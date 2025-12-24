@@ -43,6 +43,11 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
         setHealthStatus(status);
       } catch (err) {
         console.error('Failed to check health:', err);
+        // Set a default status if health check fails
+        setHealthStatus({
+          llm: { enabled: false, error: 'Health check failed' },
+          vector: { enabled: false },
+        });
       } finally {
         setCheckingHealth(false);
       }
