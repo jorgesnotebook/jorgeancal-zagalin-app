@@ -260,17 +260,16 @@ npm run lint
 
 ## 📝 License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](https://github.com/jorgesnotebook/jorgeancal-zagalin-app/blob/main/LICENSE) file for details.
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details on how to submit pull requests, report issues, and contribute to the project.
+Contributions are welcome! Please read our [Contributing Guidelines](https://github.com/jorgesnotebook/jorgeancal-zagalin-app/blob/main/CONTRIBUTING.md) for details on how to submit pull requests, report issues, and contribute to the project.
 
 ## 💬 Support
 
 - **Documentation**: [GitHub README](https://github.com/jorgesnotebook/jorgeancal-zagalin-app#readme)
 - **Issues**: [GitHub Issues](https://github.com/jorgesnotebook/jorgeancal-zagalin-app/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/jorgesnotebook/jorgeancal-zagalin-app/discussions)
 
 ## 🙏 Acknowledgments
 
