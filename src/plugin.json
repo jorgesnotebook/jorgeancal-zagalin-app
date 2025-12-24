@@ -55,9 +55,6 @@
     "version": "%VERSION%",
     "updated": "%TODAY%"
   },
-  "rootUrls": [
-    "https://github.com/jorgesnotebook/jorgeancal-zagalin-app"
-  ],
   "includes": [
     {
       "type": "page",
