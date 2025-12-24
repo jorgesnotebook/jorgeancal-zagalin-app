@@ -5,10 +5,101 @@
  * https://grafana.com/developers/plugin-tools/how-to-guides/extend-configurations#extend-the-jest-config
  */
 
+// Set up minimal window and document objects BEFORE any imports that might use them
+// This is required because @grafana/data (used by @grafana/llm) and other libraries
+// access window/document at import time
+if (typeof global.window === 'undefined') {
+  // Minimal document mock with all necessary methods for nano-css and other libraries
+  global.document = {
+    createElement: () => ({
+      setAttribute: () => {},
+      getAttribute: () => null,
+      appendChild: () => {},
+      removeChild: () => {},
+      style: {},
+      sheet: { cssRules: [], insertRule: () => {}, deleteRule: () => {} },
+    }),
+    createElementNS: () => ({
+      setAttribute: () => {},
+      getAttribute: () => null,
+      appendChild: () => {},
+      removeChild: () => {},
+      style: {},
+    }),
+    createTextNode: () => ({}),
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    getElementById: () => null,
+    getElementsByTagName: () => [{ appendChild: () => {} }],
+    getElementsByClassName: () => [],
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    documentElement: { style: {} },
+    head: { appendChild: () => {} },
+    body: {
+      appendChild: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    },
+  };
+
+  // Mock HTML element constructors
+  global.HTMLElement = function() {};
+  global.HTMLElement.prototype = { addEventListener: () => {}, removeEventListener: () => {} };
+  global.Element = function() {};
+  global.Element.prototype = { addEventListener: () => {}, removeEventListener: () => {} };
+  global.Node = function() {};
+  global.Node.prototype = {};
+
+  global.window = {
+    document: global.document,
+    location: { href: 'http://localhost:3000' },
+    history: {
+      pushState: () => {},
+      replaceState: () => {},
+      back: () => {},
+      forward: () => {},
+      go: () => {},
+      length: 0,
+      state: null,
+    },
+    localStorage: {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+      clear: () => {},
+    },
+    sessionStorage: {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+      clear: () => {},
+    },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    navigator: { userAgent: 'jest' },
+    getComputedStyle: () => ({}),
+  };
+  global.self = global;
+}
+
 const path = require('path');
 const { grafanaESModules, nodeModulesToTransform } = require('./jest/utils');
-// Add @grafana/llm ES modules support
-const { grafanaLLMESModules } = require('@grafana/llm');
+
+// Lazy-load @grafana/llm to avoid loading it before Jest environment is ready
+// This function will be called when Jest processes transformIgnorePatterns
+function getGrafanaLLMESModules() {
+  try {
+    const { grafanaLLMESModules } = require('@grafana/llm');
+    return grafanaLLMESModules;
+  } catch (error) {
+    console.warn('Failed to load @grafana/llm ES modules, tests may fail if they depend on it:', error.message);
+    return [];
+  }
+}
+
+// Additional ES modules that need transformation
+const additionalESModules = ['pkce-challenge', '@modelcontextprotocol/sdk'];
 
 module.exports = {
   moduleNameMapper: {
@@ -16,8 +107,9 @@ module.exports = {
     'react-inlinesvg': path.resolve(__dirname, 'jest', 'mocks', 'react-inlinesvg.tsx'),
   },
   modulePaths: ['<rootDir>/src'],
+  setupFiles: ['<rootDir>/.config/jest-setup-globals.js'],
   setupFilesAfterEnv: ['<rootDir>/jest-setup.js'],
-  testEnvironment: 'jest-environment-jsdom',
+  testEnvironment: '<rootDir>/.config/jest-environment.js',
   testMatch: [
     '<rootDir>/src/**/__tests__/**/*.{js,jsx,ts,tsx}',
     '<rootDir>/src/**/*.{spec,test,jest}.{js,jsx,ts,tsx}',
@@ -41,6 +133,8 @@ module.exports = {
   },
   // Jest will throw `Cannot use import statement outside module` if it tries to load an
   // ES module without it being transformed first. ./config/README.md#esm-errors-with-jest
-  transformIgnorePatterns: [nodeModulesToTransform([...grafanaESModules, ...grafanaLLMESModules])],
+  transformIgnorePatterns: [
+    nodeModulesToTransform([...grafanaESModules, ...getGrafanaLLMESModules(), ...additionalESModules])
+  ],
   watchPathIgnorePatterns: ['<rootDir>/node_modules', '<rootDir>/dist'],
 };

@@ -4,14 +4,26 @@ import { AppRootProps, PluginType } from '@grafana/data';
 import { render, waitFor } from '@testing-library/react';
 import App from './App';
 
-// Mock @grafana/experimental
-jest.mock('@grafana/experimental', () => ({
-  llms: {
-    openai: {
-      enabled: jest.fn().mockResolvedValue(true),
-      streamChatCompletions: jest.fn(),
-      accumulateContent: jest.fn(),
-    },
+// Mock @grafana/llm - this must be mocked before any imports that use it
+jest.mock('@grafana/llm', () => ({
+  llm: {
+    enabled: jest.fn().mockResolvedValue(true),
+    health: jest.fn().mockResolvedValue({
+      configured: true,
+      enabled: true,
+      details: {
+        llmProvider: {
+          provider: 'openai',
+          models: ['gpt-4'],
+        },
+      },
+    }),
+    streamChatCompletions: jest.fn().mockImplementation(() => ({
+      subscribe: jest.fn(),
+    })),
+  },
+  vector: {
+    enabled: jest.fn().mockResolvedValue(false),
   },
 }));
 

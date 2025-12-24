@@ -12,12 +12,48 @@ import { TransformStream } from 'node:stream/web';
 
 Object.assign(global, { TextDecoder, TextEncoder, TransformStream });
 
-// Mock window for @grafana/data
+// Ensure self is defined for browser APIs
+global.self = global.self || global;
+
+// Mock window for @grafana/data - needs to be comprehensive for Store class
 if (typeof window === 'undefined') {
   global.window = {
-    location: { href: 'http://localhost:3000' },
+    location: {
+      href: 'http://localhost:3000',
+      protocol: 'http:',
+      host: 'localhost:3000',
+      hostname: 'localhost',
+      port: '3000',
+      pathname: '/',
+      search: '',
+      hash: '',
+    },
+    localStorage: {
+      getItem: jest.fn(),
+      setItem: jest.fn(),
+      removeItem: jest.fn(),
+      clear: jest.fn(),
+      length: 0,
+      key: jest.fn(),
+    },
+    sessionStorage: {
+      getItem: jest.fn(),
+      setItem: jest.fn(),
+      removeItem: jest.fn(),
+      clear: jest.fn(),
+      length: 0,
+      key: jest.fn(),
+    },
     addEventListener: jest.fn(),
     removeEventListener: jest.fn(),
+    dispatchEvent: jest.fn(),
+    navigator: {
+      userAgent: 'jest',
+    },
+    document: global.document,
+    getComputedStyle: jest.fn(() => ({})),
+    requestAnimationFrame: jest.fn((cb) => setTimeout(cb, 0)),
+    cancelAnimationFrame: jest.fn((id) => clearTimeout(id)),
   } as any;
 }
 
