@@ -5,14 +5,34 @@ test('should be possible to view app configuration', async ({ appConfigPage, pag
   await page.waitForLoadState('load');
   await page.waitForLoadState('domcontentloaded');
 
-  // Give extra time for Suspense lazy loading in CI environments
-  // Check if the page has any content at all first
-  const pageContent = page.locator('body');
-  await expect(pageContent).not.toBeEmpty({ timeout: 10000 });
+  // Wait a bit for React to render
+  await page.waitForTimeout(2000);
 
-  // Wait for the main configuration heading to appear (indicates lazy loading is complete)
-  // Using a more flexible locator that works across Grafana versions
-  await expect(page.locator('text=Zagalin Configuration').first()).toBeVisible({ timeout: 30000 });
+  // Take screenshot for debugging
+  await page.screenshot({ path: 'test-results/config-page-debug.png', fullPage: true });
+
+  // Log the page HTML for debugging
+  const bodyHTML = await page.locator('body').innerHTML();
+  console.log('Page HTML length:', bodyHTML.length);
+
+  // Check if there are any error messages
+  const errorMessages = await page.locator('[role="alert"], .error, .alert-error').allTextContents();
+  if (errorMessages.length > 0) {
+    console.log('Error messages found:', errorMessages);
+  }
+
+  // Check what's actually in the page
+  const headings = await page.locator('h1, h2, h3').allTextContents();
+  console.log('Headings found:', headings);
+
+  // Wait for the main configuration heading to appear
+  // Using a more flexible approach with better error handling
+  try {
+    await expect(page.locator('h2:has-text("Zagalin Configuration")')).toBeVisible({ timeout: 10000 });
+  } catch (e) {
+    // If h2 doesn't work, try any heading
+    await expect(page.getByRole('heading', { name: /zagalin configuration/i })).toBeVisible({ timeout: 10000 });
+  }
 
   // Verify main configuration sections are present
   await expect(page.locator('text=Personality & Behavior').first()).toBeVisible({ timeout: 10000 });

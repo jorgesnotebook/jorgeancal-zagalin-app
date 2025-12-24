@@ -4,6 +4,19 @@ import { AppRootProps, PluginType } from '@grafana/data';
 import { render, waitFor } from '@testing-library/react';
 import App from './App';
 
+// Mock @grafana/runtime to provide getBackendSrv
+jest.mock('@grafana/runtime', () => ({
+  ...jest.requireActual('@grafana/runtime'),
+  getBackendSrv: jest.fn().mockReturnValue({
+    get: jest.fn().mockResolvedValue({
+      enabled: true,
+      pinned: false,
+      jsonData: {},
+    }),
+    post: jest.fn().mockResolvedValue({}),
+  }),
+}));
+
 // Mock @grafana/llm - this must be mocked before any imports that use it
 jest.mock('@grafana/llm', () => ({
   llm: {
