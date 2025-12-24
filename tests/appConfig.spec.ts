@@ -1,8 +1,10 @@
 import { test, expect } from './fixtures';
 
 test('should be possible to view app configuration', async ({ appConfigPage, page }) => {
+  // Wait for the lazy-loaded configuration page to render by checking for a heading
+  await expect(page.getByRole('heading', { name: 'Zagalin Configuration' })).toBeVisible({ timeout: 10000 });
+
   // Check for main configuration sections
-  await expect(page.getByText('Zagalin Configuration')).toBeVisible();
   await expect(page.getByText('Personality & Behavior')).toBeVisible();
   await expect(page.getByText('Skills & Features')).toBeVisible();
   await expect(page.getByText('UI Preferences')).toBeVisible();
