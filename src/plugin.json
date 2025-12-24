@@ -1,0 +1,79 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "app",
+  "name": "Zagalin",
+  "id": "jorgeancal-zagalin-app",
+  "backend": true,
+  "executable": "gpx_zagalin",
+  "info": {
+    "keywords": ["ai", "llm", "chat", "assistant", "openai", "promql", "logql", "observability", "monitoring"],
+    "description": "Zagalin - Context-aware AI assistant for Grafana. Chat with your metrics, generate queries, and troubleshoot issues using natural language powered by OpenAI.",
+    "author": {
+      "name": "Jorge Andreu Calatayud",
+      "url": "https://github.com/jorgeancal"
+    },
+    "logos": {
+      "small": "img/logo.png",
+      "large": "img/logo.png"
+    },
+    "links": [
+      {
+        "name": "GitHub",
+        "url": "https://github.com/jorgesnotebook/jorgeancal-zagalin-app"
+      },
+      {
+        "name": "Documentation",
+        "url": "https://github.com/jorgesnotebook/jorgeancal-zagalin-app#readme"
+      },
+      {
+        "name": "Report Issues",
+        "url": "https://github.com/jorgesnotebook/jorgeancal-zagalin-app/issues"
+      },
+      {
+        "name": "License",
+        "url": "https://github.com/jorgesnotebook/jorgeancal-zagalin-app/blob/main/LICENSE"
+      }
+    ],
+    "screenshots": [
+      {
+        "name": "Floating Chat Interface",
+        "path": "img/screenshots/floating-chat.png"
+      },
+      {
+        "name": "Dashboard Context Awareness",
+        "path": "img/screenshots/dashboard-context.png"
+      },
+      {
+        "name": "Natural Language Query Generation",
+        "path": "img/screenshots/query-generation.png"
+      },
+      {
+        "name": "Plugin Configuration",
+        "path": "img/screenshots/configuration.png"
+      }
+    ],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "includes": [
+    {
+      "type": "page",
+      "name": "Chat",
+      "path": "/a/%PLUGIN_ID%",
+      "addToNav": true,
+      "defaultNav": true,
+      "role": "Viewer"
+    }
+  ],
+  "dependencies": {
+    "grafanaDependency": ">=10.4.0",
+    "plugins": [
+      {
+        "type": "app",
+        "name": "LLM App",
+        "id": "grafana-llm-app",
+        "version": "1.0.0"
+      }
+    ]
+  }
+}
