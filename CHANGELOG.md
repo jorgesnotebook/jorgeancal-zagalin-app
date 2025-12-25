@@ -5,6 +5,11 @@ All notable changes to the Zagalin - AI Assistant for Grafana plugin will be doc
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.2] - Unreleased
+
+### Fixed
+- **Build Provenance Attestation**: Added required GitHub Actions permissions (`id-token: write`, `attestations: write`) and enabled `attestation: true` in the release workflow to comply with Grafana's plugin security requirements
+
 ## [0.0.1] - Released
 
 ### Added
