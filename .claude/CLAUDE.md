@@ -480,11 +480,18 @@ backendProxy.query(userContext, query) // Enforces permissions
 **Recent Security Implementations:**
 - Issue #16: Backend query proxy with user identity (see `.claude/ISSUE-16-IMPLEMENTATION.md`)
 
-## Configuration in .claude/
+## AI Tools Configuration
 
-The `.claude/` directory contains Claude Code-specific settings:
-- `settings.local.json` - Permissions for WebFetch and Bash commands
-- `CLAUDE.md` - This file - Development guidance
-- `ISSUE-*.md` - Implementation documentation for specific issues
+The repository has AI-specific configuration for multiple tools:
+- **`.claude/`** - Claude Code configuration
+  - `CLAUDE.md` - This file - Comprehensive development guidance
+  - `AI-TOOLS-SETUP.md` - Summary of all AI tools setup
+  - `settings.local.json` - Permissions for WebFetch and Bash commands
+- **`.openai/`** - ChatGPT/Codex instructions (copy/paste)
+  - `INSTRUCTIONS.md` - Copy this into ChatGPT conversations
+- **`.github/copilot-instructions.md`** - GitHub Copilot configuration
+- **`.cursorrules`** - Cursor AI configuration
 
-Keep `.claude/` in version control to help future Claude instances work effectively with this codebase.
+All AI tools reference `docs/` for detailed documentation.
+
+Keep these in version control to help all developers and AI tools work effectively with this codebase.

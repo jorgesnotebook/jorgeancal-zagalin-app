@@ -4,6 +4,10 @@ Welcome to the Zagalin documentation. This comprehensive guide covers everything
 
 ## Table of Contents
 
+### AI-Assisted Development
+- **[ChatGPT Instructions](../.openai/INSTRUCTIONS.md)** - Copy/paste this into ChatGPT for context
+- See also: `.claude/CLAUDE.md` (Claude Code), `.github/copilot-instructions.md` (Copilot), `.cursorrules` (Cursor AI)
+
 ### Getting Started
 - [Quick Start Guide](./getting-started/quick-start.md)
 - [Development Environment Setup](./getting-started/development-setup.md)

@@ -8,7 +8,10 @@ This document explains the AI-assisted development configuration for this reposi
 zagalin/
 ├── .claude/
 │   ├── CLAUDE.md              # Claude Code instructions (comprehensive)
+│   ├── AI-TOOLS-SETUP.md      # This file - AI tools summary
 │   └── settings.local.json    # Claude Code permissions
+├── .openai/
+│   └── INSTRUCTIONS.md        # ChatGPT/Codex copy/paste instructions
 ├── .github/
 │   └── copilot-instructions.md # GitHub Copilot instructions
 ├── .cursorrules               # Cursor AI instructions
@@ -25,16 +28,26 @@ zagalin/
 - **Config**: `.claude/CLAUDE.md` + `.claude/settings.local.json`
 - **Features**: Comprehensive development guide with KISS mindset and security-first principles
 - **Documentation reference**: `docs/`
+- **Auto-loads**: Yes
 
 ### 2. GitHub Copilot
 - **Config**: `.github/copilot-instructions.md`
 - **Features**: Code generation guidance with security and simplicity focus
 - **Documentation reference**: `docs/`
+- **Auto-loads**: Yes
 
 ### 3. Cursor AI
 - **Config**: `.cursorrules`
 - **Features**: Concise rules for code completion and chat
 - **Documentation reference**: `docs/`
+- **Auto-loads**: Yes
+
+### 4. ChatGPT / OpenAI Codex
+- **Config**: `.openai/INSTRUCTIONS.md`
+- **Features**: Copy/paste instructions for ChatGPT web interface or API
+- **Documentation reference**: `docs/`
+- **Auto-loads**: No - developers copy/paste into ChatGPT conversation
+- **Usage**: Open `.openai/INSTRUCTIONS.md` and paste into ChatGPT when starting work
 
 ## Key Principles (All Tools)
 
@@ -76,12 +89,13 @@ All AI tools reference the same `docs/` folder to avoid duplication:
 
 ## Usage
 
-Each AI tool automatically reads its configuration file:
+Most AI tools automatically read their configuration files:
 - **Claude Code**: Reads `.claude/CLAUDE.md` on startup
-- **GitHub Copilot**: Reads `.github/copilot-instructions.md`
-- **Cursor AI**: Reads `.cursorrules`
+- **GitHub Copilot**: Reads `.github/copilot-instructions.md` automatically
+- **Cursor AI**: Reads `.cursorrules` automatically
+- **ChatGPT**: Developer manually copies `docs/CHATGPT-INSTRUCTIONS.md` into conversation
 
-All tools can reference `docs/` for detailed documentation.
+All tools reference `docs/` for detailed documentation.
 
 ## Maintenance
 
