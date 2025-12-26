@@ -39,16 +39,16 @@ export function useConversation(): UseConversationReturn {
   const [conversations, setConversations] = useState<ConversationMetadata[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Load conversation list on mount
-  useEffect(() => {
-    refreshConversationList();
-  }, [refreshConversationList]);
-
   // Refresh the conversation list
   const refreshConversationList = useCallback(() => {
     const list = ConversationStorage.getConversationList();
     setConversations(list);
   }, []);
+
+  // Load conversation list on mount
+  useEffect(() => {
+    refreshConversationList();
+  }, [refreshConversationList]);
 
   /**
    * Create a new conversation
