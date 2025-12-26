@@ -1,0 +1,47 @@
+#!/bin/bash
+# Pre-commit hook for quick validation
+# Runs fast checks on every commit
+
+set -e
+
+echo ""
+echo "🔍 Running pre-commit checks..."
+echo ""
+
+# Check if we're in the right directory
+if [ ! -f "package.json" ]; then
+  echo "❌ Error: Not in project root"
+  exit 1
+fi
+
+# Function to handle errors
+handle_error() {
+  echo ""
+  echo "❌ Pre-commit check FAILED: $1"
+  echo ""
+  echo "Fix the issues above before committing."
+  echo "To skip these checks (not recommended), use: git commit --no-verify"
+  echo ""
+  exit 1
+}
+
+# 1. Type checking
+echo "▶ Type checking..."
+if ! npm run typecheck; then
+  handle_error "Type checking"
+fi
+echo "✅ Type check passed"
+echo ""
+
+# 2. Linting
+echo "▶ Linting..."
+if ! npm run lint; then
+  handle_error "Linting"
+fi
+echo "✅ Lint passed"
+echo ""
+
+echo "✅ All pre-commit checks passed!"
+echo ""
+
+exit 0

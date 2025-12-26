@@ -1,0 +1,75 @@
+#!/bin/bash
+# Pre-push hook to run all CI checks locally before pushing
+# This prevents surprises from CI failures
+
+set -e
+
+echo ""
+echo "🔍 Running pre-push CI checks..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Check if we're in the right directory
+if [ ! -f "package.json" ]; then
+  echo "❌ Error: Not in project root"
+  exit 1
+fi
+
+# Function to print step headers
+print_step() {
+  echo ""
+  echo "▶ $1"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+# Function to handle errors
+handle_error() {
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "❌ Pre-push checks FAILED at: $1"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "Fix the issues above before pushing."
+  echo "To skip these checks (not recommended), use: git push --no-verify"
+  echo ""
+  exit 1
+}
+
+# 1. Type checking
+print_step "1/4 Type Checking"
+if ! npm run typecheck; then
+  handle_error "Type checking"
+fi
+echo "✅ Type check passed"
+
+# 2. Linting
+print_step "2/4 Linting"
+if ! npm run lint; then
+  handle_error "Linting"
+fi
+echo "✅ Lint passed"
+
+# 3. Unit tests
+print_step "3/4 Unit Tests"
+if ! npm run test:ci; then
+  handle_error "Unit tests"
+fi
+echo "✅ Tests passed"
+
+# 4. Build
+print_step "4/4 Building"
+if ! npm run build; then
+  handle_error "Build"
+fi
+echo "✅ Build succeeded"
+
+# Success!
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "✅ All pre-push checks passed!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "🚀 Proceeding with push..."
+echo ""
+
+exit 0
