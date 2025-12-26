@@ -103,7 +103,7 @@ function ConversationItem({
         />
       ) : (
         <>
-          <Tooltip content={conversation.preview || 'No messages yet'} placement="right">
+          <Tooltip content={conversation.lastMessagePreview || 'No messages yet'} placement="right">
             <div className={s.itemContent} onClick={onSelect}>
               <div className={s.itemTitle}>{conversation.title}</div>
               <div className={s.itemMeta}>
