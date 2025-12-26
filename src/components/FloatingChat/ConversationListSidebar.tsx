@@ -7,7 +7,6 @@ import {
   Input,
   useStyles2,
   Tooltip,
-  Alert,
   Badge,
 } from '@grafana/ui';
 import type { ConversationMetadata } from '../../services/conversationStorage';
@@ -19,6 +18,7 @@ interface ConversationListSidebarProps {
   onSelectConversation: (id: string) => void;
   onRenameConversation: (id: string, title: string) => void;
   onDeleteConversation: (id: string) => void;
+  onDeleteAll: () => void;
   onTogglePin: (id: string) => void;
   onCreateNew: () => void;
 }
@@ -154,12 +154,14 @@ export function ConversationListSidebar({
   onSelectConversation,
   onRenameConversation,
   onDeleteConversation,
+  onDeleteAll,
   onTogglePin,
   onCreateNew,
 }: ConversationListSidebarProps) {
   const s = useStyles2(getSidebarStyles);
   const [searchTerm, setSearchTerm] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
 
   // Filter conversations by search term
   const filteredConversations = conversations.filter((conv) =>
@@ -172,6 +174,7 @@ export function ConversationListSidebar({
 
   const confirmDelete = () => {
     if (deletingId) {
+      console.log('Deleting conversation:', deletingId);
       onDeleteConversation(deletingId);
       setDeletingId(null);
     }
@@ -179,6 +182,20 @@ export function ConversationListSidebar({
 
   const cancelDelete = () => {
     setDeletingId(null);
+  };
+
+  const handleDeleteAll = () => {
+    setShowDeleteAll(true);
+  };
+
+  const confirmDeleteAll = () => {
+    console.log('Deleting all conversations');
+    onDeleteAll();
+    setShowDeleteAll(false);
+  };
+
+  const cancelDeleteAll = () => {
+    setShowDeleteAll(false);
   };
 
   const deletingConversation = conversations.find((c) => c.id === deletingId);
@@ -196,6 +213,18 @@ export function ConversationListSidebar({
         >
           New Chat
         </Button>
+        {conversations.length > 0 && (
+          <Button
+            icon="trash-alt"
+            onClick={handleDeleteAll}
+            size="sm"
+            fullWidth
+            variant="destructive"
+            className={s.deleteAllButton}
+          >
+            Delete All
+          </Button>
+        )}
       </div>
 
       {conversations.length > 5 && (
@@ -231,22 +260,48 @@ export function ConversationListSidebar({
       </div>
 
       {deletingId && (
-        <div className={s.deleteConfirm}>
-          <Alert
-            title={`Delete "${deletingConversation?.title}"?`}
-            severity="warning"
-            onRemove={cancelDelete}
-          >
-            <div className={s.deleteButtons}>
-              <Button variant="destructive" size="sm" onClick={confirmDelete}>
-                Delete
-              </Button>
-              <Button variant="secondary" size="sm" onClick={cancelDelete}>
-                Cancel
-              </Button>
+        <>
+          <div className={s.deleteOverlay} onClick={cancelDelete} />
+          <div className={s.deleteModal}>
+            <div className={s.deleteModalContent}>
+              <h4 className={s.deleteModalTitle}>Delete Conversation?</h4>
+              <p className={s.deleteModalText}>
+                Are you sure you want to delete &quot;{deletingConversation?.title}&quot;? This action cannot be undone.
+              </p>
+              <div className={s.deleteButtons}>
+                <Button variant="destructive" size="md" onClick={confirmDelete} icon="trash-alt">
+                  Delete
+                </Button>
+                <Button variant="secondary" size="md" onClick={cancelDelete}>
+                  Cancel
+                </Button>
+              </div>
             </div>
-          </Alert>
-        </div>
+          </div>
+        </>
+      )}
+
+      {showDeleteAll && (
+        <>
+          <div className={s.deleteOverlay} onClick={cancelDeleteAll} />
+          <div className={s.deleteModal}>
+            <div className={s.deleteModalContent}>
+              <h4 className={s.deleteModalTitle}>Delete All Conversations?</h4>
+              <p className={s.deleteModalText}>
+                Are you sure you want to delete ALL {conversations.length} conversation{conversations.length !== 1 ? 's' : ''}?
+                This will permanently remove all your chat history. This action cannot be undone.
+              </p>
+              <div className={s.deleteButtons}>
+                <Button variant="destructive" size="md" onClick={confirmDeleteAll} icon="trash-alt">
+                  Delete All
+                </Button>
+                <Button variant="secondary" size="md" onClick={cancelDeleteAll}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -264,6 +319,9 @@ const getSidebarStyles = (theme: GrafanaTheme2) => ({
   header: css`
     padding: ${theme.spacing(1)};
     border-bottom: 1px solid ${theme.colors.border.weak};
+    display: flex;
+    flex-direction: column;
+    gap: ${theme.spacing(1)};
   `,
   newChatButton: css`
     background: ${ZagalinColors.orangeGradient} !important;
@@ -274,6 +332,9 @@ const getSidebarStyles = (theme: GrafanaTheme2) => ({
       background: ${ZagalinColors.orangeGradientHover} !important;
       box-shadow: 0 2px 4px rgba(255, 152, 48, 0.3);
     }
+  `,
+  deleteAllButton: css`
+    margin-top: ${theme.spacing(0.5)};
   `,
   searchContainer: css`
     padding: ${theme.spacing(1)};
@@ -309,17 +370,47 @@ const getSidebarStyles = (theme: GrafanaTheme2) => ({
     color: ${theme.colors.text.secondary};
     font-size: ${theme.typography.bodySmall.fontSize};
   `,
-  deleteConfirm: css`
-    position: absolute;
-    bottom: ${theme.spacing(2)};
-    left: ${theme.spacing(1)};
-    right: ${theme.spacing(1)};
-    z-index: 1000;
+  deleteOverlay: css`
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 2000;
+    backdrop-filter: blur(2px);
+  `,
+  deleteModal: css`
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2001;
+    min-width: 400px;
+    max-width: 500px;
+  `,
+  deleteModalContent: css`
+    background: ${theme.colors.background.primary};
+    border: 2px solid ${theme.colors.error.border};
+    border-radius: ${theme.shape.radius.default};
+    padding: ${theme.spacing(3)};
+    box-shadow: ${theme.shadows.z3};
+  `,
+  deleteModalTitle: css`
+    margin: 0 0 ${theme.spacing(2)} 0;
+    font-size: ${theme.typography.h4.fontSize};
+    font-weight: ${theme.typography.fontWeightBold};
+    color: ${theme.colors.error.text};
+  `,
+  deleteModalText: css`
+    margin: 0 0 ${theme.spacing(3)} 0;
+    color: ${theme.colors.text.primary};
+    line-height: 1.5;
   `,
   deleteButtons: css`
     display: flex;
-    gap: ${theme.spacing(1)};
-    margin-top: ${theme.spacing(1)};
+    gap: ${theme.spacing(2)};
+    justify-content: flex-end;
   `,
 });
 

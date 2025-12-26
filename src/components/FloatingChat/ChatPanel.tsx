@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, KeyboardEvent } from 'react';
+import React, { useState, useRef, useEffect, useMemo, KeyboardEvent } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import {
@@ -58,6 +58,7 @@ export function ChatPanel() {
   const [streamingContent, setStreamingContent] = useState('');
   const [llmReady, setLlmReady] = useState<boolean | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const vectorSearchRef = useRef(new VectorSearchService());
 
@@ -76,6 +77,7 @@ export function ChatPanel() {
     createNew,
     loadConversation,
     deleteConversation,
+    deleteAll,
     updateTitle,
     togglePin,
     clearCurrent,
@@ -85,18 +87,12 @@ export function ChatPanel() {
   // Handle new chat
   const handleNewChat = () => {
     clearCurrent();
+    setOptimisticMessages([]);
     createNew(context);
   };
 
-  // Convert conversation messages to UI messages
-  const messages: Message[] = conversationMessages;
-
-  // Initialize conversation on mount if none exists
-  useEffect(() => {
-    if (!conversation) {
-      createNew(context);
-    }
-  }, [conversation, createNew, context]);
+  // Convert conversation messages to UI messages, including optimistic messages
+  const messages: Message[] = useMemo(() => [...conversationMessages, ...optimisticMessages], [conversationMessages, optimisticMessages]);
 
   // Check LLM health on mount
   useEffect(() => {
@@ -139,6 +135,10 @@ export function ChatPanel() {
       return;
     }
 
+    console.log('[ChatPanel] Current conversation before send:', conversation?.id);
+    console.log('[ChatPanel] Conversation message count:', conversationMessages.length);
+
+    // eslint-disable-next-line react-hooks/purity
     const userMessage: ConversationMessage = {
       id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       role: 'user',
@@ -146,14 +146,22 @@ export function ChatPanel() {
       timestamp: new Date(),
     };
 
-    // Save user message to conversation
-    addMessage(userMessage);
+    // Show message immediately (optimistic update)
+    setOptimisticMessages([userMessage]);
     setInput('');
     setIsStreaming(true);
     setError(null);
     setStreamingContent('');
 
     try {
+      // Save user message to conversation (with context if this is the first message)
+      // MUST await this to ensure conversation is created before assistant responds
+      await addMessage(userMessage, context);
+
+      console.log('[ChatPanel] Message saved, current conversation:', conversation?.id);
+
+      // Clear optimistic messages once saved
+      setOptimisticMessages([]);
       // Enhance query with vector search if available
       let enhancedQuery = userMessage.content;
       if (zagalinConfig.enabledSkills.searchContext) {
@@ -256,12 +264,14 @@ export function ChatPanel() {
           console.error('Zagalin: Stream error', err);
           setError(err.message || 'Failed to send message');
           setIsStreaming(false);
+          setOptimisticMessages([]);
         }
       });
     } catch (err) {
       console.error('Zagalin: Send error', err);
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
       setIsStreaming(false);
+      setOptimisticMessages([]);
     }
   };
 
@@ -344,6 +354,7 @@ export function ChatPanel() {
           onSelectConversation={loadConversation}
           onRenameConversation={updateTitle}
           onDeleteConversation={deleteConversation}
+          onDeleteAll={deleteAll}
           onTogglePin={togglePin}
           onCreateNew={handleNewChat}
         />
