@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, KeyboardEvent } from 'react';
+import React, { useState, useRef, useEffect, useMemo, KeyboardEvent } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import {
@@ -13,6 +13,8 @@ import {
 } from '@grafana/ui';
 import { llm } from '@grafana/llm';
 import { finalize } from 'rxjs';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
 import { useGrafanaContext } from '../../services/useGrafanaContext';
 import { detectSkill } from '../../services/assistantSkills';
 import { createExploreLink } from '../../services/actionExtractor';
@@ -26,11 +28,26 @@ import { ZAGALIN_TOOLS, type ToolCall } from '../../services/zagalinTools';
 import { optimizeContext } from '../../services/contextOptimizer';
 import { useConversation } from '../../hooks/useConversation';
 import type { ConversationMessage } from '../../services/conversationStorage';
+import { ConversationListSidebar } from './ConversationListSidebar';
 
 // Internal Message type for UI (extends ConversationMessage)
 interface Message extends ConversationMessage {
   actions?: AssistantAction[];
   toolCalls?: ToolCall[];
+}
+
+// Helper function to safely render markdown content
+function sanitizeMarkdown(content: string): string {
+  try {
+    const rawHtml = marked.parse(content) as string;
+    return DOMPurify.sanitize(rawHtml, {
+      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'],
+      ALLOWED_ATTR: ['href', 'title', 'target', 'rel'],
+    });
+  } catch (error) {
+    console.error('Markdown sanitization error:', error);
+    return DOMPurify.sanitize(content.replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+  }
 }
 
 export function ChatPanel() {
@@ -40,6 +57,8 @@ export function ChatPanel() {
   const [error, setError] = useState<string | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
   const [llmReady, setLlmReady] = useState<boolean | null>(null);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const vectorSearchRef = useRef(new VectorSearchService());
 
@@ -50,23 +69,30 @@ export function ChatPanel() {
   const { config: zagalinConfig } = useZagalinConfig();
 
   // Get conversation management hook
-  const { messages: conversationMessages, addMessage, conversation, createNew, clearCurrent } = useConversation();
+  const {
+    messages: conversationMessages,
+    addMessage,
+    conversation,
+    conversations,
+    createNew,
+    loadConversation,
+    deleteConversation,
+    deleteAll,
+    updateTitle,
+    togglePin,
+    clearCurrent,
+    currentId,
+  } = useConversation();
 
   // Handle new chat
   const handleNewChat = () => {
     clearCurrent();
+    setOptimisticMessages([]);
     createNew(context);
   };
 
-  // Convert conversation messages to UI messages
-  const messages: Message[] = conversationMessages;
-
-  // Initialize conversation on mount if none exists
-  useEffect(() => {
-    if (!conversation) {
-      createNew(context);
-    }
-  }, [conversation, createNew, context]);
+  // Convert conversation messages to UI messages, including optimistic messages
+  const messages: Message[] = useMemo(() => [...conversationMessages, ...optimisticMessages], [conversationMessages, optimisticMessages]);
 
   // Check LLM health on mount
   useEffect(() => {
@@ -109,6 +135,10 @@ export function ChatPanel() {
       return;
     }
 
+    console.log('[ChatPanel] Current conversation before send:', conversation?.id);
+    console.log('[ChatPanel] Conversation message count:', conversationMessages.length);
+
+    // eslint-disable-next-line react-hooks/purity
     const userMessage: ConversationMessage = {
       id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       role: 'user',
@@ -116,14 +146,22 @@ export function ChatPanel() {
       timestamp: new Date(),
     };
 
-    // Save user message to conversation
-    addMessage(userMessage);
+    // Show message immediately (optimistic update)
+    setOptimisticMessages([userMessage]);
     setInput('');
     setIsStreaming(true);
     setError(null);
     setStreamingContent('');
 
     try {
+      // Save user message to conversation (with context if this is the first message)
+      // MUST await this to ensure conversation is created before assistant responds
+      await addMessage(userMessage, context);
+
+      console.log('[ChatPanel] Message saved, current conversation:', conversation?.id);
+
+      // Clear optimistic messages once saved
+      setOptimisticMessages([]);
       // Enhance query with vector search if available
       let enhancedQuery = userMessage.content;
       if (zagalinConfig.enabledSkills.searchContext) {
@@ -226,12 +264,14 @@ export function ChatPanel() {
           console.error('Zagalin: Stream error', err);
           setError(err.message || 'Failed to send message');
           setIsStreaming(false);
+          setOptimisticMessages([]);
         }
       });
     } catch (err) {
       console.error('Zagalin: Send error', err);
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
       setIsStreaming(false);
+      setOptimisticMessages([]);
     }
   };
 
@@ -306,8 +346,21 @@ export function ChatPanel() {
   };
 
   return (
-    <div className={s.container}>
-      <div className={s.contextBar}>
+    <div className={s.outerContainer}>
+      {showSidebar && (
+        <ConversationListSidebar
+          conversations={conversations}
+          currentId={currentId}
+          onSelectConversation={loadConversation}
+          onRenameConversation={updateTitle}
+          onDeleteConversation={deleteConversation}
+          onDeleteAll={deleteAll}
+          onTogglePin={togglePin}
+          onCreateNew={handleNewChat}
+        />
+      )}
+      <div className={s.container}>
+        <div className={s.contextBar}>
         <div className={s.contextInfo}>
           {llmReady === null ? (
             <Badge color="blue" text="Checking LLM..." icon="sync" />
@@ -329,6 +382,15 @@ export function ChatPanel() {
           )}
         </div>
         <div className={s.contextActions}>
+          <Tooltip content={showSidebar ? 'Hide conversation history' : 'Show conversation history'}>
+            <IconButton
+              name={showSidebar ? 'angle-left' : 'angle-right'}
+              size="sm"
+              variant="secondary"
+              onClick={() => setShowSidebar(!showSidebar)}
+              aria-label="Toggle history"
+            />
+          </Tooltip>
           <Tooltip content="Start a new conversation">
             <IconButton
               name="plus"
@@ -363,12 +425,7 @@ export function ChatPanel() {
             <div
               className={s.messageContent}
               dangerouslySetInnerHTML={{
-                __html: message.content
-                  .replace(/\n/g, '<br />')
-                  .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-                  .replace(/`([^`]+)`/g, '<code>$1</code>')
-                  .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                  .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                __html: sanitizeMarkdown(message.content)
               }}
             />
             {message.actions && message.actions.length > 0 && renderActions(message.actions)}
@@ -390,12 +447,7 @@ export function ChatPanel() {
             <div className={s.messageContent}>
               <span
                 dangerouslySetInnerHTML={{
-                  __html: streamingContent
-                    .replace(/\n/g, '<br />')
-                    .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-                    .replace(/`([^`]+)`/g, '<code>$1</code>')
-                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                  __html: sanitizeMarkdown(streamingContent)
                 }}
               />
               <Spinner inline className={s.streamingSpinner} />
@@ -439,13 +491,21 @@ export function ChatPanel() {
         </div>
       </div>
     </div>
+    </div>
   );
 }
 
 const getStyles = (theme: GrafanaTheme2) => ({
+  outerContainer: css`
+    display: flex;
+    flex-direction: row;
+    height: 100%;
+    width: 100%;
+  `,
   container: css`
     display: flex;
     flex-direction: column;
+    flex: 1;
     height: 100%;
     background: ${theme.colors.background.primary};
   `,

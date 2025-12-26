@@ -12,6 +12,8 @@ import {
 } from '@grafana/ui';
 import { useAsync } from 'react-use';
 import { finalize } from 'rxjs';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
 import { ZagalinColors } from '../theme/colors';
 import { isLLMReady } from '../services/llmHealthService';
 import { VectorSearchService } from '../services/vectorSearchService';
@@ -23,6 +25,20 @@ interface Message {
   content: string;
   timestamp: Date;
   toolCalls?: ToolCall[];
+}
+
+// Helper function to safely render markdown content
+function sanitizeMarkdown(content: string): string {
+  try {
+    const rawHtml = marked.parse(content) as string;
+    return DOMPurify.sanitize(rawHtml, {
+      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'],
+      ALLOWED_ATTR: ['href', 'title', 'target', 'rel'],
+    });
+  } catch (error) {
+    console.error('Markdown sanitization error:', error);
+    return DOMPurify.sanitize(content.replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+  }
 }
 
 function AssistantChatPage() {
@@ -274,12 +290,7 @@ function AssistantChatPage() {
                     <div
                       className={s.messageContent}
                       dangerouslySetInnerHTML={{
-                        __html: message.content
-                          .replace(/\n/g, '<br />')
-                          .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-                          .replace(/`([^`]+)`/g, '<code>$1</code>')
-                          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                          .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                        __html: sanitizeMarkdown(message.content)
                       }}
                     />
                     {message.role === 'assistant' && (
@@ -302,12 +313,7 @@ function AssistantChatPage() {
                     <div className={s.messageContent}>
                       <span
                         dangerouslySetInnerHTML={{
-                          __html: streamingContent
-                            .replace(/\n/g, '<br />')
-                            .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-                            .replace(/`([^`]+)`/g, '<code>$1</code>')
-                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                          __html: sanitizeMarkdown(streamingContent)
                         }}
                       />
                       <Spinner inline className={s.streamingSpinner} />

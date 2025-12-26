@@ -226,9 +226,25 @@ export async function executeToolCall(toolCall: ToolCall): Promise<any> {
 
 // Tool implementation functions
 
+const DASHBOARD_UID_REGEX = /^[a-zA-Z0-9_-]{1,40}$/;
+
 function navigateToDashboard(uid: string, panelId?: number): any {
-  let url = `/d/${uid}`;
-  if (panelId) {
+  // Validate dashboard UID format
+  if (!DASHBOARD_UID_REGEX.test(uid)) {
+    console.error('Invalid dashboard UID format:', uid);
+    return { success: false, error: 'Invalid dashboard UID format' };
+  }
+
+  // Validate panelId is a positive integer if provided
+  if (panelId !== undefined) {
+    if (!Number.isInteger(panelId) || panelId < 0) {
+      console.error('Invalid panel ID:', panelId);
+      return { success: false, error: 'Invalid panel ID' };
+    }
+  }
+
+  let url = `/d/${encodeURIComponent(uid)}`;
+  if (panelId !== undefined) {
     url += `?viewPanel=${panelId}`;
   }
   window.location.assign(url);
@@ -279,12 +295,30 @@ function createLogQLQuery(params: any): any {
 function openExploreView(params: any): any {
   const { datasource, query } = params;
 
-  // Simplified - in reality would use Grafana's explore URL builder
-  const url = `/explore?left={"datasource":"${datasource}","queries":[{"expr":"${encodeURIComponent(
-    query
-  )}"}]}`;
+  // Validate datasource is a non-empty string
+  if (!datasource || typeof datasource !== 'string' || datasource.length > 100) {
+    console.error('Invalid datasource:', datasource);
+    return { success: false, error: 'Invalid datasource' };
+  }
 
-  window.location.assign(url);
+  // Validate query
+  if (!query || typeof query !== 'string' || query.length > 10000) {
+    console.error('Invalid query:', query);
+    return { success: false, error: 'Invalid query' };
+  }
 
-  return { success: true, url };
+  // Use a safer URL construction
+  const exploreState = {
+    datasource: datasource,
+    queries: [{ expr: query }]
+  };
+
+  try {
+    const url = `/explore?left=${encodeURIComponent(JSON.stringify(exploreState))}`;
+    window.location.assign(url);
+    return { success: true, url };
+  } catch (error) {
+    console.error('Failed to construct explore URL:', error);
+    return { success: false, error: 'Failed to construct URL' };
+  }
 }

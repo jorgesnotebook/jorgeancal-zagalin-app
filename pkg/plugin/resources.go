@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -11,7 +10,7 @@ import (
 func (a *App) handlePing(w http.ResponseWriter, req *http.Request) {
 	w.Header().Add("Content-Type", "application/json")
 	if _, err := w.Write([]byte(`{"message": "ok"}`)); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		sendErrorResponse(w, "Failed to write ping response", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -26,12 +25,12 @@ func (a *App) handleEcho(w http.ResponseWriter, req *http.Request) {
 		Message string `json:"message"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		sendErrorResponse(w, "Failed to decode echo request", err, http.StatusBadRequest)
 		return
 	}
 	w.Header().Add("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(body); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		sendErrorResponse(w, "Failed to encode echo response", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -42,6 +41,8 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/echo", a.handleEcho)
 	mux.HandleFunc("/context/status", a.handleContextStatus)
 	mux.HandleFunc("/context/refresh", a.handleContextRefresh)
+
+	mux.HandleFunc("/query", a.handleQuery)
 
 	mux.HandleFunc("/storage/conversations", a.handleGetConversations)
 	mux.HandleFunc("/storage/conversation", a.handleGetConversation)
@@ -120,8 +121,7 @@ func (a *App) handleContextRefresh(w http.ResponseWriter, req *http.Request) {
 
 	err := a.contextManager.Refresh(req.Context())
 	if err != nil {
-		backend.Logger.Error("Context refresh failed", "error", err)
-		http.Error(w, fmt.Sprintf("refresh failed: %v", err), http.StatusInternalServerError)
+		sendErrorResponse(w, "Context refresh failed", err, http.StatusInternalServerError)
 		return
 	}
 

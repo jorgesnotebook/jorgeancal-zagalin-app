@@ -1,7 +1,3 @@
 apiVersion: 1
 
-apps:
-  - type: 'jorgeancal-zagalin-app'
-    org_id: 1
-    org_name: 'jorgeancal'
-    disabled: false
+apps: []
