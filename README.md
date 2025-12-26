@@ -1,4 +1,5 @@
-# Zagalin - AI Assistant for Grafana
+# Z
+agalin - AI Assistant for Grafana
 
 **Zagalin** is a context-aware AI assistant that brings the power of Large Language Models (LLMs) directly into your Grafana experience. Chat with your metrics, generate queries, and troubleshoot issues using natural language.
 
