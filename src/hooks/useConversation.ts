@@ -40,8 +40,8 @@ export function useConversation(): UseConversationReturn {
   const [isLoading, setIsLoading] = useState(false);
 
   // Refresh the conversation list
-  const refreshConversationList = useCallback(() => {
-    const list = ConversationStorage.getConversationList();
+  const refreshConversationList = useCallback(async () => {
+    const list = await ConversationStorage.getConversationList();
     setConversations(list);
   }, []);
 
@@ -53,8 +53,7 @@ export function useConversation(): UseConversationReturn {
   /**
    * Create a new conversation
    */
-  const createNew = useCallback((grafanaContext?: GrafanaContext) => {
-    // Convert GrafanaContext to conversation context
+  const createNew = useCallback(async (grafanaContext?: GrafanaContext) => {
     const context = grafanaContext ? {
       dashboardUid: grafanaContext.dashboard?.uid,
       dashboardTitle: grafanaContext.dashboard?.title,
@@ -63,20 +62,19 @@ export function useConversation(): UseConversationReturn {
       timeRange: grafanaContext.timeRange
     } : undefined;
 
-    const newConv = ConversationStorage.createConversation(undefined, context);
+    const newConv = await ConversationStorage.createConversation(context);
     setConversation(newConv);
-    // Save empty conversation
-    ConversationStorage.saveConversation(newConv);
-    refreshConversationList();
+    await ConversationStorage.saveConversation(newConv);
+    await refreshConversationList();
   }, [refreshConversationList]);
 
   /**
    * Load an existing conversation
    */
-  const loadConversation = useCallback((id: string) => {
+  const loadConversation = useCallback(async (id: string) => {
     setIsLoading(true);
     try {
-      const conv = ConversationStorage.getConversation(id);
+      const conv = await ConversationStorage.getConversation(id);
       if (conv) {
         setConversation(conv);
       } else {
@@ -92,13 +90,17 @@ export function useConversation(): UseConversationReturn {
   /**
    * Add a message to the current conversation
    */
-  const addMessage = useCallback((message: ConversationMessage) => {
+  const addMessage = useCallback(async (message: ConversationMessage) => {
     if (!conversation) {
       console.warn('No active conversation. Creating new one.');
-      const newConv = ConversationStorage.createConversation(message);
-      setConversation(newConv);
-      ConversationStorage.saveConversation(newConv);
-      refreshConversationList();
+      const newConv = await ConversationStorage.createConversation();
+      const updatedConv = {
+        ...newConv,
+        messages: [message]
+      };
+      setConversation(updatedConv);
+      await ConversationStorage.saveConversation(updatedConv);
+      await refreshConversationList();
       return;
     }
 
@@ -108,7 +110,6 @@ export function useConversation(): UseConversationReturn {
       updatedAt: new Date()
     };
 
-    // Update title if this is the first user message
     if (conversation.messages.length === 0 && message.role === 'user') {
       updated.title = message.content.slice(0, 50);
       if (message.content.length > 50) {
@@ -117,31 +118,29 @@ export function useConversation(): UseConversationReturn {
     }
 
     setConversation(updated);
-    ConversationStorage.saveConversation(updated);
-    refreshConversationList();
+    await ConversationStorage.saveConversation(updated);
+    await refreshConversationList();
   }, [conversation, refreshConversationList]);
 
   /**
    * Delete a conversation
    */
-  const deleteConversation = useCallback((id: string) => {
-    ConversationStorage.deleteConversation(id);
+  const deleteConversation = useCallback(async (id: string) => {
+    await ConversationStorage.deleteConversation(id);
 
-    // If we deleted the current conversation, clear it
     if (conversation?.id === id) {
       setConversation(null);
     }
 
-    refreshConversationList();
+    await refreshConversationList();
   }, [conversation, refreshConversationList]);
 
   /**
    * Update conversation title
    */
-  const updateTitle = useCallback((id: string, title: string) => {
-    ConversationStorage.updateTitle(id, title);
+  const updateTitle = useCallback(async (id: string, title: string) => {
+    await ConversationStorage.updateTitle(id, title);
 
-    // Update current conversation if it's the one being renamed
     if (conversation?.id === id) {
       setConversation({
         ...conversation,
@@ -149,16 +148,15 @@ export function useConversation(): UseConversationReturn {
       });
     }
 
-    refreshConversationList();
+    await refreshConversationList();
   }, [conversation, refreshConversationList]);
 
   /**
    * Toggle pin status
    */
-  const togglePin = useCallback((id: string) => {
-    ConversationStorage.togglePin(id);
+  const togglePin = useCallback(async (id: string) => {
+    await ConversationStorage.togglePin(id);
 
-    // Update current conversation if it's the one being pinned/unpinned
     if (conversation?.id === id) {
       setConversation({
         ...conversation,
@@ -166,7 +164,7 @@ export function useConversation(): UseConversationReturn {
       });
     }
 
-    refreshConversationList();
+    await refreshConversationList();
   }, [conversation, refreshConversationList]);
 
   /**

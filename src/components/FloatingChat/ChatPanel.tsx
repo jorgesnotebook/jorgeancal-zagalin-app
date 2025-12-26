@@ -110,6 +110,7 @@ export function ChatPanel() {
     }
 
     const userMessage: ConversationMessage = {
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       role: 'user',
       content: input.trim(),
       timestamp: new Date(),
@@ -211,6 +212,7 @@ export function ChatPanel() {
         },
         complete: async () => {
           const assistantMessage: ConversationMessage = {
+            id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
             role: 'assistant',
             content: accumulatedContent,
             timestamp: new Date(),

@@ -1,4 +1,14 @@
-export interface ConversationMessage {
+import { StorageApiClient, migrateFromLocalStorage } from './storageApiClient';
+
+const STORAGE_KEY = 'zagalin-conversations';
+const MAX_CONVERSATIONS = 50;
+const MAX_MESSAGES_PER_CONVERSATION = 100;
+
+let backendAvailable: boolean | null = null;
+let migrationAttempted = false;
+
+export interface StoredMessage {
+  id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: Date;
@@ -6,10 +16,12 @@ export interface ConversationMessage {
   cost?: number;
 }
 
+export type ConversationMessage = StoredMessage;
+
 export interface Conversation {
   id: string;
   title: string;
-  messages: ConversationMessage[];
+  messages: StoredMessage[];
   createdAt: Date;
   updatedAt: Date;
   isPinned: boolean;
@@ -18,10 +30,8 @@ export interface Conversation {
     dashboardTitle?: string;
     panelId?: number;
     panelTitle?: string;
-    timeRange?: {
-      from: string;
-      to: string;
-    };
+    timeFrom?: string;
+    timeTo?: string;
   };
 }
 
@@ -29,299 +39,394 @@ export interface ConversationMetadata {
   id: string;
   title: string;
   messageCount: number;
-  createdAt: Date;
+  lastMessagePreview: string;
   updatedAt: Date;
   isPinned: boolean;
-  preview: string; // Last user message
-  context?: Conversation['context'];
 }
 
-const STORAGE_KEY = 'zagalin_conversations';
-const MAX_CONVERSATIONS = 50;
-const MAX_MESSAGES_PER_CONVERSATION = 100;
+function generateId(): string {
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+}
 
-export class ConversationStorage {
-  /**
-   * Get all conversation metadata (without full message history)
-   */
-  static getConversationList(): ConversationMetadata[] {
+function generateTitle(messages: StoredMessage[]): string {
+  const firstUserMessage = messages.find(m => m.role === 'user');
+  if (firstUserMessage) {
+    const truncated = firstUserMessage.content.slice(0, 50);
+    return truncated.length < firstUserMessage.content.length
+      ? `${truncated}...`
+      : truncated;
+  }
+
+  const timestamp = new Date().toLocaleString();
+  return `Chat from ${timestamp}`;
+}
+
+async function ensureBackendReady(): Promise<boolean> {
+  if (backendAvailable === null) {
+    backendAvailable = await StorageApiClient.isAvailable();
+
+    if (backendAvailable && !migrationAttempted) {
+      migrationAttempted = true;
+      const result = await migrateFromLocalStorage();
+      if (result.success && result.migrated > 0) {
+        console.log(`Successfully migrated ${result.migrated} conversations to backend storage`);
+      }
+    }
+  }
+  return backendAvailable;
+}
+
+async function loadAllConversations(): Promise<Conversation[]> {
+  try {
+    const useBackend = await ensureBackendReady();
+
+    if (useBackend) {
+      const metadata = await StorageApiClient.getConversations();
+
+      const conversations = await Promise.all(
+        metadata.map(async (meta) => {
+          const conv = await StorageApiClient.getConversation(meta.id);
+          return conv;
+        })
+      );
+
+      return conversations.filter((c): c is Conversation => c !== null);
+    }
+
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (!data) {
+      return [];
+    }
+
+    const parsed = JSON.parse(data);
+
+    return parsed.map((conv: any) => ({
+      ...conv,
+      createdAt: new Date(conv.createdAt),
+      updatedAt: new Date(conv.updatedAt),
+      messages: conv.messages.map((msg: any) => ({
+        ...msg,
+        timestamp: new Date(msg.timestamp),
+      })),
+    }));
+  } catch (error) {
+    console.error('Failed to load conversations:', error);
+
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (!stored) {
+      const data = localStorage.getItem(STORAGE_KEY);
+      if (!data) {
         return [];
       }
-
-      const conversations: Conversation[] = JSON.parse(stored);
-
-      // Convert to metadata and sort by update time (most recent first)
-      return conversations
-        .map(conv => this.toMetadata(conv))
-        .sort((a, b) => {
-          // Pinned conversations first
-          if (a.isPinned && !b.isPinned) {
-            return -1;
-          }
-          if (!a.isPinned && b.isPinned) {
-            return 1;
-          }
-          // Then by update time
-          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-        });
-    } catch (error) {
-      console.error('Failed to load conversation list:', error);
+      const parsed = JSON.parse(data);
+      return parsed.map((conv: any) => ({
+        ...conv,
+        createdAt: new Date(conv.createdAt),
+        updatedAt: new Date(conv.updatedAt),
+        messages: conv.messages.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp),
+        })),
+      }));
+    } catch (localError) {
+      console.error('localStorage fallback failed:', localError);
       return [];
     }
   }
+}
 
-  /**
-   * Get a specific conversation by ID
-   */
-  static getConversation(id: string): Conversation | null {
-    try {
-      const conversations = this.getAllConversations();
-      const conversation = conversations.find(c => c.id === id);
+async function saveConversation(conversation: Conversation): Promise<void> {
+  try {
+    const useBackend = await ensureBackendReady();
 
-      if (!conversation) {
-        return null;
-      }
+    if (useBackend) {
+      await StorageApiClient.saveConversation(conversation);
+    } else {
+      const conversations = await loadAllConversations();
+      const index = conversations.findIndex(c => c.id === conversation.id);
 
-      // Restore Date objects
-      return {
-        ...conversation,
-        createdAt: new Date(conversation.createdAt),
-        updatedAt: new Date(conversation.updatedAt),
-        messages: conversation.messages.map(m => ({
-          ...m,
-          timestamp: new Date(m.timestamp)
-        }))
-      };
-    } catch (error) {
-      console.error('Failed to load conversation:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Save a new conversation or update existing one
-   */
-  static saveConversation(conversation: Conversation): void {
-    try {
-      let conversations = this.getAllConversations();
-
-      // Update timestamp
-      conversation.updatedAt = new Date();
-
-      // Trim messages if too long
-      if (conversation.messages.length > MAX_MESSAGES_PER_CONVERSATION) {
-        // Keep system messages and recent messages
-        const systemMessages = conversation.messages.filter(m => m.role === 'system');
-        const recentMessages = conversation.messages
-          .filter(m => m.role !== 'system')
-          .slice(-MAX_MESSAGES_PER_CONVERSATION + systemMessages.length);
-
-        conversation.messages = [...systemMessages, ...recentMessages];
-      }
-
-      // Find and update or append
-      const existingIndex = conversations.findIndex(c => c.id === conversation.id);
-      if (existingIndex >= 0) {
-        conversations[existingIndex] = conversation;
+      if (index >= 0) {
+        conversations[index] = conversation;
       } else {
         conversations.push(conversation);
       }
 
-      // Enforce max conversations limit
-      if (conversations.length > MAX_CONVERSATIONS) {
-        // Remove oldest non-pinned conversations
-        conversations = this.pruneConversations(conversations);
+      const pruned = pruneOldConversations(conversations);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(pruned));
+    }
+  } catch (error) {
+    console.error('Failed to save conversation:', error);
+
+    try {
+      const conversations = await loadAllConversations();
+      const index = conversations.findIndex(c => c.id === conversation.id);
+
+      if (index >= 0) {
+        conversations[index] = conversation;
+      } else {
+        conversations.push(conversation);
       }
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+      const pruned = pruneOldConversations(conversations);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(pruned));
+    } catch (localError) {
+      console.error('localStorage fallback failed:', localError);
+      throw new Error('Failed to save conversation. Storage unavailable.');
+    }
+  }
+}
+
+function pruneOldConversations(conversations: Conversation[]): Conversation[] {
+  if (conversations.length <= MAX_CONVERSATIONS) {
+    return conversations;
+  }
+
+  const pinned = conversations.filter(c => c.isPinned);
+  const unpinned = conversations.filter(c => !c.isPinned);
+
+  unpinned.sort((a, b) => a.updatedAt.getTime() - b.updatedAt.getTime());
+
+  const toKeep = MAX_CONVERSATIONS - pinned.length;
+  const kept = unpinned.slice(-toKeep);
+
+  return [...pinned, ...kept];
+}
+
+function trimMessages(messages: StoredMessage[]): StoredMessage[] {
+  if (!messages || messages.length <= MAX_MESSAGES_PER_CONVERSATION) {
+    return messages || [];
+  }
+
+  const systemMessages = messages.filter(m => m.role === 'system');
+  const otherMessages = messages.filter(m => m.role !== 'system');
+
+  const recentMessages = otherMessages.slice(-MAX_MESSAGES_PER_CONVERSATION + systemMessages.length);
+
+  return [...systemMessages, ...recentMessages];
+}
+
+export class ConversationStorage {
+  static async getConversationList(): Promise<ConversationMetadata[]> {
+    try {
+      const useBackend = await ensureBackendReady();
+
+      if (useBackend) {
+        const metadata = await StorageApiClient.getConversations();
+        return metadata;
+      }
+
+      const conversations = await loadAllConversations();
+
+      conversations.sort((a, b) => {
+        if (a.isPinned && !b.isPinned) {
+          return -1;
+        }
+        if (!a.isPinned && b.isPinned) {
+          return 1;
+        }
+        return b.updatedAt.getTime() - a.updatedAt.getTime();
+      });
+
+      return conversations.map(conv => ({
+        id: conv.id,
+        title: conv.title,
+        messageCount: conv.messages.length,
+        lastMessagePreview: conv.messages[conv.messages.length - 1]?.content.slice(0, 100) || '',
+        updatedAt: conv.updatedAt,
+        isPinned: conv.isPinned,
+      }));
     } catch (error) {
-      console.error('Failed to save conversation:', error);
-      throw new Error('Failed to save conversation. Storage might be full.');
+      console.error('Failed to get conversation list:', error);
+      return [];
     }
   }
 
-  /**
-   * Create a new conversation
-   */
-  static createConversation(
-    initialMessage?: ConversationMessage,
-    context?: Conversation['context']
-  ): Conversation {
-    const now = new Date();
-    const id = this.generateId();
+  static async getConversation(id: string): Promise<Conversation | null> {
+    try {
+      const useBackend = await ensureBackendReady();
 
-    // Generate title from context or default
-    let title = 'New Conversation';
-    if (context?.dashboardTitle) {
-      title = `Chat: ${context.dashboardTitle}`;
-      if (context.panelTitle) {
-        title += ` - ${context.panelTitle}`;
+      if (useBackend) {
+        return await StorageApiClient.getConversation(id);
       }
-    } else if (initialMessage) {
-      // Use first 50 chars of initial message as title
-      title = initialMessage.content.slice(0, 50);
-      if (initialMessage.content.length > 50) {
-        title += '...';
-      }
+
+      const conversations = await loadAllConversations();
+      return conversations.find(c => c.id === id) || null;
+    } catch (error) {
+      console.error('Failed to get conversation:', error);
+      return null;
     }
+  }
 
+  static async createConversation(context?: Conversation['context']): Promise<Conversation> {
+    const now = new Date();
     const conversation: Conversation = {
-      id,
-      title,
-      messages: initialMessage ? [initialMessage] : [],
+      id: generateId(),
+      title: 'New Chat',
+      messages: [],
       createdAt: now,
       updatedAt: now,
       isPinned: false,
-      context
+      context,
     };
+
+    try {
+      const useBackend = await ensureBackendReady();
+
+      if (useBackend) {
+        await StorageApiClient.saveConversation(conversation);
+      } else {
+        const conversations = await loadAllConversations();
+        conversations.push(conversation);
+
+        const pruned = pruneOldConversations(conversations);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(pruned));
+      }
+    } catch (error) {
+      console.error('Failed to create conversation:', error);
+    }
 
     return conversation;
   }
 
-  /**
-   * Delete a conversation
-   */
-  static deleteConversation(id: string): void {
-    try {
-      const conversations = this.getAllConversations().filter(c => c.id !== id);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
-    } catch (error) {
-      console.error('Failed to delete conversation:', error);
+  static async saveConversation(conversation: Conversation): Promise<void> {
+    conversation.messages = trimMessages(conversation.messages);
+
+    if (conversation.title === 'New Chat' && conversation.messages.length > 0) {
+      conversation.title = generateTitle(conversation.messages);
     }
+
+    conversation.updatedAt = new Date();
+
+    await saveConversation(conversation);
   }
 
-  /**
-   * Update conversation title
-   */
-  static updateTitle(id: string, title: string): void {
+  static async deleteConversation(id: string): Promise<void> {
     try {
-      const conversations = this.getAllConversations();
-      const conversation = conversations.find(c => c.id === id);
+      const useBackend = await ensureBackendReady();
 
-      if (conversation) {
-        conversation.title = title;
-        conversation.updatedAt = new Date();
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+      if (useBackend) {
+        await StorageApiClient.deleteConversation(id);
+      } else {
+        const conversations = await loadAllConversations();
+        const filtered = conversations.filter(c => c.id !== id);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
       }
     } catch (error) {
-      console.error('Failed to update conversation title:', error);
+      console.error('Failed to delete conversation:', error);
+      throw error;
     }
   }
 
-  /**
-   * Toggle pin status
-   */
-  static togglePin(id: string): void {
+  static async updateTitle(id: string, title: string): Promise<void> {
     try {
-      const conversations = this.getAllConversations();
-      const conversation = conversations.find(c => c.id === id);
+      const sanitized = title.trim().slice(0, 50) || 'Untitled Chat';
 
-      if (conversation) {
-        conversation.isPinned = !conversation.isPinned;
-        conversation.updatedAt = new Date();
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+      const useBackend = await ensureBackendReady();
+
+      if (useBackend) {
+        await StorageApiClient.updateTitle(id, sanitized);
+      } else {
+        const conversations = await loadAllConversations();
+        const conversation = conversations.find(c => c.id === id);
+
+        if (conversation) {
+          conversation.title = sanitized;
+          conversation.updatedAt = new Date();
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to update title:', error);
+      throw error;
+    }
+  }
+
+  static async togglePin(id: string): Promise<void> {
+    try {
+      const useBackend = await ensureBackendReady();
+
+      if (useBackend) {
+        await StorageApiClient.togglePin(id);
+      } else {
+        const conversations = await loadAllConversations();
+        const conversation = conversations.find(c => c.id === id);
+
+        if (conversation) {
+          conversation.isPinned = !conversation.isPinned;
+          conversation.updatedAt = new Date();
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+        }
       }
     } catch (error) {
       console.error('Failed to toggle pin:', error);
+      throw error;
     }
   }
 
-  /**
-   * Clear all conversations (use with caution)
-   */
-  static clearAll(): void {
+  static async addMessage(conversationId: string, message: Omit<StoredMessage, 'id'>): Promise<void> {
+    const conversation = await this.getConversation(conversationId);
+
+    if (conversation) {
+      const storedMessage: StoredMessage = {
+        ...message,
+        id: generateId(),
+      };
+
+      conversation.messages.push(storedMessage);
+      await this.saveConversation(conversation);
+    }
+  }
+
+  static async clearAll(): Promise<void> {
     try {
+      const useBackend = await ensureBackendReady();
+
+      if (useBackend) {
+        const conversations = await StorageApiClient.getConversations();
+        await Promise.all(
+          conversations.map(conv => StorageApiClient.deleteConversation(conv.id))
+        );
+      }
+
       localStorage.removeItem(STORAGE_KEY);
     } catch (error) {
       console.error('Failed to clear conversations:', error);
     }
   }
 
-  /**
-   * Get storage usage info
-   */
-  static getStorageInfo(): {
-    conversationCount: number;
-    totalMessages: number;
-    storageSize: number;
-  } {
+  static async exportConversations(): Promise<string> {
+    const conversations = await loadAllConversations();
+    return JSON.stringify(conversations, null, 2);
+  }
+
+  static async importConversations(jsonData: string): Promise<void> {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      const conversations = stored ? JSON.parse(stored) : [];
+      const parsed = JSON.parse(jsonData);
+      if (!Array.isArray(parsed)) {
+        throw new Error('Invalid format: expected array of conversations');
+      }
 
-      return {
-        conversationCount: conversations.length,
-        totalMessages: conversations.reduce((sum: number, c: Conversation) => sum + c.messages.length, 0),
-        storageSize: stored ? new Blob([stored]).size : 0
-      };
+      const conversations: Conversation[] = parsed.map((conv: any) => ({
+        ...conv,
+        createdAt: new Date(conv.createdAt),
+        updatedAt: new Date(conv.updatedAt),
+        messages: conv.messages.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp),
+        })),
+      }));
+
+      const useBackend = await ensureBackendReady();
+
+      if (useBackend) {
+        await Promise.all(
+          conversations.map(conv => StorageApiClient.saveConversation(conv))
+        );
+      } else {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+      }
     } catch (error) {
-      return {
-        conversationCount: 0,
-        totalMessages: 0,
-        storageSize: 0
-      };
+      console.error('Failed to import conversations:', error);
+      throw new Error('Failed to import conversations. Invalid format.');
     }
-  }
-
-  // ========== Private Helper Methods ==========
-
-  private static getAllConversations(): Conversation[] {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
-    } catch (error) {
-      console.error('Failed to parse conversations:', error);
-      return [];
-    }
-  }
-
-  private static toMetadata(conversation: Conversation): ConversationMetadata {
-    // Get last user message for preview
-    const lastUserMessage = [...conversation.messages]
-      .reverse()
-      .find(m => m.role === 'user');
-
-    const preview = lastUserMessage
-      ? lastUserMessage.content.slice(0, 100)
-      : 'No messages yet';
-
-    return {
-      id: conversation.id,
-      title: conversation.title,
-      messageCount: conversation.messages.length,
-      createdAt: new Date(conversation.createdAt),
-      updatedAt: new Date(conversation.updatedAt),
-      isPinned: conversation.isPinned,
-      preview,
-      context: conversation.context
-    };
-  }
-
-  private static pruneConversations(conversations: Conversation[]): Conversation[] {
-    // Separate pinned and unpinned
-    const pinned = conversations.filter(c => c.isPinned);
-    const unpinned = conversations.filter(c => !c.isPinned);
-
-    // Sort unpinned by update time (oldest first for removal)
-    unpinned.sort((a, b) =>
-      new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime()
-    );
-
-    // Calculate how many to keep
-    const totalToKeep = MAX_CONVERSATIONS;
-    const pinnedCount = pinned.length;
-    const unpinnedToKeep = Math.max(0, totalToKeep - pinnedCount);
-
-    // Keep most recent unpinned conversations
-    const keptUnpinned = unpinned.slice(-unpinnedToKeep);
-
-    return [...pinned, ...keptUnpinned];
-  }
-
-  private static generateId(): string {
-    return `conv_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
   }
 }

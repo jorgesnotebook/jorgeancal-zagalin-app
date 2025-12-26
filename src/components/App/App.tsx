@@ -1,16 +1,26 @@
 import React from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { AppRootProps } from '@grafana/data';
-
-const AssistantChatPage = React.lazy(() => import('../../pages/AssistantChatPage'));
+import { css } from '@emotion/css';
+import { ChatPanel } from '../FloatingChat/ChatPanel';
 
 function App(props: AppRootProps) {
   return (
-    <Routes>
-      {/* Default page - Zagalin Chat */}
-      <Route path="*" element={<AssistantChatPage />} />
-    </Routes>
+    <div className={getAppStyles()}>
+      <Routes>
+        {/* Default page - Zagalin Chat with conversation history */}
+        <Route path="*" element={<ChatPanel />} />
+      </Routes>
+    </div>
   );
 }
+
+const getAppStyles = () => css`
+  height: calc(100vh - 52px); /* Account for Grafana header */
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+`;
 
 export default App;

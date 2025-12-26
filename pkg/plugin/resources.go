@@ -8,7 +8,6 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
-// handlePing is an example HTTP GET resource that returns a {"message": "ok"} JSON response.
 func (a *App) handlePing(w http.ResponseWriter, req *http.Request) {
 	w.Header().Add("Content-Type", "application/json")
 	if _, err := w.Write([]byte(`{"message": "ok"}`)); err != nil {
@@ -18,8 +17,6 @@ func (a *App) handlePing(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleEcho is an example HTTP POST resource that accepts a JSON with a "message" key and
-// returns to the client whatever it is sent.
 func (a *App) handleEcho(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -40,15 +37,20 @@ func (a *App) handleEcho(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// registerRoutes takes a *http.ServeMux and registers some HTTP handlers.
 func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/ping", a.handlePing)
 	mux.HandleFunc("/echo", a.handleEcho)
 	mux.HandleFunc("/context/status", a.handleContextStatus)
 	mux.HandleFunc("/context/refresh", a.handleContextRefresh)
+
+	mux.HandleFunc("/storage/conversations", a.handleGetConversations)
+	mux.HandleFunc("/storage/conversation", a.handleGetConversation)
+	mux.HandleFunc("/storage/conversation/save", a.handleSaveConversation)
+	mux.HandleFunc("/storage/conversation/delete", a.handleDeleteConversation)
+	mux.HandleFunc("/storage/conversation/title", a.handleUpdateConversationTitle)
+	mux.HandleFunc("/storage/conversation/pin", a.handleTogglePin)
 }
 
-// handleContextStatus returns the current context status
 func (a *App) handleContextStatus(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -108,7 +110,6 @@ func (a *App) handleContextStatus(w http.ResponseWriter, req *http.Request) {
 	json.NewEncoder(w).Encode(status)
 }
 
-// handleContextRefresh triggers a manual context refresh
 func (a *App) handleContextRefresh(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
