@@ -15,7 +15,7 @@ import { llm } from '@grafana/llm';
 import { finalize } from 'rxjs';
 import { useGrafanaContext } from '../../services/useGrafanaContext';
 import { detectSkill } from '../../services/assistantSkills';
-import { extractActions, createExploreLink } from '../../services/actionExtractor';
+import { createExploreLink } from '../../services/actionExtractor';
 import { useZagalinConfig } from '../../hooks/useZagalinConfig';
 import { getFullSystemPrompt } from '../../types/zagalinConfig';
 import type { AssistantAction } from '../../services/contextTypes';
@@ -24,20 +24,17 @@ import { isLLMReady } from '../../services/llmHealthService';
 import { VectorSearchService } from '../../services/vectorSearchService';
 import { ZAGALIN_TOOLS, type ToolCall } from '../../services/zagalinTools';
 import { optimizeContext } from '../../services/contextOptimizer';
+import { useConversation } from '../../hooks/useConversation';
+import type { ConversationMessage } from '../../services/conversationStorage';
 
-interface Message {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  timestamp: Date;
-  tokens?: number;
-  cost?: number;
+// Internal Message type for UI (extends ConversationMessage)
+interface Message extends ConversationMessage {
   actions?: AssistantAction[];
   toolCalls?: ToolCall[];
 }
 
 export function ChatPanel() {
   const s = useStyles2(getStyles);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +48,25 @@ export function ChatPanel() {
 
   // Get Zagalin configuration
   const { config: zagalinConfig } = useZagalinConfig();
+
+  // Get conversation management hook
+  const { messages: conversationMessages, addMessage, conversation, createNew, clearCurrent } = useConversation();
+
+  // Handle new chat
+  const handleNewChat = () => {
+    clearCurrent();
+    createNew(context);
+  };
+
+  // Convert conversation messages to UI messages
+  const messages: Message[] = conversationMessages;
+
+  // Initialize conversation on mount if none exists
+  useEffect(() => {
+    if (!conversation) {
+      createNew(context);
+    }
+  }, [conversation, createNew, context]);
 
   // Check LLM health on mount
   useEffect(() => {
@@ -93,13 +109,14 @@ export function ChatPanel() {
       return;
     }
 
-    const userMessage: Message = {
+    const userMessage: ConversationMessage = {
       role: 'user',
       content: input.trim(),
       timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    // Save user message to conversation
+    addMessage(userMessage);
     setInput('');
     setIsStreaming(true);
     setError(null);
@@ -193,16 +210,14 @@ export function ChatPanel() {
           setStreamingContent(content);
         },
         complete: async () => {
-          const actions = extractActions(accumulatedContent);
-
-          const assistantMessage: Message = {
+          const assistantMessage: ConversationMessage = {
             role: 'assistant',
             content: accumulatedContent,
             timestamp: new Date(),
-            actions: actions.length > 0 ? actions : undefined,
           };
 
-          setMessages(prev => [...prev, assistantMessage]);
+          // Save assistant message to conversation
+          addMessage(assistantMessage);
           setStreamingContent('');
         },
         error: (err: any) => {
@@ -291,24 +306,42 @@ export function ChatPanel() {
   return (
     <div className={s.container}>
       <div className={s.contextBar}>
-        {llmReady === null ? (
-          <Badge color="blue" text="Checking LLM..." icon="sync" />
-        ) : llmReady ? (
-          <>
-            {hasContext ? (
-              <Tooltip content={getContextTooltip()}>
-                <Badge color="green" text={context.dashboard ? `📊 ${context.dashboard.title}` : "Context Active"} icon="info-circle" />
-              </Tooltip>
-            ) : (
-              <Tooltip content="Navigate to a dashboard to enable context-aware assistance">
-                <Badge color="orange" text="No Dashboard Context" icon="info-circle" />
-              </Tooltip>
-            )}
-            {contextLoading && <Spinner inline size={14} />}
-          </>
-        ) : (
-          <Badge color="red" text="LLM Unavailable" icon="exclamation-triangle" />
-        )}
+        <div className={s.contextInfo}>
+          {llmReady === null ? (
+            <Badge color="blue" text="Checking LLM..." icon="sync" />
+          ) : llmReady ? (
+            <>
+              {hasContext ? (
+                <Tooltip content={getContextTooltip()}>
+                  <Badge color="green" text={context.dashboard ? `📊 ${context.dashboard.title}` : "Context Active"} icon="info-circle" />
+                </Tooltip>
+              ) : (
+                <Tooltip content="Navigate to a dashboard to enable context-aware assistance">
+                  <Badge color="orange" text="No Dashboard Context" icon="info-circle" />
+                </Tooltip>
+              )}
+              {contextLoading && <Spinner inline size={14} />}
+            </>
+          ) : (
+            <Badge color="red" text="LLM Unavailable" icon="exclamation-triangle" />
+          )}
+        </div>
+        <div className={s.contextActions}>
+          <Tooltip content="Start a new conversation">
+            <IconButton
+              name="plus"
+              size="sm"
+              variant="secondary"
+              onClick={handleNewChat}
+              aria-label="New chat"
+            />
+          </Tooltip>
+          {conversation && messages.length > 0 && (
+            <Tooltip content={`${messages.length} messages`}>
+              <Badge color="blue" text={`${messages.length}`} icon="comment-alt" />
+            </Tooltip>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -417,10 +450,22 @@ const getStyles = (theme: GrafanaTheme2) => ({
   contextBar: css`
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: ${theme.spacing(1)};
     padding: ${theme.spacing(1, 2)};
     border-bottom: 1px solid ${theme.colors.border.weak};
-    min-height: 32px;
+    min-height: 40px;
+  `,
+  contextInfo: css`
+    display: flex;
+    align-items: center;
+    gap: ${theme.spacing(1)};
+    flex: 1;
+  `,
+  contextActions: css`
+    display: flex;
+    align-items: center;
+    gap: ${theme.spacing(1)};
   `,
   messagesContainer: css`
     flex: 1;

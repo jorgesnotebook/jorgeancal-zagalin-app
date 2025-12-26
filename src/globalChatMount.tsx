@@ -31,28 +31,15 @@ function shouldShowFloatingChat(): boolean {
 /**
  * Mount the floating chat button globally
  * This is called once when the plugin is loaded and persists across all pages
+ * PERFORMANCE: Mounts UI immediately, checks LLM availability in background
  */
-export async function mountGlobalChat() {
+export function mountGlobalChat() {
   // Check if already mounted
   if (document.getElementById('zagalin-global-chat')) {
     return;
   }
 
-  // Check if LLM plugin is enabled and configured
-  try {
-    const result = await llm.enabled();
-    const isEnabled = typeof result === 'boolean' ? result : (result as any)?.ok;
-
-    if (!isEnabled) {
-      console.log('Zagalin: LLM plugin not configured, skipping floating chat mount');
-      return;
-    }
-  } catch (err) {
-    console.log('Zagalin: LLM plugin not available, skipping floating chat mount');
-    return;
-  }
-
-  // Create container
+  // Create container immediately (non-blocking)
   const container = document.createElement('div');
   container.id = 'zagalin-global-chat';
   container.style.position = 'fixed';
@@ -70,6 +57,7 @@ export async function mountGlobalChat() {
     container.style.display = shouldShowFloatingChat() ? 'block' : 'none';
   };
 
+  // Render UI immediately
   root.render(
     <div style={{ pointerEvents: 'auto' }}>
       <FloatingChatButton />
@@ -97,4 +85,23 @@ export async function mountGlobalChat() {
   };
 
   console.log('Zagalin: Global floating chat mounted (shows on dashboards and explore)');
+
+  // Check LLM availability in background (non-blocking)
+  // This happens after the UI is already mounted and visible
+  setTimeout(async () => {
+    try {
+      const result = await llm.enabled();
+      const isEnabled = typeof result === 'boolean' ? result : (result as any)?.ok;
+
+      if (!isEnabled) {
+        console.log('Zagalin: LLM plugin not configured, hiding floating chat');
+        container.style.display = 'none';
+      } else {
+        console.log('Zagalin: LLM plugin available and enabled');
+      }
+    } catch (err) {
+      console.log('Zagalin: LLM plugin not available, hiding floating chat');
+      container.style.display = 'none';
+    }
+  }, 0);
 }

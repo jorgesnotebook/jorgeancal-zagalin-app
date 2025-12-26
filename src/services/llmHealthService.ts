@@ -56,16 +56,51 @@ export async function checkZagalinHealth(): Promise<HealthStatus> {
 }
 
 /**
- * Quick check if LLM is ready to use
+ * LLM Status Cache (module-level)
+ * Simple but bomb-proof: handles race conditions, caches results, fails gracefully
+ */
+let llmStatus: boolean | null = null;
+let llmStatusExpiry = 0;
+let pendingCheck: Promise<boolean> | null = null;
+const LLM_CACHE_TTL = 30000; // 30 seconds
+
+/**
+ * Quick check if LLM is ready to use (with caching and deduplication)
  */
 export async function isLLMReady(): Promise<boolean> {
-  try {
-    const { llm } = await import('@grafana/llm');
-    return await llm.enabled();
-  } catch (err) {
-    console.error('LLM health check failed:', err);
-    return false;
+  const now = Date.now();
+
+  // Return cached status if still valid
+  if (llmStatus !== null && now < llmStatusExpiry) {
+    return llmStatus;
   }
+
+  // If a check is already in progress, wait for it (prevents race conditions)
+  if (pendingCheck) {
+    return pendingCheck;
+  }
+
+  // Start new check
+  pendingCheck = (async () => {
+    try {
+      const { llm } = await import('@grafana/llm');
+      const result = await llm.enabled();
+
+      // Cache the result
+      llmStatus = result;
+      llmStatusExpiry = now + LLM_CACHE_TTL;
+
+      return result;
+    } catch (err) {
+      console.error('LLM health check failed:', err);
+      return false;
+    } finally {
+      // Clear pending check
+      pendingCheck = null;
+    }
+  })();
+
+  return pendingCheck;
 }
 
 /**
