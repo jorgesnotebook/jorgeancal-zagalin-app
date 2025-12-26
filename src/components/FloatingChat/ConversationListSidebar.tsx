@@ -337,10 +337,6 @@ const getItemStyles = (theme: GrafanaTheme2) => ({
 
     &:hover {
       background: ${theme.colors.background.primary};
-
-      .item-actions {
-        opacity: 1;
-      }
     }
   `,
   activeItem: css`
@@ -377,8 +373,12 @@ const getItemStyles = (theme: GrafanaTheme2) => ({
     display: flex;
     gap: ${theme.spacing(0.25)};
     align-items: center;
-    opacity: 0;
+    opacity: 0.7;
     transition: opacity 0.2s;
+
+    &:hover {
+      opacity: 1;
+    }
   `,
   editInput: css`
     width: 100%;

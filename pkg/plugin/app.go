@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
@@ -90,7 +91,7 @@ func (a *App) CheckHealth(_ context.Context, req *backend.CheckHealthRequest) (*
 
 	message := "Zagalin plugin is ready. Using grafana-llm-app for LLM functionality."
 	if settings != nil {
-		message += " Context refresh: every " + string(rune(settings.ContextRefreshMinutes)) + " minutes."
+		message += " Context refresh: every " + strconv.Itoa(settings.ContextRefreshMinutes) + " minutes."
 	}
 
 	return &backend.CheckHealthResult{

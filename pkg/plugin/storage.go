@@ -3,11 +3,13 @@ package plugin
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,13 +40,14 @@ type ConversationContext struct {
 }
 
 type Conversation struct {
-	ID        string               `json:"id"`
-	Title     string               `json:"title"`
-	Messages  []StoredMessage      `json:"messages"`
-	CreatedAt time.Time            `json:"createdAt"`
-	UpdatedAt time.Time            `json:"updatedAt"`
-	IsPinned  bool                 `json:"isPinned"`
-	Context   *ConversationContext `json:"context,omitempty"`
+	ID         string               `json:"id"`
+	OwnerLogin string               `json:"ownerLogin"`
+	Title      string               `json:"title"`
+	Messages   []StoredMessage      `json:"messages"`
+	CreatedAt  time.Time            `json:"createdAt"`
+	UpdatedAt  time.Time            `json:"updatedAt"`
+	IsPinned   bool                 `json:"isPinned"`
+	Context    *ConversationContext `json:"context,omitempty"`
 }
 
 type ConversationMetadata struct {
@@ -67,17 +70,48 @@ func NewUserStorage(dataDir string) *UserStorage {
 	}
 }
 
-func (s *UserStorage) getUserDataPath(userLogin string) string {
-	safe := filepath.Clean(userLogin)
-	safe = filepath.Base(safe) // Prevent path traversal
-	return filepath.Join(s.dataDir, fmt.Sprintf("user_%s_conversations.json", safe))
+func hashUsername(username string) uint32 {
+	h := fnv.New32a()
+	h.Write([]byte(username))
+	return h.Sum32()
+}
+
+func (s *UserStorage) getUserDataPath(userLogin string) (string, error) {
+	if err := validateUsername(userLogin); err != nil {
+		return "", fmt.Errorf("invalid username: %w", err)
+	}
+
+	hash := hashUsername(userLogin)
+	safe := filepath.Base(userLogin)
+	safeFilename := fmt.Sprintf("user_%s_%x_conversations.json", safe, hash)
+
+	path := filepath.Join(s.dataDir, safeFilename)
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	absDataDir, err := filepath.Abs(s.dataDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to get absolute data dir: %w", err)
+	}
+
+	if !strings.HasPrefix(absPath, absDataDir+string(filepath.Separator)) {
+		return "", fmt.Errorf("path traversal attempt detected")
+	}
+
+	return path, nil
 }
 
 func (s *UserStorage) loadUserConversations(userLogin string) ([]Conversation, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := s.getUserDataPath(userLogin)
+	path, err := s.getUserDataPath(userLogin)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user path: %w", err)
+	}
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return []Conversation{}, nil
@@ -109,8 +143,12 @@ func (s *UserStorage) saveUserConversations(userLogin string, conversations []Co
 		return fmt.Errorf("failed to marshal conversations: %w", err)
 	}
 
-	path := s.getUserDataPath(userLogin)
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	path, err := s.getUserDataPath(userLogin)
+	if err != nil {
+		return fmt.Errorf("invalid user path: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("failed to write conversations: %w", err)
 	}
 
@@ -243,8 +281,8 @@ func (a *App) handleGetConversation(w http.ResponseWriter, req *http.Request) {
 	}
 
 	conversationID := req.URL.Query().Get("id")
-	if conversationID == "" {
-		http.Error(w, "conversation ID required", http.StatusBadRequest)
+	if err := validateConversationID(conversationID); err != nil {
+		sendErrorResponse(w, "Invalid conversation ID", err, http.StatusBadRequest)
 		return
 	}
 
@@ -262,6 +300,10 @@ func (a *App) handleGetConversation(w http.ResponseWriter, req *http.Request) {
 
 	for _, conv := range conversations {
 		if conv.ID == conversationID {
+			if conv.OwnerLogin != "" && conv.OwnerLogin != userLogin {
+				sendErrorResponse(w, "Ownership verification failed", fmt.Errorf("user %s attempted to access conversation owned by %s", userLogin, conv.OwnerLogin), http.StatusForbidden)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(conv)
 			return
@@ -282,6 +324,8 @@ func (a *App) handleSaveConversation(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+
+	req.Body = http.MaxBytesReader(w, req.Body, 10*1024*1024)
 
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
@@ -308,6 +352,11 @@ func (a *App) handleSaveConversation(w http.ResponseWriter, req *http.Request) {
 	found := false
 	for i, conv := range conversations {
 		if conv.ID == conversation.ID {
+			if conv.OwnerLogin != userLogin {
+				sendErrorResponse(w, "Ownership verification failed", fmt.Errorf("user %s attempted to modify conversation owned by %s", userLogin, conv.OwnerLogin), http.StatusForbidden)
+				return
+			}
+			conversation.OwnerLogin = userLogin
 			conversations[i] = conversation
 			found = true
 			break
@@ -315,6 +364,10 @@ func (a *App) handleSaveConversation(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if !found {
+		conversation.OwnerLogin = userLogin
+		if conversation.CreatedAt.IsZero() {
+			conversation.CreatedAt = time.Now()
+		}
 		conversations = append(conversations, conversation)
 	}
 
@@ -339,8 +392,8 @@ func (a *App) handleDeleteConversation(w http.ResponseWriter, req *http.Request)
 	}
 
 	conversationID := req.URL.Query().Get("id")
-	if conversationID == "" {
-		http.Error(w, "conversation ID required", http.StatusBadRequest)
+	if err := validateConversationID(conversationID); err != nil {
+		sendErrorResponse(w, "Invalid conversation ID", err, http.StatusBadRequest)
 		return
 	}
 
@@ -357,10 +410,22 @@ func (a *App) handleDeleteConversation(w http.ResponseWriter, req *http.Request)
 	}
 
 	filtered := make([]Conversation, 0, len(conversations))
+	found := false
 	for _, conv := range conversations {
-		if conv.ID != conversationID {
+		if conv.ID == conversationID {
+			if conv.OwnerLogin != "" && conv.OwnerLogin != userLogin {
+				sendErrorResponse(w, "Ownership verification failed", fmt.Errorf("user %s attempted to delete conversation owned by %s", userLogin, conv.OwnerLogin), http.StatusForbidden)
+				return
+			}
+			found = true
+		} else {
 			filtered = append(filtered, conv)
 		}
+	}
+
+	if !found {
+		http.Error(w, "conversation not found", http.StatusNotFound)
+		return
 	}
 
 	if err := a.storage.saveUserConversations(userLogin, filtered); err != nil {
@@ -396,6 +461,16 @@ func (a *App) handleUpdateConversationTitle(w http.ResponseWriter, req *http.Req
 		return
 	}
 
+	if err := validateConversationID(payload.ID); err != nil {
+		sendErrorResponse(w, "Invalid conversation ID", err, http.StatusBadRequest)
+		return
+	}
+
+	if err := validateTitle(payload.Title); err != nil {
+		sendErrorResponse(w, "Invalid title", err, http.StatusBadRequest)
+		return
+	}
+
 	conversations, err := a.storage.loadUserConversations(userLogin)
 	if err != nil {
 		http.Error(w, "failed to load conversations", http.StatusInternalServerError)
@@ -405,6 +480,10 @@ func (a *App) handleUpdateConversationTitle(w http.ResponseWriter, req *http.Req
 	found := false
 	for i, conv := range conversations {
 		if conv.ID == payload.ID {
+			if conv.OwnerLogin != "" && conv.OwnerLogin != userLogin {
+				sendErrorResponse(w, "Ownership verification failed", fmt.Errorf("user %s attempted to modify conversation owned by %s", userLogin, conv.OwnerLogin), http.StatusForbidden)
+				return
+			}
 			conversations[i].Title = payload.Title
 			conversations[i].UpdatedAt = time.Now()
 			found = true
@@ -435,8 +514,8 @@ func (a *App) handleTogglePin(w http.ResponseWriter, req *http.Request) {
 	}
 
 	conversationID := req.URL.Query().Get("id")
-	if conversationID == "" {
-		http.Error(w, "conversation ID required", http.StatusBadRequest)
+	if err := validateConversationID(conversationID); err != nil {
+		sendErrorResponse(w, "Invalid conversation ID", err, http.StatusBadRequest)
 		return
 	}
 
@@ -455,6 +534,10 @@ func (a *App) handleTogglePin(w http.ResponseWriter, req *http.Request) {
 	found := false
 	for i, conv := range conversations {
 		if conv.ID == conversationID {
+			if conv.OwnerLogin != "" && conv.OwnerLogin != userLogin {
+				sendErrorResponse(w, "Ownership verification failed", fmt.Errorf("user %s attempted to modify conversation owned by %s", userLogin, conv.OwnerLogin), http.StatusForbidden)
+				return
+			}
 			conversations[i].IsPinned = !conversations[i].IsPinned
 			conversations[i].UpdatedAt = time.Now()
 			found = true

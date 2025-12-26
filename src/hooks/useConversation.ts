@@ -139,12 +139,26 @@ export function useConversation(): UseConversationReturn {
    * Update conversation title
    */
   const updateTitle = useCallback(async (id: string, title: string) => {
-    await ConversationStorage.updateTitle(id, title);
+    // Sanitize and validate title
+    const sanitizedTitle = title.trim().slice(0, 200);
+
+    if (sanitizedTitle.length === 0) {
+      console.warn('Title cannot be empty');
+      return;
+    }
+
+    // Check for control characters (except newline, carriage return, tab)
+    if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(sanitizedTitle)) {
+      console.warn('Title contains invalid characters');
+      return;
+    }
+
+    await ConversationStorage.updateTitle(id, sanitizedTitle);
 
     if (conversation?.id === id) {
       setConversation({
         ...conversation,
-        title
+        title: sanitizedTitle
       });
     }
 
