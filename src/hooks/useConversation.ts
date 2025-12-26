@@ -42,7 +42,7 @@ export function useConversation(): UseConversationReturn {
   // Load conversation list on mount
   useEffect(() => {
     refreshConversationList();
-  }, []);
+  }, [refreshConversationList]);
 
   // Refresh the conversation list
   const refreshConversationList = useCallback(() => {
