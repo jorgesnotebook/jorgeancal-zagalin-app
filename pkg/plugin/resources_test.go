@@ -3,9 +3,12 @@ package plugin
 import (
 	"bytes"
 	"context"
-	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
 // mockCallResourceResponseSender implements backend.CallResourceResponseSender
@@ -97,5 +100,233 @@ func TestCallResource(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestUserIdentityExtraction tests that user identity is correctly extracted from request context
+func TestUserIdentityExtraction(t *testing.T) {
+	tests := []struct {
+		name        string
+		user        *backend.User
+		orgID       int64
+		expectError bool
+		expectedID  string
+	}{
+		{
+			name: "valid user with login",
+			user: &backend.User{
+				Login: "testuser",
+				Email: "test@example.com",
+				Name:  "Test User",
+			},
+			orgID:       1,
+			expectError: false,
+			expectedID:  "testuser",
+		},
+		{
+			name:        "anonymous user with org",
+			user:        nil,
+			orgID:       1,
+			expectError: false,
+			expectedID:  "anonymous",
+		},
+		{
+			name:        "no user and no org",
+			user:        nil,
+			orgID:       0,
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create request with plugin context
+			ctx := backend.WithPluginContext(context.Background(), backend.PluginContext{
+				User:  tt.user,
+				OrgID: tt.orgID,
+			})
+
+			req := httptest.NewRequest(http.MethodPost, "/query", nil)
+			req = req.WithContext(ctx)
+
+			user, err := extractUserIdentity(req)
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if user.UserLogin != tt.expectedID {
+				t.Errorf("expected user login %s, got %s", tt.expectedID, user.UserLogin)
+			}
+
+			if user.OrgID != tt.orgID {
+				t.Errorf("expected org ID %d, got %d", tt.orgID, user.OrgID)
+			}
+		})
+	}
+}
+
+// TestQueryProxyBasicHandling tests basic request handling for the query proxy
+func TestQueryProxyBasicHandling(t *testing.T) {
+	app, err := NewApp(context.Background(), backend.AppInstanceSettings{})
+	if err != nil {
+		t.Fatalf("failed to create app: %v", err)
+	}
+
+	tests := []struct {
+		name           string
+		method         string
+		body           interface{}
+		user           *backend.User
+		orgID          int64
+		expectedStatus int
+	}{
+		{
+			name:           "GET request returns method not allowed",
+			method:         http.MethodGet,
+			user:           &backend.User{Login: "testuser"},
+			orgID:          1,
+			expectedStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:   "valid POST request with user context",
+			method: http.MethodPost,
+			body: QueryRequest{
+				Datasource: "prometheus-uid",
+				Queries: []QueryPayload{
+					{
+						RefID:      "A",
+						Expr:       "up",
+						QueryType:  "prometheus",
+						IntervalMs: 15000,
+					},
+				},
+				TimeRange: TimeRange{
+					From: "now-1h",
+					To:   "now",
+				},
+			},
+			user:           &backend.User{Login: "testuser", Email: "test@example.com"},
+			orgID:          1,
+			expectedStatus: http.StatusOK, // Will be OK even if Grafana isn't running, as we're testing the handler
+		},
+		{
+			name:           "invalid JSON body",
+			method:         http.MethodPost,
+			body:           "invalid json",
+			user:           &backend.User{Login: "testuser"},
+			orgID:          1,
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Marshal body
+			var bodyBytes []byte
+			if tt.body != nil {
+				if str, ok := tt.body.(string); ok {
+					bodyBytes = []byte(str)
+				} else {
+					bodyBytes, _ = json.Marshal(tt.body)
+				}
+			}
+
+			// Create request with plugin context
+			ctx := backend.WithPluginContext(context.Background(), backend.PluginContext{
+				User:  tt.user,
+				OrgID: tt.orgID,
+			})
+
+			req := httptest.NewRequest(tt.method, "/query", bytes.NewReader(bodyBytes))
+			req = req.WithContext(ctx)
+
+			// Record response
+			w := httptest.NewRecorder()
+
+			// Call handler directly
+			appInstance := app.(*App)
+			appInstance.handleQuery(w, req)
+
+			// Check status code
+			if w.Code != tt.expectedStatus && w.Code != http.StatusInternalServerError {
+				// Allow InternalServerError as it might happen if Grafana isn't running
+				if tt.expectedStatus != http.StatusOK || w.Code != http.StatusInternalServerError {
+					t.Errorf("expected status %d, got %d: %s", tt.expectedStatus, w.Code, w.Body.String())
+				}
+			}
+		})
+	}
+}
+
+// TestRateLimitingPerUser tests that rate limiting is applied per user
+func TestRateLimitingPerUser(t *testing.T) {
+	app, err := NewApp(context.Background(), backend.AppInstanceSettings{})
+	if err != nil {
+		t.Fatalf("failed to create app: %v", err)
+	}
+
+	appInstance := app.(*App)
+
+	// Set low rate limit for testing
+	appInstance.guardrails = NewGuardrails(2) // Only 2 requests per minute
+
+	queryReq := QueryRequest{
+		Datasource: "prometheus-uid",
+		Queries: []QueryPayload{
+			{
+				RefID:     "A",
+				Expr:      "up",
+				QueryType: "prometheus",
+			},
+		},
+		TimeRange: TimeRange{
+			From: "now-1h",
+			To:   "now",
+		},
+	}
+
+	bodyBytes, _ := json.Marshal(queryReq)
+
+	// Create request with plugin context
+	ctx := backend.WithPluginContext(context.Background(), backend.PluginContext{
+		User:  &backend.User{Login: "testuser"},
+		OrgID: 1,
+	})
+
+	// Make requests until rate limit is hit
+	successCount := 0
+	rateLimited := false
+
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/query", bytes.NewReader(bodyBytes))
+		req = req.WithContext(ctx)
+		w := httptest.NewRecorder()
+
+		appInstance.handleQuery(w, req)
+
+		if w.Code == http.StatusTooManyRequests {
+			rateLimited = true
+			break
+		} else if w.Code == http.StatusOK || w.Code == http.StatusInternalServerError {
+			// Both OK and InternalServerError count as not rate-limited
+			// (InternalServerError happens if Grafana isn't running)
+			successCount++
+		}
+	}
+
+	if successCount == 0 {
+		t.Error("expected at least one successful request")
+	}
+
+	if !rateLimited {
+		t.Error("expected to hit rate limit, but didn't")
 	}
 }

@@ -1,0 +1,299 @@
+# Cursor AI Rules for Zagalin
+
+You are helping develop **Zagalin**, a context-aware AI assistant Grafana plugin with a React/TypeScript frontend and Go backend.
+
+## Quick Reference
+
+**Commands:**
+- `npm run dev` - Frontend watch mode
+- `npm run server` - Start Grafana with plugin
+- `npm run build && mage -v buildAll` - Full build
+- `npm run test:ci` - Unit tests
+- `./ci-local.sh` - Full CI pipeline
+
+**Documentation:** See `docs/` folder for detailed guides
+
+## KISS Mindset - Keep It Simple
+
+**Always prefer simple solutions:**
+- Don't create abstractions until 3+ similar uses
+- Delete unused code immediately
+- No commented code or "just in case" features
+- Three similar lines > one premature abstraction
+
+```typescript
+// ❌ Over-engineered
+class QueryBuilderFactory {
+  createBuilder(type: QueryType): AbstractQueryBuilder {
+    return this.builderRegistry.get(type).instantiate();
+  }
+}
+
+// ✅ Simple and clear
+function buildPromQLQuery(expr: string, range: TimeRange): Query {
+  return { expr, from: range.from, to: range.to };
+}
+```
+
+## Security-First Development
+
+**All code must be secure by default.**
+
+### Critical Rules:
+
+1. **Authentication & Authorization**
+   - ✅ All backend queries use user's security context
+   - ✅ Forward user auth cookies to Grafana API
+   - ❌ Never bypass Grafana's permission system
+   - ❌ Never store API keys in frontend/localStorage
+
+2. **Input Validation**
+   - ✅ Validate all user input on backend
+   - ✅ Sanitize LLM output (use DOMPurify)
+   - ✅ Limit sizes (max 50KB messages)
+   - ❌ Don't trust frontend validation alone
+
+3. **Query Execution**
+   - ✅ All datasource queries through backend proxy
+   - ✅ Rate limiting per user (60 req/min default)
+   - Files: `pkg/plugin/query_proxy.go`, `pkg/plugin/guardrails.go`
+
+4. **Data Privacy**
+   - ✅ Per-user storage with access control
+   - ✅ Hash user IDs in logs (PII protection)
+   - ❌ Never leak data between users
+
+### Security Checklist
+
+When writing code that:
+- Accepts user input → Add validation
+- Accesses data → Check user permissions
+- Makes external calls → Use proper auth
+- Stores data → Implement access control
+- Renders content → Sanitize for XSS
+- Has errors → Don't leak sensitive info
+- Uses secrets → Use Grafana secure storage
+- Logs data → Don't log PII/credentials
+
+```typescript
+// ❌ Never hardcode credentials
+const apiKey = "sk-proj-...";
+
+// ✅ Use secure storage
+const apiKey = secureJsonData.apiKey;
+
+// ❌ Don't bypass backend
+datasource.query(query);
+
+// ✅ Route through backend with user context
+backendProxy.query(userContext, query);
+```
+
+## Code Style
+
+### TypeScript
+
+```typescript
+// ✅ Explicit types for public APIs
+export interface QueryRequest {
+  datasource: string;
+  queries: QueryPayload[];
+  timeRange: TimeRange;
+}
+
+// ✅ Type inference for locals
+const response = await queryService.query(request);
+
+// ❌ Never use 'any'
+function processData(data: any) { }  // Bad
+
+// ✅ Proper types
+function processData(data: QueryResponse) { }  // Good
+```
+
+### React
+
+```typescript
+// ✅ Functional components with hooks
+export const ChatPanel: React.FC<Props> = ({ conversation }) => {
+  const [messages, setMessages] = useState<Message[]>([]);
+
+  useEffect(() => {
+    loadMessages(conversation.id);
+  }, [conversation.id]);
+
+  return <div>{/* ... */}</div>;
+};
+
+// ❌ Don't use class components (except error boundaries)
+```
+
+### Go
+
+```go
+// ✅ Return errors, don't panic
+func executeQuery(ctx context.Context, query Query) (*Result, error) {
+    if err := validate(query); err != nil {
+        return nil, fmt.Errorf("validation failed: %w", err)
+    }
+    return result, nil
+}
+
+// ✅ Use context for cancellation
+func handleRequest(w http.ResponseWriter, req *http.Request) {
+    ctx := req.Context()
+    result, err := doWork(ctx)
+    // ...
+}
+
+// ✅ Structured logging
+backend.Logger.Info("Query executed",
+    "user", user.Login,
+    "datasource", dsUID,
+    "duration", elapsed,
+)
+```
+
+## Architecture Patterns
+
+### Dual Storage
+- Primary: Backend Go storage (file-based)
+- Fallback: Browser localStorage
+- Auto-migration on backend availability
+- Files: `src/services/conversationStorage.ts`, `pkg/plugin/storage.go`
+
+### Context Manager
+- Backend caches Prometheus/Loki/Tempo metadata
+- Refreshes every N minutes (configurable)
+- Reduces LLM token usage
+- Files: `pkg/plugin/context/*.go`
+
+### Global Chat Mounting
+- Portal pattern for floating chat
+- Mounts once, persists across navigation
+- Only on dashboard pages
+- Files: `src/globalChatMount.tsx`, `src/components/FloatingChat/`
+
+### LLM Streaming
+- RxJS for streaming responses
+- Backend proxy with guardrails
+- Function calling support
+- Files: `src/services/queryService.ts`, `src/services/assistantSkills.ts`
+
+## File Organization
+
+```
+src/
+├── components/          # React components
+├── services/           # Business logic (LLM, context, storage)
+├── hooks/              # React hooks
+├── pages/              # Route pages
+└── module.tsx          # Plugin entry
+
+pkg/
+├── main.go             # Backend entry
+└── plugin/
+    ├── query_proxy.go  # Query handler with user context
+    ├── guardrails.go   # Rate limiting
+    ├── storage.go      # User storage
+    └── context/        # Context extraction
+```
+
+## Common Patterns
+
+### Adding a Service
+
+```typescript
+// src/services/myService.ts
+export class MyService {
+  static async doSomething(param: string): Promise<Result> {
+    // Always validate input
+    if (!param || param.length > 1000) {
+      throw new Error('Invalid parameter');
+    }
+
+    // Call backend
+    return await getBackendSrv().post(
+      '/api/plugins/jorgeancal-zagalin-app/resources/my-endpoint',
+      { data: param }
+    );
+  }
+}
+```
+
+### Adding Backend Endpoint
+
+```go
+// pkg/plugin/resources.go
+func (a *App) registerRoutes(mux *http.ServeMux) {
+    mux.HandleFunc("/my-endpoint", a.handleMyEndpoint)
+}
+
+func (a *App) handleMyEndpoint(w http.ResponseWriter, req *http.Request) {
+    // Always extract user identity
+    user, err := extractUserIdentity(req)
+    if err != nil {
+        sendErrorResponse(w, "Unauthorized", err, http.StatusUnauthorized)
+        return
+    }
+
+    // Process with user context
+    // ...
+}
+```
+
+### Adding Tests
+
+```typescript
+// Frontend
+describe('MyService', () => {
+  it('validates input', async () => {
+    await expect(MyService.doSomething('')).rejects.toThrow();
+  });
+});
+```
+
+```go
+// Backend
+func TestMyEndpoint(t *testing.T) {
+    ctx := backend.WithPluginContext(context.Background(),
+        backend.PluginContext{
+            User: &backend.User{Login: "testuser"},
+            OrgID: 1,
+        })
+
+    req := httptest.NewRequest(http.MethodPost, "/my-endpoint", nil)
+    req = req.WithContext(ctx)
+    w := httptest.NewRecorder()
+
+    app.(*App).handleMyEndpoint(w, req)
+
+    if w.Code != http.StatusOK {
+        t.Errorf("expected 200, got %d", w.Code)
+    }
+}
+```
+
+## Important Notes
+
+1. **Backend changes need full rebuild**: `mage -v buildAll`
+2. **Frontend has hot reload**: `npm run dev`
+3. **Always validate on backend**: Don't trust frontend
+4. **User identity must be preserved**: See Issue #16 implementation
+5. **Rate limiting is per-user**: Token bucket algorithm
+6. **All queries through backend proxy**: No direct datasource access
+
+## Documentation Reference
+
+- **Detailed guide**: `.claude/CLAUDE.md`
+- **Architecture**: `docs/development/architecture.md`
+- **API Reference**: `docs/api/`
+- **Testing**: `docs/testing/overview.md`
+- **CI/CD**: `docs/CI_PIPELINE_SUMMARY.md`
+- **GitHub Copilot**: `.github/copilot-instructions.md`
+
+## Resources
+
+- Grafana Plugin SDK: https://grafana.com/docs/grafana/latest/developers/plugins/
+- OWASP Top 10: https://owasp.org/www-project-top-ten/
+- Grafana Security: https://grafana.com/docs/grafana/latest/setup-grafana/configure-security/
