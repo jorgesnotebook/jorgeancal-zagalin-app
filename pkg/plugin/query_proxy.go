@@ -239,6 +239,19 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Validate datasource is in allowlist
+	if !a.isDatasourceAllowed(queryReq.Datasource) {
+		backend.Logger.Warn("Query blocked: datasource not in allowlist",
+			"user", user.UserLogin,
+			"datasource", queryReq.Datasource,
+			"allowedDatasources", a.settings.AllowedDatasources,
+		)
+		sendErrorResponse(w, "Datasource not allowed",
+			fmt.Errorf("datasource '%s' is not in the allowed list", queryReq.Datasource),
+			http.StatusForbidden)
+		return
+	}
+
 	startTime := time.Now()
 
 	backend.Logger.Info("Query proxy request",

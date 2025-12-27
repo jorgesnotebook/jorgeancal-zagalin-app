@@ -15,6 +15,10 @@ type PluginSettings struct {
 
 	// Context settings
 	ContextRefreshMinutes int `json:"contextRefreshMinutes"`
+
+	// Datasource governance
+	AllowedDatasources []string `json:"allowedDatasources"`
+	DefaultDatasource  string   `json:"defaultDatasource"`
 }
 
 // Settings represents the plugin settings
@@ -65,6 +69,21 @@ func (s *Settings) Validate() error {
 	}
 	if s.MonthlyBudgetUSD < 0 {
 		return fmt.Errorf("monthly budget must be >= 0")
+	}
+
+	// Validate datasource allowlist
+	if s.DefaultDatasource != "" && len(s.AllowedDatasources) > 0 {
+		// Ensure default datasource is in the allowed list
+		found := false
+		for _, ds := range s.AllowedDatasources {
+			if ds == s.DefaultDatasource {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("default datasource '%s' must be in allowed datasources list", s.DefaultDatasource)
+		}
 	}
 
 	return nil

@@ -16,8 +16,9 @@ import {
   Spinner,
 } from '@grafana/ui';
 import { getBackendSrv } from '@grafana/runtime';
-import { ZagalinConfig, DEFAULT_CONFIG, PERSONALITY_PRESETS, BASE_SYSTEM_PROMPT } from '../../types/zagalinConfig';
+import { ZagalinConfig, DEFAULT_CONFIG, PERSONALITY_PRESETS } from '../../types/zagalinConfig';
 import { checkZagalinHealth, type HealthStatus } from '../../services/llmHealthService';
+import { DatasourceService, type DatasourceInfo } from '../../services/datasourceService';
 
 export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
   const s = useStyles2(getStyles);
@@ -33,6 +34,14 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
   const [isDirty, setIsDirty] = useState(false);
   const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
   const [checkingHealth, setCheckingHealth] = useState(true);
+  const [datasources, setDatasources] = useState<DatasourceInfo[]>([]);
+  const [loadingDatasources, setLoadingDatasources] = useState(true);
+  const [allowedDatasources, setAllowedDatasources] = useState<string[]>(
+    plugin.meta.jsonData?.allowedDatasources || []
+  );
+  const [defaultDatasource, setDefaultDatasource] = useState<string>(
+    plugin.meta.jsonData?.defaultDatasource || ''
+  );
 
   // Check health on mount
   useEffect(() => {
@@ -43,16 +52,32 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
         setHealthStatus(status);
       } catch (err) {
         console.error('Failed to check health:', err);
-        // Set a default status if health check fails
+        // Set a default status if health check fails - never show internal errors
         setHealthStatus({
-          llm: { enabled: false, error: 'Health check failed' },
-          vector: { enabled: false },
+          llm: { enabled: false, error: 'Unable to check LLM status' },
+          vector: { enabled: false, error: 'Unable to check vector status' },
         });
       } finally {
         setCheckingHealth(false);
       }
     };
     loadHealth();
+  }, []);
+
+  // Load datasources on mount
+  useEffect(() => {
+    const loadDatasources = async () => {
+      setLoadingDatasources(true);
+      try {
+        const response = await DatasourceService.listDatasources();
+        setDatasources(response.datasources);
+      } catch (err) {
+        console.error('Failed to load datasources:', err);
+      } finally {
+        setLoadingDatasources(false);
+      }
+    };
+    loadDatasources();
   }, []);
 
   const handleSave = async () => {
@@ -62,7 +87,11 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
       await getBackendSrv().post(`/api/plugins/${plugin.meta.id}/settings`, {
         enabled: plugin.meta.enabled,
         pinned: plugin.meta.pinned,
-        jsonData: config,
+        jsonData: {
+          ...config,
+          allowedDatasources,
+          defaultDatasource,
+        },
       });
 
       setSaved(true);
@@ -76,6 +105,31 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
 
   const handleReset = () => {
     setConfig(DEFAULT_CONFIG);
+    setAllowedDatasources([]);
+    setDefaultDatasource('');
+    setIsDirty(true);
+  };
+
+  const handleDatasourceToggle = (uid: string) => {
+    const newAllowed = allowedDatasources.includes(uid)
+      ? allowedDatasources.filter(ds => ds !== uid)
+      : [...allowedDatasources, uid];
+    setAllowedDatasources(newAllowed);
+
+    // If we removed the default datasource, clear it
+    if (!newAllowed.includes(defaultDatasource)) {
+      setDefaultDatasource('');
+    }
+
+    setIsDirty(true);
+  };
+
+  const handleDefaultDatasourceChange = (uid: string) => {
+    setDefaultDatasource(uid);
+    // Ensure default datasource is in allowed list
+    if (!allowedDatasources.includes(uid)) {
+      setAllowedDatasources([...allowedDatasources, uid]);
+    }
     setIsDirty(true);
   };
 
@@ -196,6 +250,77 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
         </div>
       </div>
 
+      {/* Datasource Governance */}
+      <div className={s.section}>
+        <h3 className={s.sectionTitle}>Datasource Governance</h3>
+        <div className={s.sectionContent}>
+          <p className={s.description}>
+            Control which datasources Zagalin can query. Leave empty to allow all datasources.
+          </p>
+
+          {loadingDatasources ? (
+            <div className={s.statusRow}>
+              <Spinner inline /> Loading datasources...
+            </div>
+          ) : (
+            <>
+              <Field
+                label="Allowed Datasources"
+                description="Select which datasources Zagalin can access. If none selected, all datasources are allowed."
+              >
+                <div className={s.datasourceList}>
+                  {datasources.length === 0 ? (
+                    <Alert title="No datasources found" severity="info">
+                      No datasources are configured in your Grafana instance. Add datasources to enable query governance.
+                    </Alert>
+                  ) : (
+                    datasources.map((ds) => (
+                      <div key={ds.uid} className={s.datasourceItem}>
+                        <Switch
+                          value={allowedDatasources.includes(ds.uid)}
+                          onChange={() => handleDatasourceToggle(ds.uid)}
+                        />
+                        <div className={s.datasourceInfo}>
+                          <span className={s.datasourceName}>{ds.name}</span>
+                          <Badge text={ds.type} color="blue" />
+                          {defaultDatasource === ds.uid && (
+                            <Badge text="Default" color="green" icon="star" />
+                          )}
+                        </div>
+                        {allowedDatasources.includes(ds.uid) && (
+                          <Button
+                            size="sm"
+                            variant={defaultDatasource === ds.uid ? 'primary' : 'secondary'}
+                            onClick={() => handleDefaultDatasourceChange(ds.uid)}
+                            disabled={defaultDatasource === ds.uid}
+                          >
+                            {defaultDatasource === ds.uid ? 'Default' : 'Set as Default'}
+                          </Button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </Field>
+
+              {allowedDatasources.length > 0 && (
+                <Alert title="Datasource Allowlist Active" severity="info">
+                  <p>
+                    Zagalin will only be able to query the {allowedDatasources.length} selected datasource(s).
+                    Users will not be able to access data from other datasources through Zagalin.
+                  </p>
+                  {defaultDatasource && (
+                    <p>
+                      The default datasource will be used when no specific datasource is requested.
+                    </p>
+                  )}
+                </Alert>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
       {/* Personality & Behavior */}
       <div className={s.section}>
         <h3 className={s.sectionTitle}>Personality & Behavior</h3>
@@ -213,20 +338,8 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
           </Field>
 
           <Field
-            label="Base System Prompt (Read-Only)"
-            description="Core identity and rules that cannot be changed - ensures consistent behavior"
-          >
-            <TextArea
-              value={BASE_SYSTEM_PROMPT}
-              rows={6}
-              disabled={true}
-              className={s.readOnlyPrompt}
-            />
-          </Field>
-
-          <Field
             label="Custom Instructions"
-            description="Additional instructions to customize Zagalin's behavior (appended to base prompt)"
+            description="Additional instructions to customize Zagalin's behavior"
           >
             <TextArea
               value={config.customInstructions}
@@ -486,6 +599,29 @@ const getStyles = (theme: GrafanaTheme2) => ({
   statusError: css`
     color: ${theme.colors.error.text};
     font-size: ${theme.typography.bodySmall.fontSize};
+  `,
+  datasourceList: css`
+    display: flex;
+    flex-direction: column;
+    gap: ${theme.spacing(1.5)};
+  `,
+  datasourceItem: css`
+    display: flex;
+    align-items: center;
+    gap: ${theme.spacing(2)};
+    padding: ${theme.spacing(1.5)};
+    background: ${theme.colors.background.primary};
+    border-radius: ${theme.shape.radius.default};
+    border: 1px solid ${theme.colors.border.weak};
+  `,
+  datasourceInfo: css`
+    display: flex;
+    align-items: center;
+    gap: ${theme.spacing(1)};
+    flex: 1;
+  `,
+  datasourceName: css`
+    font-weight: ${theme.typography.fontWeightMedium};
   `,
 });
 
