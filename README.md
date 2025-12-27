@@ -3,7 +3,7 @@ Zagalin - AI Assistant for Grafana
 
 **Zagalin** is a context-aware AI assistant that brings the power of Large Language Models (LLMs) directly into your Grafana experience. Chat with your metrics, generate queries, and troubleshoot issues using natural language.
 
-![Zagalin Logo](https://raw.githubusercontent.com/jorgesnotebook/jorgeancal-zagalin-app/main/src/img/logo.png)
+<img src="https://raw.githubusercontent.com/jorgesnotebook/jorgeancal-zagalin-app/main/src/img/logo.png" alt="Zagalin Logo" width="200"/>
 
 ## ✨ Features
 
@@ -213,51 +213,36 @@ Enable or disable specific capabilities:
 
 ## 🔒 Privacy & Security
 
+Zagalin implements multiple layers of security to protect your data and infrastructure:
+
+### Data Privacy
 - **No Data Storage**: Zagalin doesn't store your queries or responses
 - **API Keys**: Managed securely through Grafana's secrets management
 - **Context Optimization**: Only sends relevant context to minimize data exposure
 - **Provider Choice**: Use your own LLM provider for full control
+- **User Isolation**: Conversations are stored per-user with access control
 
-## 🛠️ Development
+### Query Security
+- **Query Validation**: Parser-based validation for PromQL, LogQL, and TraceQL queries
+  - Prevents injection attacks using official parsers
+  - Configurable complexity limits and function allowlists
+  - Comprehensive audit logging of validation events
+- **Datasource Governance**: Allowlist-based datasource access control
+- **Rate Limiting**: Per-user rate limiting to prevent abuse (default: 60 req/min)
+- **User Context**: All queries execute with the user's security context and permissions
+- **OTel Enforcement**: Automatic scope injection for multi-tenant observability
 
-### Prerequisites
-- Node.js 20+
-- Go 1.21+
-- Docker (for local testing)
+### Defense in Depth
+The plugin implements multiple security layers that work together:
+1. User authentication and identity extraction
+2. Per-user rate limiting
+3. Datasource allowlist validation
+4. Query injection prevention and validation
+5. OpenTelemetry scope enforcement
+6. Query execution with user permissions
+7. Comprehensive audit logging
 
-### Local Development
-```bash
-# Clone the repository
-git clone https://github.com/jorgesnotebook/jorgeancal-zagalin-app.git
-cd jorgeancal-zagalin-app
-
-# Install dependencies
-npm install
-
-# Build frontend
-npm run build
-
-# Build backend
-mage -v
-
-# Run in development mode
-npm run dev
-
-# Start Grafana with plugin
-npm run server
-```
-
-### Testing
-```bash
-# Run unit tests
-npm run test
-
-# Run E2E tests
-npm run e2e
-
-# Run linter
-npm run lint
-```
+For detailed security documentation, see [`.claude/CLAUDE.md`](https://github.com/jorgesnotebook/jorgeancal-zagalin-app/blob/main/.claude/CLAUDE.md#security-first-development).
 
 ## 📝 License
 

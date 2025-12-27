@@ -252,10 +252,135 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Query Validation & Injection Prevention
+	if a.queryValidator != nil && a.settings != nil && a.settings.QueryValidation.Enabled {
+		// Detect datasource type (reuse logic from OTel section below)
+		dsTypeStr, err := a.getDatasourceType(req.Context(), req, queryReq.Datasource)
+		if err != nil {
+			backend.Logger.Warn("Failed to detect datasource type for validation",
+				"error", err,
+				"datasource", queryReq.Datasource,
+			)
+			dsTypeStr = "other"
+		}
+
+		var dsType DatasourceType
+		switch dsTypeStr {
+		case "prometheus":
+			dsType = DatasourcePrometheus
+		case "loki":
+			dsType = DatasourceLoki
+		case "tempo":
+			dsType = DatasourceTempo
+		default:
+			dsType = DatasourceOther
+		}
+
+		// Validate and sanitize each query
+		for i := range queryReq.Queries {
+			queryStr := queryReq.Queries[i].Expr
+			if queryStr == "" {
+				queryStr = queryReq.Queries[i].Query
+			}
+			if queryStr == "" {
+				continue // Skip empty queries
+			}
+
+			result := a.queryValidator.ValidateQuery(req.Context(), queryStr, dsType)
+
+			if !result.Valid {
+				// Log validation failure with user context
+				backend.Logger.Warn("Query validation failed",
+					"user", user.UserLogin,
+					"userId", user.UserID,
+					"orgId", user.OrgID,
+					"datasource", queryReq.Datasource,
+					"datasourceType", dsType,
+					"violationType", result.ViolationType,
+					"originalQuery", result.OriginalQuery,
+					"error", result.Error,
+				)
+
+				// Audit log validation failure
+				a.logQueryValidationFailure(user, queryReq.Datasource, result)
+
+				sendErrorResponse(w, "Query validation failed", result.Error, http.StatusBadRequest)
+				return
+			}
+
+			// If query was sanitized, log it and update
+			if result.Sanitized {
+				backend.Logger.Warn("Query sanitized",
+					"user", user.UserLogin,
+					"userId", user.UserID,
+					"orgId", user.OrgID,
+					"datasource", queryReq.Datasource,
+					"datasourceType", dsType,
+					"originalQuery", result.OriginalQuery,
+					"sanitizedQuery", result.SanitizedQuery,
+				)
+
+				// Audit log sanitization
+				a.logQuerySanitization(user, queryReq.Datasource, result)
+
+				// Update query with sanitized version
+				if queryReq.Queries[i].Expr != "" {
+					queryReq.Queries[i].Expr = result.SanitizedQuery
+				} else {
+					queryReq.Queries[i].Query = result.SanitizedQuery
+				}
+			}
+
+			// Log LLM warnings if present (advisory mode)
+			if len(result.LLMWarnings) > 0 {
+				backend.Logger.Info("LLM validation warnings",
+					"user", user.UserLogin,
+					"datasource", queryReq.Datasource,
+					"warnings", result.LLMWarnings,
+					"suggestions", result.LLMSuggestions,
+				)
+			}
+		}
+
+		backend.Logger.Debug("Query validation passed",
+			"datasource", queryReq.Datasource,
+			"datasourceType", dsType,
+			"queryCount", len(queryReq.Queries),
+		)
+	}
+
 	// OTel Scope Enforcement
 	if a.settings != nil && a.settings.OtelEnforcement.Enabled {
+		// Detect datasource type
+		dsTypeStr, err := a.getDatasourceType(req.Context(), req, queryReq.Datasource)
+		if err != nil {
+			backend.Logger.Warn("Failed to detect datasource type, using validation-only mode",
+				"error", err,
+				"datasource", queryReq.Datasource,
+			)
+			dsTypeStr = "other"
+		}
+
+		// Map to DatasourceType enum
+		var dsType DatasourceType
+		switch dsTypeStr {
+		case "prometheus":
+			dsType = DatasourcePrometheus
+		case "loki":
+			dsType = DatasourceLoki
+		case "tempo":
+			dsType = DatasourceTempo
+		default:
+			dsType = DatasourceOther
+		}
+
+		backend.Logger.Debug("Datasource type detected",
+			"datasource", queryReq.Datasource,
+			"type", dsType,
+		)
+
 		// Extract current scope from query
-		scope := a.extractOtelScopeFromQuery(queryReq)
+		scope := a.extractOtelScopeFromQuery(queryReq, dsType)
 
 		// Apply defaults if needed
 		a.applyOtelScopeDefaults(scope)
@@ -266,16 +391,18 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 				"user", user.UserLogin,
 				"error", err,
 				"scope", scope,
+				"datasourceType", dsType,
 			)
 			sendErrorResponse(w, "Query scope validation failed", err, http.StatusBadRequest)
 			return
 		}
 
-		// Inject scope labels into queries
-		if err := a.injectOtelScope(&queryReq, scope); err != nil {
+		// Inject scope labels into queries (for known datasource types only)
+		if err := a.injectOtelScope(&queryReq, scope, dsType); err != nil {
 			backend.Logger.Error("Failed to inject OTel scope",
 				"error", err,
 				"user", user.UserLogin,
+				"datasourceType", dsType,
 			)
 			sendErrorResponse(w, "Failed to apply query scope", err, http.StatusInternalServerError)
 			return
@@ -327,4 +454,35 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+}
+
+// logQueryValidationFailure logs query validation failures for audit
+func (a *App) logQueryValidationFailure(user *UserIdentity, datasource string, result *QueryValidationResult) {
+	auditLog := map[string]interface{}{
+		"timestamp":     time.Now().UTC().Format(time.RFC3339),
+		"event":         "query_validation_failed",
+		"user":          user.UserLogin,
+		"userId":        user.UserID,
+		"orgId":         user.OrgID,
+		"datasource":    datasource,
+		"violationType": result.ViolationType,
+		"originalQuery": result.OriginalQuery,
+		"error":         result.Error.Error(),
+	}
+	backend.Logger.Info("Query validation failure audit", "audit", auditLog)
+}
+
+// logQuerySanitization logs query sanitization attempts for audit
+func (a *App) logQuerySanitization(user *UserIdentity, datasource string, result *QueryValidationResult) {
+	auditLog := map[string]interface{}{
+		"timestamp":      time.Now().UTC().Format(time.RFC3339),
+		"event":          "query_sanitized",
+		"user":           user.UserLogin,
+		"userId":         user.UserID,
+		"orgId":          user.OrgID,
+		"datasource":     datasource,
+		"originalQuery":  result.OriginalQuery,
+		"sanitizedQuery": result.SanitizedQuery,
+	}
+	backend.Logger.Info("Query sanitization audit", "audit", auditLog)
 }

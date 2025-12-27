@@ -64,6 +64,35 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     plugin.meta.jsonData?.otelEnforcement?.rejectIfNoScope !== false
   );
 
+  // Query Validation state
+  const [queryValidationEnabled, setQueryValidationEnabled] = useState<boolean>(
+    plugin.meta.jsonData?.queryValidation?.enabled || false
+  );
+  const [queryValidationEnablePromQL, setQueryValidationEnablePromQL] = useState<boolean>(
+    plugin.meta.jsonData?.queryValidation?.enablePromqlValidation || false
+  );
+  const [queryValidationEnableLogQL, setQueryValidationEnableLogQL] = useState<boolean>(
+    plugin.meta.jsonData?.queryValidation?.enableLogqlValidation || false
+  );
+  const [queryValidationEnableTraceQL, setQueryValidationEnableTraceQL] = useState<boolean>(
+    plugin.meta.jsonData?.queryValidation?.enableTraceqlValidation || false
+  );
+  const [queryValidationStrictMode, setQueryValidationStrictMode] = useState<boolean>(
+    plugin.meta.jsonData?.queryValidation?.strictMode || false
+  );
+  const [queryValidationMaxComplexity, setQueryValidationMaxComplexity] = useState<number>(
+    plugin.meta.jsonData?.queryValidation?.maxQueryComplexity || 100
+  );
+  const [queryValidationLogAttempts, setQueryValidationLogAttempts] = useState<boolean>(
+    plugin.meta.jsonData?.queryValidation?.logValidationAttempts !== false
+  );
+  const [queryValidationEnableLLM, setQueryValidationEnableLLM] = useState<boolean>(
+    plugin.meta.jsonData?.queryValidation?.enableLlmValidation || false
+  );
+  const [queryValidationLLMMode, setQueryValidationLLMMode] = useState<string>(
+    plugin.meta.jsonData?.queryValidation?.llmValidationMode || 'advisory'
+  );
+
   // Check health on mount
   useEffect(() => {
     const loadHealth = async () => {
@@ -120,6 +149,17 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             defaultEnvironmentName: otelDefaultEnvironment,
             rejectIfNoScope: otelRejectIfNoScope,
           },
+          queryValidation: {
+            enabled: queryValidationEnabled,
+            enablePromqlValidation: queryValidationEnablePromQL,
+            enableLogqlValidation: queryValidationEnableLogQL,
+            enableTraceqlValidation: queryValidationEnableTraceQL,
+            strictMode: queryValidationStrictMode,
+            maxQueryComplexity: queryValidationMaxComplexity,
+            logValidationAttempts: queryValidationLogAttempts,
+            enableLlmValidation: queryValidationEnableLLM,
+            llmValidationMode: queryValidationLLMMode,
+          },
         },
       });
 
@@ -142,6 +182,15 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     setOtelDefaultService('');
     setOtelDefaultEnvironment('');
     setOtelRejectIfNoScope(true);
+    setQueryValidationEnabled(false);
+    setQueryValidationEnablePromQL(false);
+    setQueryValidationEnableLogQL(false);
+    setQueryValidationEnableTraceQL(false);
+    setQueryValidationStrictMode(false);
+    setQueryValidationMaxComplexity(100);
+    setQueryValidationLogAttempts(true);
+    setQueryValidationEnableLLM(false);
+    setQueryValidationLLMMode('advisory');
     setIsDirty(true);
   };
 
@@ -461,6 +510,174 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                   </p>
                   {otelDefaultService && <p>Default service: <strong>{otelDefaultService}</strong></p>}
                   {otelDefaultEnvironment && <p>Default environment: <strong>{otelDefaultEnvironment}</strong></p>}
+                </Alert>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Query Injection Prevention */}
+      <div className={s.section}>
+        <h3 className={s.sectionTitle}>Query Injection Prevention</h3>
+        <div className={s.sectionContent}>
+          <p className={s.description}>
+            Validate and sanitize PromQL, LogQL, and TraceQL queries using official parsers to prevent injection attacks.
+            Hybrid validation combines parser-based syntax checking with optional LLM semantic analysis.
+          </p>
+
+          <Field
+            label="Enable Query Validation"
+            description="Master switch for all query validation. Enable specific query types below."
+          >
+            <Switch
+              value={queryValidationEnabled}
+              onChange={(e) => {
+                setQueryValidationEnabled(e.currentTarget.checked);
+                setIsDirty(true);
+              }}
+            />
+          </Field>
+
+          {queryValidationEnabled && (
+            <>
+              <Alert title="Query Validation Active" severity="info">
+                <p>
+                  Master validation switch is ON. Enable specific query types below. Invalid queries will be rejected or sanitized based on strict mode.
+                </p>
+              </Alert>
+
+              <Field
+                label="Enable PromQL Validation"
+                description="Validate Prometheus queries (PromQL) for syntax errors, complexity, and injection attempts"
+              >
+                <Switch
+                  value={queryValidationEnablePromQL}
+                  onChange={(e) => {
+                    setQueryValidationEnablePromQL(e.currentTarget.checked);
+                    setIsDirty(true);
+                  }}
+                />
+              </Field>
+
+              <Field
+                label="Enable LogQL Validation"
+                description="Validate Loki queries (LogQL) for syntax errors, complexity, and injection attempts"
+              >
+                <Switch
+                  value={queryValidationEnableLogQL}
+                  onChange={(e) => {
+                    setQueryValidationEnableLogQL(e.currentTarget.checked);
+                    setIsDirty(true);
+                  }}
+                />
+              </Field>
+
+              <Field
+                label="Enable TraceQL Validation"
+                description="Validate Tempo queries (TraceQL) for syntax errors, complexity, and injection attempts"
+              >
+                <Switch
+                  value={queryValidationEnableTraceQL}
+                  onChange={(e) => {
+                    setQueryValidationEnableTraceQL(e.currentTarget.checked);
+                    setIsDirty(true);
+                  }}
+                />
+              </Field>
+
+              <Field
+                label="Strict Mode"
+                description="Reject invalid queries instead of attempting to sanitize them"
+              >
+                <Switch
+                  value={queryValidationStrictMode}
+                  onChange={(e) => {
+                    setQueryValidationStrictMode(e.currentTarget.checked);
+                    setIsDirty(true);
+                  }}
+                />
+              </Field>
+
+              <Field
+                label="Max Query Complexity"
+                description="Maximum allowed complexity (AST node count). Prevents resource exhaustion attacks."
+              >
+                <Input
+                  type="number"
+                  value={queryValidationMaxComplexity}
+                  onChange={(e) => {
+                    setQueryValidationMaxComplexity(parseInt(e.currentTarget.value, 10) || 100);
+                    setIsDirty(true);
+                  }}
+                  min={10}
+                  max={1000}
+                  width={20}
+                />
+              </Field>
+
+              <Field
+                label="Log Validation Attempts"
+                description="Audit log all validation failures and sanitizations for security monitoring"
+              >
+                <Switch
+                  value={queryValidationLogAttempts}
+                  onChange={(e) => {
+                    setQueryValidationLogAttempts(e.currentTarget.checked);
+                    setIsDirty(true);
+                  }}
+                />
+              </Field>
+
+              <Field
+                label="Enable LLM Semantic Validation"
+                description="Use AI to check for expensive queries, best practices, and semantic issues"
+              >
+                <Switch
+                  value={queryValidationEnableLLM}
+                  onChange={(e) => {
+                    setQueryValidationEnableLLM(e.currentTarget.checked);
+                    setIsDirty(true);
+                  }}
+                />
+              </Field>
+
+              {queryValidationEnableLLM && (
+                <Field
+                  label="LLM Validation Mode"
+                  description="Advisory: warnings only. Strict: can block problematic queries."
+                >
+                  <Combobox
+                    options={[
+                      { label: 'Advisory (warnings only)', value: 'advisory' },
+                      { label: 'Strict (can block queries)', value: 'strict' },
+                    ]}
+                    value={queryValidationLLMMode}
+                    onChange={(option) => {
+                      setQueryValidationLLMMode(option.value as string);
+                      setIsDirty(true);
+                    }}
+                    width={40}
+                  />
+                </Field>
+              )}
+
+              {!queryValidationStrictMode && (
+                <Alert title="Sanitization Mode Active" severity="warning">
+                  <p>
+                    Invalid queries will be sanitized when possible. All sanitization attempts are logged for audit.
+                  </p>
+                  <p>
+                    <strong>Warning:</strong> Sanitization may modify query semantics. Enable strict mode for production environments.
+                  </p>
+                </Alert>
+              )}
+
+              {queryValidationEnableLLM && queryValidationLLMMode === 'strict' && (
+                <Alert title="LLM Strict Mode Active" severity="warning">
+                  <p>
+                    Queries deemed problematic by the LLM (e.g., too expensive, security concerns) will be blocked.
+                  </p>
                 </Alert>
               )}
             </>

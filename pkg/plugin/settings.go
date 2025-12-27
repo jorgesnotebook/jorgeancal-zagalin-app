@@ -22,6 +22,9 @@ type PluginSettings struct {
 
 	// OTel scope enforcement
 	OtelEnforcement OtelEnforcementSettings `json:"otelEnforcement"`
+
+	// Query validation settings
+	QueryValidation QueryValidationSettings `json:"queryValidation"`
 }
 
 // OtelEnforcementSettings configures OpenTelemetry scope enforcement
@@ -32,6 +35,22 @@ type OtelEnforcementSettings struct {
 	DefaultServiceName        string `json:"defaultServiceName"`
 	DefaultEnvironmentName    string `json:"defaultEnvironmentName"`
 	RejectIfNoScope           bool   `json:"rejectIfNoScope"`
+}
+
+// QueryValidationSettings configures query injection prevention
+type QueryValidationSettings struct {
+	Enabled                 bool     `json:"enabled"`                 // Master switch for all validation
+	EnablePromQLValidation  bool     `json:"enablePromqlValidation"`  // Enable PromQL validation
+	EnableLogQLValidation   bool     `json:"enableLogqlValidation"`   // Enable LogQL validation
+	EnableTraceQLValidation bool     `json:"enableTraceqlValidation"` // Enable TraceQL validation
+	StrictMode              bool     `json:"strictMode"`              // true = reject, false = sanitize
+	MaxQueryComplexity      int      `json:"maxQueryComplexity"`      // Max AST nodes
+	AllowedFunctions        []string `json:"allowedFunctions,omitempty"` // Optional function allowlist
+	LogValidationAttempts   bool     `json:"logValidationAttempts"`
+
+	// LLM semantic validation settings
+	EnableLLMValidation bool   `json:"enableLlmValidation"`
+	LLMValidationMode   string `json:"llmValidationMode"` // "advisory" or "strict"
 }
 
 // Settings represents the plugin settings
@@ -80,6 +99,21 @@ func applyDefaults(s *PluginSettings) {
 			// If enabled but no specific requirements, require both
 			s.OtelEnforcement.RequireServiceName = true
 			s.OtelEnforcement.RequireEnvironmentName = true
+		}
+	}
+
+	// Query validation defaults - disabled by default for backwards compatibility
+	if s.QueryValidation.Enabled {
+		if s.QueryValidation.MaxQueryComplexity == 0 {
+			s.QueryValidation.MaxQueryComplexity = 100
+		}
+		// Default to logging validation attempts
+		if !s.QueryValidation.LogValidationAttempts {
+			s.QueryValidation.LogValidationAttempts = true
+		}
+		// Default LLM validation mode to advisory
+		if s.QueryValidation.EnableLLMValidation && s.QueryValidation.LLMValidationMode == "" {
+			s.QueryValidation.LLMValidationMode = "advisory"
 		}
 	}
 }

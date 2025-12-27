@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -25,6 +26,22 @@ type DatasourceListResponse []struct {
 	UID  string `json:"uid"`
 	Name string `json:"name"`
 	Type string `json:"type"`
+}
+
+// datasourceCache caches datasource information to avoid repeated API calls
+type datasourceCache struct {
+	mu          sync.RWMutex
+	datasources map[string]DatasourceInfo // UID -> Info
+	lastRefresh time.Time
+	ttl         time.Duration
+}
+
+// newDatasourceCache creates a new datasource cache with 5-minute TTL
+func newDatasourceCache() *datasourceCache {
+	return &datasourceCache{
+		datasources: make(map[string]DatasourceInfo),
+		ttl:         5 * time.Minute,
+	}
 }
 
 // fetchDatasources fetches all datasources from Grafana
@@ -152,4 +169,47 @@ func (a *App) handleListDatasources(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+}
+
+// getDatasourceType returns the type of a datasource by UID (prometheus, loki, tempo, etc.)
+// Uses caching to avoid repeated API calls
+func (a *App) getDatasourceType(ctx context.Context, req *http.Request, uid string) (string, error) {
+	if a.datasourceCache == nil {
+		return "", fmt.Errorf("datasource cache not initialized")
+	}
+
+	// Check cache first
+	a.datasourceCache.mu.RLock()
+	needsRefresh := time.Since(a.datasourceCache.lastRefresh) > a.datasourceCache.ttl
+	if !needsRefresh {
+		if ds, ok := a.datasourceCache.datasources[uid]; ok {
+			a.datasourceCache.mu.RUnlock()
+			return ds.Type, nil
+		}
+	}
+	a.datasourceCache.mu.RUnlock()
+
+	// Cache miss or expired - fetch datasources
+	datasources, err := a.fetchDatasources(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch datasources: %w", err)
+	}
+
+	// Update cache
+	a.datasourceCache.mu.Lock()
+	a.datasourceCache.datasources = make(map[string]DatasourceInfo)
+	for _, ds := range datasources {
+		a.datasourceCache.datasources[ds.UID] = ds
+	}
+	a.datasourceCache.lastRefresh = time.Now()
+	a.datasourceCache.mu.Unlock()
+
+	// Look up the requested UID
+	a.datasourceCache.mu.RLock()
+	defer a.datasourceCache.mu.RUnlock()
+	if ds, ok := a.datasourceCache.datasources[uid]; ok {
+		return ds.Type, nil
+	}
+
+	return "", fmt.Errorf("datasource not found: %s", uid)
 }
