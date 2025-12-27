@@ -19,6 +19,19 @@ type PluginSettings struct {
 	// Datasource governance
 	AllowedDatasources []string `json:"allowedDatasources"`
 	DefaultDatasource  string   `json:"defaultDatasource"`
+
+	// OTel scope enforcement
+	OtelEnforcement OtelEnforcementSettings `json:"otelEnforcement"`
+}
+
+// OtelEnforcementSettings configures OpenTelemetry scope enforcement
+type OtelEnforcementSettings struct {
+	Enabled                   bool   `json:"enabled"`
+	RequireServiceName        bool   `json:"requireServiceName"`
+	RequireEnvironmentName    bool   `json:"requireEnvironmentName"`
+	DefaultServiceName        string `json:"defaultServiceName"`
+	DefaultEnvironmentName    string `json:"defaultEnvironmentName"`
+	RejectIfNoScope           bool   `json:"rejectIfNoScope"`
 }
 
 // Settings represents the plugin settings
@@ -58,6 +71,16 @@ func applyDefaults(s *PluginSettings) {
 	}
 	if s.ContextRefreshMinutes == 0 {
 		s.ContextRefreshMinutes = 5
+	}
+
+	// OTel enforcement defaults - disabled by default for backwards compatibility
+	// When enabled, both service.name and deployment.environment.name are required
+	if s.OtelEnforcement.Enabled {
+		if !s.OtelEnforcement.RequireServiceName && !s.OtelEnforcement.RequireEnvironmentName {
+			// If enabled but no specific requirements, require both
+			s.OtelEnforcement.RequireServiceName = true
+			s.OtelEnforcement.RequireEnvironmentName = true
+		}
 	}
 }
 

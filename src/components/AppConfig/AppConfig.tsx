@@ -14,6 +14,7 @@ import {
   Combobox,
   Badge,
   Spinner,
+  Input,
 } from '@grafana/ui';
 import { getBackendSrv } from '@grafana/runtime';
 import { ZagalinConfig, DEFAULT_CONFIG, PERSONALITY_PRESETS } from '../../types/zagalinConfig';
@@ -41,6 +42,26 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
   );
   const [defaultDatasource, setDefaultDatasource] = useState<string>(
     plugin.meta.jsonData?.defaultDatasource || ''
+  );
+
+  // OTel enforcement settings
+  const [otelEnabled, setOtelEnabled] = useState<boolean>(
+    plugin.meta.jsonData?.otelEnforcement?.enabled || false
+  );
+  const [otelRequireService, setOtelRequireService] = useState<boolean>(
+    plugin.meta.jsonData?.otelEnforcement?.requireServiceName !== false
+  );
+  const [otelRequireEnvironment, setOtelRequireEnvironment] = useState<boolean>(
+    plugin.meta.jsonData?.otelEnforcement?.requireEnvironmentName !== false
+  );
+  const [otelDefaultService, setOtelDefaultService] = useState<string>(
+    plugin.meta.jsonData?.otelEnforcement?.defaultServiceName || ''
+  );
+  const [otelDefaultEnvironment, setOtelDefaultEnvironment] = useState<string>(
+    plugin.meta.jsonData?.otelEnforcement?.defaultEnvironmentName || ''
+  );
+  const [otelRejectIfNoScope, setOtelRejectIfNoScope] = useState<boolean>(
+    plugin.meta.jsonData?.otelEnforcement?.rejectIfNoScope !== false
   );
 
   // Check health on mount
@@ -91,6 +112,14 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
           ...config,
           allowedDatasources,
           defaultDatasource,
+          otelEnforcement: {
+            enabled: otelEnabled,
+            requireServiceName: otelRequireService,
+            requireEnvironmentName: otelRequireEnvironment,
+            defaultServiceName: otelDefaultService,
+            defaultEnvironmentName: otelDefaultEnvironment,
+            rejectIfNoScope: otelRejectIfNoScope,
+          },
         },
       });
 
@@ -107,6 +136,12 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     setConfig(DEFAULT_CONFIG);
     setAllowedDatasources([]);
     setDefaultDatasource('');
+    setOtelEnabled(false);
+    setOtelRequireService(true);
+    setOtelRequireEnvironment(true);
+    setOtelDefaultService('');
+    setOtelDefaultEnvironment('');
+    setOtelRejectIfNoScope(true);
     setIsDirty(true);
   };
 
@@ -314,6 +349,118 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                       The default datasource will be used when no specific datasource is requested.
                     </p>
                   )}
+                </Alert>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* OTel Scope Governance */}
+      <div className={s.section}>
+        <h3 className={s.sectionTitle}>OpenTelemetry Scope Governance</h3>
+        <div className={s.sectionContent}>
+          <p className={s.description}>
+            Enforce OpenTelemetry attributes on all queries for proper multi-tenant scoping and security.
+          </p>
+
+          <Field
+            label="Enable OTel Scope Enforcement"
+            description="Require service.name and deployment.environment.name labels on all queries"
+          >
+            <Switch
+              value={otelEnabled}
+              onChange={(e) => {
+                setOtelEnabled(e.currentTarget.checked);
+                setIsDirty(true);
+              }}
+            />
+          </Field>
+
+          {otelEnabled && (
+            <>
+              <Alert title="OTel Enforcement Active" severity="info">
+                <p>
+                  All queries will be validated and scoped with OpenTelemetry attributes. Queries without proper scoping will be rejected or have default values applied.
+                </p>
+              </Alert>
+
+              <InlineFieldRow>
+                <InlineField label="Require service.name" labelWidth={30}>
+                  <Switch
+                    value={otelRequireService}
+                    onChange={(e) => {
+                      setOtelRequireService(e.currentTarget.checked);
+                      setIsDirty(true);
+                    }}
+                  />
+                </InlineField>
+                <span className={s.skillDescription}>Mandate service.name label on all queries</span>
+              </InlineFieldRow>
+
+              <InlineFieldRow>
+                <InlineField label="Require deployment.environment.name" labelWidth={30}>
+                  <Switch
+                    value={otelRequireEnvironment}
+                    onChange={(e) => {
+                      setOtelRequireEnvironment(e.currentTarget.checked);
+                      setIsDirty(true);
+                    }}
+                  />
+                </InlineField>
+                <span className={s.skillDescription}>Mandate deployment.environment.name label on all queries</span>
+              </InlineFieldRow>
+
+              <Field
+                label="Default Service Name"
+                description="Fallback service name when not specified in query (leave empty to reject queries without service name)"
+              >
+                <Input
+                  value={otelDefaultService}
+                  onChange={(e) => {
+                    setOtelDefaultService(e.currentTarget.value);
+                    setIsDirty(true);
+                  }}
+                  placeholder="e.g., my-service"
+                  width={50}
+                />
+              </Field>
+
+              <Field
+                label="Default Environment Name"
+                description="Fallback environment when not specified in query (leave empty to reject queries without environment)"
+              >
+                <Input
+                  value={otelDefaultEnvironment}
+                  onChange={(e) => {
+                    setOtelDefaultEnvironment(e.currentTarget.value);
+                    setIsDirty(true);
+                  }}
+                  placeholder="e.g., production, staging, development"
+                  width={50}
+                />
+              </Field>
+
+              <Field
+                label="Reject Queries Without Scope"
+                description="Block queries that lack required attributes (even if defaults are configured). Recommended for strict governance."
+              >
+                <Switch
+                  value={otelRejectIfNoScope}
+                  onChange={(e) => {
+                    setOtelRejectIfNoScope(e.currentTarget.checked);
+                    setIsDirty(true);
+                  }}
+                />
+              </Field>
+
+              {(otelDefaultService || otelDefaultEnvironment) && !otelRejectIfNoScope && (
+                <Alert title="Fallback Mode Active" severity="warning">
+                  <p>
+                    Queries without explicit scope will use default values. Fallback usage is logged for auditing.
+                  </p>
+                  {otelDefaultService && <p>Default service: <strong>{otelDefaultService}</strong></p>}
+                  {otelDefaultEnvironment && <p>Default environment: <strong>{otelDefaultEnvironment}</strong></p>}
                 </Alert>
               )}
             </>

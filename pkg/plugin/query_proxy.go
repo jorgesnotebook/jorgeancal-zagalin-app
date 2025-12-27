@@ -252,6 +252,39 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// OTel Scope Enforcement
+	if a.settings != nil && a.settings.OtelEnforcement.Enabled {
+		// Extract current scope from query
+		scope := a.extractOtelScopeFromQuery(queryReq)
+
+		// Apply defaults if needed
+		a.applyOtelScopeDefaults(scope)
+
+		// Validate scope
+		if err := a.validateOtelScope(scope); err != nil {
+			backend.Logger.Warn("Query blocked: OTel scope validation failed",
+				"user", user.UserLogin,
+				"error", err,
+				"scope", scope,
+			)
+			sendErrorResponse(w, "Query scope validation failed", err, http.StatusBadRequest)
+			return
+		}
+
+		// Inject scope labels into queries
+		if err := a.injectOtelScope(&queryReq, scope); err != nil {
+			backend.Logger.Error("Failed to inject OTel scope",
+				"error", err,
+				"user", user.UserLogin,
+			)
+			sendErrorResponse(w, "Failed to apply query scope", err, http.StatusInternalServerError)
+			return
+		}
+
+		// Log scope usage for audit
+		a.logOtelScopeUsage(user, scope, queryReq.Datasource)
+	}
+
 	startTime := time.Now()
 
 	backend.Logger.Info("Query proxy request",
