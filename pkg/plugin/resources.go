@@ -43,6 +43,7 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/context/refresh", a.handleContextRefresh)
 
 	mux.HandleFunc("/query", a.handleQuery)
+	mux.HandleFunc("/datasources", a.handleListDatasources)
 
 	mux.HandleFunc("/storage/conversations", a.handleGetConversations)
 	mux.HandleFunc("/storage/conversation", a.handleGetConversation)

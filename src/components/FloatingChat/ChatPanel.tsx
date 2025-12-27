@@ -138,7 +138,6 @@ export function ChatPanel() {
     console.log('[ChatPanel] Current conversation before send:', conversation?.id);
     console.log('[ChatPanel] Conversation message count:', conversationMessages.length);
 
-    // eslint-disable-next-line react-hooks/purity
     const userMessage: ConversationMessage = {
       id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       role: 'user',
@@ -362,6 +361,15 @@ export function ChatPanel() {
       <div className={s.container}>
         <div className={s.contextBar}>
         <div className={s.contextInfo}>
+          <Tooltip content={showSidebar ? 'Hide conversation history' : 'Show conversation history'}>
+            <IconButton
+              name={showSidebar ? 'arrow-left' : 'bars'}
+              size="sm"
+              variant="secondary"
+              onClick={() => setShowSidebar(!showSidebar)}
+              aria-label="Toggle history"
+            />
+          </Tooltip>
           {llmReady === null ? (
             <Badge color="blue" text="Checking LLM..." icon="sync" />
           ) : llmReady ? (
@@ -382,15 +390,6 @@ export function ChatPanel() {
           )}
         </div>
         <div className={s.contextActions}>
-          <Tooltip content={showSidebar ? 'Hide conversation history' : 'Show conversation history'}>
-            <IconButton
-              name={showSidebar ? 'angle-left' : 'angle-right'}
-              size="sm"
-              variant="secondary"
-              onClick={() => setShowSidebar(!showSidebar)}
-              aria-label="Toggle history"
-            />
-          </Tooltip>
           <Tooltip content="Start a new conversation">
             <IconButton
               name="plus"
