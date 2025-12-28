@@ -235,9 +235,18 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	// Always proxy through grafana-llm-app (unified backend routing)
+	// Use service account token from settings if available, otherwise rely on plugin context
+	serviceAccountToken := ""
+	if a.settings != nil && a.settings.ServiceAccountToken != "" {
+		serviceAccountToken = a.settings.ServiceAccountToken
+		backend.Logger.Debug("Using service account token from plugin settings")
+	} else {
+		backend.Logger.Debug("No service account token in settings, will try plugin context fallback")
+	}
+
 	llmClient := NewLLMClient(
 		getGrafanaURL(),
-		"", // Service account token from plugin context
+		serviceAccountToken,
 		http.DefaultClient,
 		backend.Logger,
 	)

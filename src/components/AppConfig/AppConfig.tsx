@@ -81,6 +81,9 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
   const [llmApiKey, setLlmApiKey] = useState<string>(
     plugin.meta.secureJsonData?.llmApiKey || ''
   );
+  const [serviceAccountToken, setServiceAccountToken] = useState<string>(
+    plugin.meta.secureJsonData?.serviceAccountToken || ''
+  );
 
   // Query Validation state
   const [queryValidationEnabled, setQueryValidationEnabled] = useState<boolean>(
@@ -185,11 +188,13 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
         },
       };
 
-      // Add secure fields (API key) if provided
+      // Add secure fields (API key, service account token) if provided
+      settings.secureJsonData = {};
       if (llmApiKey) {
-        settings.secureJsonData = {
-          llmApiKey,
-        };
+        settings.secureJsonData.llmApiKey = llmApiKey;
+      }
+      if (serviceAccountToken) {
+        settings.secureJsonData.serviceAccountToken = serviceAccountToken;
       }
 
       await getBackendSrv().post(`/api/plugins/${plugin.meta.id}/settings`, settings);
@@ -212,6 +217,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     setLlmModel('gpt-4o-mini');
     setLlmEndpoint('');
     setLlmApiKey('');
+    setServiceAccountToken('');
     setOtelEnabled(false);
     setOtelRequireService(true);
     setOtelRequireEnvironment(true);
@@ -461,19 +467,54 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
 
           {/* grafana-llm-app Mode Info */}
           {llmBackend === 'grafana-llm-app' && (
-            <Alert title="Using grafana-llm-app Plugin" severity="info">
-              <p>
-                Zagalin will use the grafana-llm-app plugin for LLM functionality. Make sure the plugin is installed and configured with your preferred provider.
-              </p>
-              <p>
-                <strong>Prerequisites:</strong>
-              </p>
-              <ol>
-                <li>Install grafana-llm-app plugin from Grafana catalog</li>
-                <li>Configure it with your LLM provider (Administration → Plugins → LLM App → Configuration)</li>
-                <li>Service account authentication will be provisioned automatically</li>
-              </ol>
-            </Alert>
+            <>
+              <Alert title="Using grafana-llm-app Plugin" severity="info">
+                <p>
+                  Zagalin will use the grafana-llm-app plugin for LLM functionality. Make sure the plugin is installed and configured with your preferred provider.
+                </p>
+                <p>
+                  <strong>Prerequisites:</strong>
+                </p>
+                <ol>
+                  <li>Install grafana-llm-app plugin from Grafana catalog</li>
+                  <li>Configure it with your LLM provider (Administration → Plugins → LLM App → Configuration)</li>
+                  <li>(Optional) Provide a service account token below for backend-to-backend authentication</li>
+                </ol>
+              </Alert>
+
+              <Field
+                label="Service Account Token (Optional)"
+                description="Grafana service account token for backend-to-backend authentication with grafana-llm-app. If not provided, Zagalin will try to use plugin context authentication. Stored securely in Grafana's encrypted storage."
+              >
+                <Input
+                  type="password"
+                  value={serviceAccountToken}
+                  onChange={(e) => {
+                    setServiceAccountToken(e.currentTarget.value);
+                    setIsDirty(true);
+                  }}
+                  placeholder="glsa_..."
+                  width={50}
+                />
+              </Field>
+
+              {!serviceAccountToken && (
+                <Alert title="Service Account Token" severity="info">
+                  <p>
+                    While optional, configuring a service account token is <strong>recommended</strong> for production use. It ensures reliable backend-to-backend authentication.
+                  </p>
+                  <p>
+                    <strong>To create a service account token:</strong>
+                  </p>
+                  <ol>
+                    <li>Go to Administration → Service Accounts</li>
+                    <li>Create a new service account (e.g., &ldquo;Zagalin Plugin&rdquo;)</li>
+                    <li>Assign the <code>Admin</code> or <code>Editor</code> role</li>
+                    <li>Generate a token and paste it above</li>
+                  </ol>
+                </Alert>
+              )}
+            </>
           )}
 
           {/* Direct API Configuration - TEMPORARILY DISABLED */}

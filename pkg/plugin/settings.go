@@ -65,7 +65,8 @@ type QueryValidationSettings struct {
 type Settings struct {
 	PluginSettings
 	// Secure settings (from decryptedSecureJSONData)
-	LLMAPIKey string // LLM provider API key (only used when llmBackend = "direct")
+	LLMAPIKey              string // LLM provider API key (only used when llmBackend = "direct")
+	ServiceAccountToken    string // Grafana service account token for backend-to-backend auth with grafana-llm-app
 }
 
 // LoadSettings loads and validates settings from Grafana backend settings
@@ -79,9 +80,12 @@ func LoadSettings(jsonData json.RawMessage, decryptedSecureJSONData map[string]s
 		}
 	}
 
-	// Extract secure settings (LLM API key)
+	// Extract secure settings
 	if apiKey, ok := decryptedSecureJSONData["llmApiKey"]; ok {
 		settings.LLMAPIKey = apiKey
+	}
+	if serviceAccountToken, ok := decryptedSecureJSONData["serviceAccountToken"]; ok {
+		settings.ServiceAccountToken = serviceAccountToken
 	}
 
 	// Apply defaults
