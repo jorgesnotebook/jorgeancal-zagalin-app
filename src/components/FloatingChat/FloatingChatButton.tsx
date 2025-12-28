@@ -180,7 +180,7 @@ export function FloatingChatButton() {
               userSelect: isDragging ? 'none' : 'auto',
             }}
           >
-            <h3>Zagalin</h3>
+            <img src="public/plugins/jorgeancal-zagalin-app/img/logo.png" alt="Zagalin" className={s.headerLogo} />
             <IconButton
               name="times"
               size="lg"
@@ -237,8 +237,8 @@ const getStyles = (theme: GrafanaTheme2) => ({
     }
   `,
   logoButton: css`
-    width: 70px;
-    height: 70px;
+    width: 50px;
+    height: 50px;
     border-radius: 50%;
     background: ${theme.colors.background.primary};
     border: 2px solid ${theme.colors.border.weak};
@@ -248,7 +248,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: ${theme.spacing(1.5)};
+    padding: ${theme.spacing(1)};
 
     &:hover {
       transform: scale(1.05);
@@ -307,19 +307,16 @@ const getStyles = (theme: GrafanaTheme2) => ({
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: ${theme.spacing(2)};
-    border-bottom: 2px solid;
+    padding: 0px 8px;
+    min-height: 40px;
+    border-bottom: 1px solid;
     border-image: ${ZagalinColors.orangeGradient} 1;
     background: linear-gradient(135deg, rgba(242, 204, 12, 0.05) 0%, rgba(255, 152, 48, 0.05) 100%);
-
-    h3 {
-      margin: 0;
-      font-size: ${theme.typography.h4.fontSize};
-      background: ${ZagalinColors.orangeGradient};
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
+  `,
+  headerLogo: css`
+    height: 32px;
+    width: auto;
+    object-fit: contain;
   `,
   chatPanelContent: css`
     flex: 1;

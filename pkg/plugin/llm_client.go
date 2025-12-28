@@ -49,6 +49,7 @@ type LLMStreamRequest struct {
 	MaxTokens   int                `json:"max_tokens"`
 	Tools       []Tool             `json:"tools,omitempty"`
 	ToolChoice  string             `json:"tool_choice,omitempty"`
+	Stream      bool               `json:"stream"` // Enable SSE streaming
 }
 
 // LLMStreamChunk represents a chunk from the SSE stream
@@ -69,6 +70,38 @@ type ToolCallChunk struct {
 	} `json:"function"`
 }
 
+// OpenAI streaming format structures
+type openAIStreamChunk struct {
+	ID      string                 `json:"id"`
+	Object  string                 `json:"object"`
+	Created int64                  `json:"created"`
+	Model   string                 `json:"model"`
+	Choices []openAIStreamChoice   `json:"choices"`
+}
+
+type openAIStreamChoice struct {
+	Index        int                `json:"index"`
+	Delta        openAIDelta        `json:"delta"`
+	FinishReason *string            `json:"finish_reason"`
+}
+
+type openAIDelta struct {
+	Content   string              `json:"content,omitempty"`
+	ToolCalls []openAIToolCall    `json:"tool_calls,omitempty"`
+}
+
+type openAIToolCall struct {
+	Index    int                 `json:"index"`
+	ID       string              `json:"id"`
+	Type     string              `json:"type"`
+	Function openAIFunctionCall  `json:"function"`
+}
+
+type openAIFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
 // StreamChat makes a streaming chat request to grafana-llm-app
 // It uses service account authentication and forwards user context to ensure
 // the LLM call executes with proper permissions
@@ -79,8 +112,8 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Create HTTP request
-	llmURL := fmt.Sprintf("%s/api/plugins/grafana-llm-app/resources/llm/chat", c.grafanaURL)
+	// Create HTTP request (OpenAI-compatible endpoint)
+	llmURL := fmt.Sprintf("%s/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions", c.grafanaURL)
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", llmURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -194,7 +227,10 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 		defer close(chunkChan)
 		defer resp.Body.Close()
 
+		c.logger.Debug("Starting to read SSE stream from grafana-llm-app")
+
 		reader := bufio.NewReader(resp.Body)
+		lineCount := 0
 
 		for {
 			// Check context cancellation
@@ -209,14 +245,19 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 			line, err := reader.ReadString('\n')
 			if err != nil {
 				if err != io.EOF {
-					c.logger.Error("Error reading stream", "error", err)
+					c.logger.Error("Error reading stream", "error", err, "linesRead", lineCount)
 					chunkChan <- LLMStreamChunk{
 						Error: fmt.Sprintf("Stream error: %v", err),
 						Done:  true,
 					}
+				} else {
+					c.logger.Debug("EOF reached", "linesRead", lineCount)
 				}
 				return
 			}
+
+			lineCount++
+			c.logger.Debug("Read SSE line", "lineNumber", lineCount, "line", line)
 
 			// Parse SSE line
 			line = strings.TrimSpace(line)
@@ -237,18 +278,53 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 				return
 			}
 
-			// Parse JSON chunk
-			var chunk LLMStreamChunk
-			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-				c.logger.Warn("Failed to parse SSE chunk", "data", data, "error", err)
+			// Parse OpenAI format chunk
+			var openaiChunk openAIStreamChunk
+			if err := json.Unmarshal([]byte(data), &openaiChunk); err != nil {
+				c.logger.Warn("Failed to parse OpenAI SSE chunk", "data", data, "error", err)
+				c.logger.Debug("Raw SSE data that failed to parse", "rawData", data)
 				continue
 			}
 
-			// Send chunk to channel
-			chunkChan <- chunk
+			// Convert OpenAI format to our format
+			if len(openaiChunk.Choices) == 0 {
+				continue
+			}
 
-			// Check if done
-			if chunk.Done || chunk.Error != "" {
+			choice := openaiChunk.Choices[0]
+
+			// Handle text content
+			if choice.Delta.Content != "" {
+				chunk := LLMStreamChunk{
+					Chunk: choice.Delta.Content,
+				}
+				chunkChan <- chunk
+				c.logger.Debug("Sent text chunk", "content", choice.Delta.Content)
+			}
+
+			// Handle tool calls
+			for _, toolCall := range choice.Delta.ToolCalls {
+				chunk := LLMStreamChunk{
+					ToolCall: &ToolCallChunk{
+						ID:   toolCall.ID,
+						Type: toolCall.Type,
+						Function: struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						}{
+							Name:      toolCall.Function.Name,
+							Arguments: toolCall.Function.Arguments,
+						},
+					},
+				}
+				chunkChan <- chunk
+				c.logger.Debug("Sent tool call chunk", "id", toolCall.ID, "name", toolCall.Function.Name)
+			}
+
+			// Check if stream is finished
+			if choice.FinishReason != nil && *choice.FinishReason != "" {
+				c.logger.Debug("Stream finished", "reason", *choice.FinishReason)
+				chunkChan <- LLMStreamChunk{Done: true}
 				return
 			}
 		}

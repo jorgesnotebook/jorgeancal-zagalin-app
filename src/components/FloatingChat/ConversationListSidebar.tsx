@@ -7,7 +7,6 @@ import {
   Input,
   useStyles2,
   Tooltip,
-  Badge,
   Dropdown,
   Menu,
 } from '@grafana/ui';
@@ -117,9 +116,6 @@ function ConversationItem({
             </div>
           </Tooltip>
           <div className={s.itemActions}>
-            {conversation.messageCount > 0 && (
-              <Badge text={conversation.messageCount.toString()} color="blue" />
-            )}
             <IconButton
               name="star"
               size="sm"

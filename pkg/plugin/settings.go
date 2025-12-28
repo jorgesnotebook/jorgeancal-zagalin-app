@@ -31,7 +31,8 @@ type PluginSettings struct {
 	OtelEnforcement OtelEnforcementSettings `json:"otelEnforcement"`
 
 	// Query validation settings
-	QueryValidation QueryValidationSettings `json:"queryValidation"`
+	QueryValidation     QueryValidationSettings `json:"queryValidation"`
+	ToolCallValidation  bool                    `json:"toolCallValidation"` // Validate tool-generated queries (default: true)
 }
 
 // OtelEnforcementSettings configures OpenTelemetry scope enforcement
@@ -140,6 +141,16 @@ func applyDefaults(s *PluginSettings) {
 		if s.QueryValidation.EnableLLMValidation && s.QueryValidation.LLMValidationMode == "" {
 			s.QueryValidation.LLMValidationMode = "advisory"
 		}
+	}
+
+	// Tool call validation defaults - enabled by default for security
+	// Set to true if not explicitly set to false
+	// Note: In Go, bool zero value is false, so we can't distinguish unset from explicitly false
+	// For now, assume if QueryValidation is enabled, ToolCallValidation should also be enabled
+	if s.QueryValidation.Enabled {
+		// ToolCallValidation inherits from QueryValidation.Enabled by default
+		// This ensures tool-generated queries are validated when validation is enabled
+		s.ToolCallValidation = true
 	}
 }
 
