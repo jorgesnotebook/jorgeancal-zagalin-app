@@ -178,7 +178,7 @@ backend.Logger.Info("Query executed",
 - RxJS for streaming responses
 - Backend proxy with guardrails
 - Function calling support
-- Files: `src/services/queryService.ts`, `src/services/assistantSkills.ts`
+- Files: `src/services/queryService.ts`, `pkg/plugin/assistant_prompts.go (backend)`
 
 ## File Organization
 

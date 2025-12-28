@@ -1,0 +1,258 @@
+package plugin
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+)
+
+// LLMClient handles communication with grafana-llm-app
+type LLMClient struct {
+	httpClient          *http.Client
+	grafanaURL          string
+	serviceAccountToken string // Optional service account token for backend-to-backend auth
+	logger              log.Logger
+}
+
+// NewLLMClient creates a new LLM client
+func NewLLMClient(grafanaURL string, serviceAccountToken string, httpClient *http.Client, logger log.Logger) *LLMClient {
+	if httpClient == nil {
+		httpClient = &http.Client{}
+	}
+	return &LLMClient{
+		httpClient:          httpClient,
+		grafanaURL:          grafanaURL,
+		serviceAccountToken: serviceAccountToken,
+		logger:              logger,
+	}
+}
+
+// AssistantMessage represents a chat message
+type AssistantMessage struct {
+	Role    string `json:"role"`    // "user" | "assistant" | "system"
+	Content string `json:"content"`
+}
+
+// LLMStreamRequest represents a request to the LLM API
+type LLMStreamRequest struct {
+	Model       string             `json:"model"`
+	Messages    []AssistantMessage `json:"messages"`
+	Temperature float64            `json:"temperature"`
+	MaxTokens   int                `json:"max_tokens"`
+	Tools       []Tool             `json:"tools,omitempty"`
+	ToolChoice  string             `json:"tool_choice,omitempty"`
+}
+
+// LLMStreamChunk represents a chunk from the SSE stream
+type LLMStreamChunk struct {
+	Chunk   string `json:"chunk,omitempty"`
+	Done    bool   `json:"done,omitempty"`
+	Error   string `json:"error,omitempty"`
+	ToolCall *ToolCallChunk `json:"tool_call,omitempty"`
+}
+
+// ToolCallChunk represents a tool call in the stream
+type ToolCallChunk struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+// StreamChat makes a streaming chat request to grafana-llm-app
+// It uses service account authentication and forwards user context to ensure
+// the LLM call executes with proper permissions
+func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomingReq *http.Request) (<-chan LLMStreamChunk, error) {
+	// Encode request body
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Create HTTP request
+	llmURL := fmt.Sprintf("%s/api/plugins/grafana-llm-app/resources/llm/chat", c.grafanaURL)
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", llmURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	// Get plugin context for authentication
+	pluginCtx := backend.PluginConfigFromContext(ctx)
+
+	// Try multiple auth methods in order of preference:
+
+	// 1. Use provisioned service account token (most reliable for backend-to-backend)
+	if c.serviceAccountToken != "" && c.serviceAccountToken != "existing-token-via-plugin-context" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.serviceAccountToken)
+		c.logger.Debug("Using provisioned service account token for authentication")
+	} else {
+		// 2. Try to get service account token from plugin context (if available)
+		grafanaConfig := backend.GrafanaConfigFromContext(ctx)
+		if token, err := grafanaConfig.PluginAppClientSecret(); err == nil && token != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+token)
+			c.logger.Debug("Using plugin context service account token for authentication")
+		} else {
+			c.logger.Warn("Service account token not available, trying fallback auth", "error", err)
+		}
+	}
+
+	// Forward user context from plugin context (not from HTTP headers)
+	// This ensures the LLM call runs on behalf of the correct user
+	if pluginCtx.User != nil {
+		// Forward user login
+		if pluginCtx.User.Login != "" {
+			httpReq.Header.Set("X-Grafana-User", pluginCtx.User.Login)
+		}
+
+		// Forward org ID
+		if pluginCtx.OrgID > 0 {
+			httpReq.Header.Set("X-Grafana-Org-Id", fmt.Sprintf("%d", pluginCtx.OrgID))
+		}
+
+		c.logger.Debug("Forwarding user context",
+			"user", pluginCtx.User.Login,
+			"orgId", pluginCtx.OrgID,
+		)
+	}
+
+	// Fallback: try forwarding headers from incoming HTTP request if service account not available
+	// This is less secure but may work in some Grafana configurations
+	if httpReq.Header.Get("Authorization") == "" {
+		if grafanaID := incomingReq.Header.Get("X-Grafana-Id"); grafanaID != "" {
+			httpReq.Header.Set("X-Grafana-Id", grafanaID)
+			c.logger.Debug("Fallback: forwarding X-Grafana-Id JWT")
+		}
+		if cookies := incomingReq.Header.Get("Cookie"); cookies != "" {
+			httpReq.Header.Set("Cookie", cookies)
+			c.logger.Debug("Fallback: forwarding cookies")
+		}
+	}
+
+	// Log authentication status for debugging
+	c.logger.Info("Making LLM request",
+		"url", llmURL,
+		"hasServiceAccountToken", httpReq.Header.Get("Authorization") != "",
+		"hasUserContext", httpReq.Header.Get("X-Grafana-User") != "",
+		"hasOrgId", httpReq.Header.Get("X-Grafana-Org-Id") != "",
+	)
+
+	// Make request
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to make request: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		// Parse the error response to give better guidance
+		var errorResponse map[string]interface{}
+		errorMsg := string(body)
+		if json.Unmarshal(body, &errorResponse) == nil {
+			if msg, ok := errorResponse["message"].(string); ok {
+				errorMsg = msg
+			}
+		}
+
+		c.logger.Error("LLM API request failed",
+			"status", resp.StatusCode,
+			"response", string(body),
+			"url", llmURL,
+			"hadXGrafanaId", incomingReq.Header.Get("X-Grafana-Id") != "",
+			"hadCookie", incomingReq.Header.Get("Cookie") != "",
+			"hadAuthorization", incomingReq.Header.Get("Authorization") != "",
+		)
+
+		// Provide helpful error message based on status
+		if resp.StatusCode == 401 {
+			return nil, fmt.Errorf("authentication failed (401): %s\n\nPossible causes:\n1. grafana-llm-app may not be properly configured with LLM provider credentials\n2. Check Administration → Plugins → LLM App → Configuration\n3. Ensure your LLM provider API key is set", errorMsg)
+		}
+
+		return nil, fmt.Errorf("LLM API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Create channel for streaming chunks
+	chunkChan := make(chan LLMStreamChunk, 10)
+
+	// Start goroutine to read SSE stream
+	go func() {
+		defer close(chunkChan)
+		defer resp.Body.Close()
+
+		reader := bufio.NewReader(resp.Body)
+
+		for {
+			// Check context cancellation
+			select {
+			case <-ctx.Done():
+				c.logger.Debug("Stream context cancelled")
+				return
+			default:
+			}
+
+			// Read line
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if err != io.EOF {
+					c.logger.Error("Error reading stream", "error", err)
+					chunkChan <- LLMStreamChunk{
+						Error: fmt.Sprintf("Stream error: %v", err),
+						Done:  true,
+					}
+				}
+				return
+			}
+
+			// Parse SSE line
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+
+			// SSE format: "data: <json>"
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+
+			data := strings.TrimPrefix(line, "data: ")
+
+			// Check for "[DONE]" marker
+			if data == "[DONE]" {
+				chunkChan <- LLMStreamChunk{Done: true}
+				return
+			}
+
+			// Parse JSON chunk
+			var chunk LLMStreamChunk
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				c.logger.Warn("Failed to parse SSE chunk", "data", data, "error", err)
+				continue
+			}
+
+			// Send chunk to channel
+			chunkChan <- chunk
+
+			// Check if done
+			if chunk.Done || chunk.Error != "" {
+				return
+			}
+		}
+	}()
+
+	return chunkChan, nil
+}

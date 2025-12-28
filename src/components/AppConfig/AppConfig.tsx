@@ -15,6 +15,7 @@ import {
   Badge,
   Spinner,
   Input,
+  Icon,
 } from '@grafana/ui';
 import { getBackendSrv } from '@grafana/runtime';
 import { ZagalinConfig, DEFAULT_CONFIG, PERSONALITY_PRESETS } from '../../types/zagalinConfig';
@@ -62,6 +63,23 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
   );
   const [otelRejectIfNoScope, setOtelRejectIfNoScope] = useState<boolean>(
     plugin.meta.jsonData?.otelEnforcement?.rejectIfNoScope !== false
+  );
+
+  // LLM Backend settings
+  const [llmBackend, setLlmBackend] = useState<string>(
+    plugin.meta.jsonData?.llmBackend || 'grafana-llm-app'
+  );
+  const [llmProvider, setLlmProvider] = useState<string>(
+    plugin.meta.jsonData?.llmProvider || 'openai'
+  );
+  const [llmModel, setLlmModel] = useState<string>(
+    plugin.meta.jsonData?.llmModel || 'gpt-4o-mini'
+  );
+  const [llmEndpoint, setLlmEndpoint] = useState<string>(
+    plugin.meta.jsonData?.llmEndpoint || ''
+  );
+  const [llmApiKey, setLlmApiKey] = useState<string>(
+    plugin.meta.secureJsonData?.llmApiKey || ''
   );
 
   // Query Validation state
@@ -134,13 +152,17 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     try {
       setError(null);
       // Save to Grafana's plugin settings (stored in database)
-      await getBackendSrv().post(`/api/plugins/${plugin.meta.id}/settings`, {
+      const settings: any = {
         enabled: plugin.meta.enabled,
         pinned: plugin.meta.pinned,
         jsonData: {
           ...config,
           allowedDatasources,
           defaultDatasource,
+          llmBackend,
+          llmProvider,
+          llmModel,
+          llmEndpoint,
           otelEnforcement: {
             enabled: otelEnabled,
             requireServiceName: otelRequireService,
@@ -161,7 +183,16 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             llmValidationMode: queryValidationLLMMode,
           },
         },
-      });
+      };
+
+      // Add secure fields (API key) if provided
+      if (llmApiKey) {
+        settings.secureJsonData = {
+          llmApiKey,
+        };
+      }
+
+      await getBackendSrv().post(`/api/plugins/${plugin.meta.id}/settings`, settings);
 
       setSaved(true);
       setIsDirty(false);
@@ -176,6 +207,11 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     setConfig(DEFAULT_CONFIG);
     setAllowedDatasources([]);
     setDefaultDatasource('');
+    setLlmBackend('grafana-llm-app');
+    setLlmProvider('openai');
+    setLlmModel('gpt-4o-mini');
+    setLlmEndpoint('');
+    setLlmApiKey('');
     setOtelEnabled(false);
     setOtelRequireService(true);
     setOtelRequireEnvironment(true);
@@ -330,6 +366,326 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                 </Alert>
               )}
             </>
+          )}
+        </div>
+      </div>
+
+      {/* LLM Backend Configuration */}
+      <div className={s.section}>
+        <h3 className={s.sectionTitle}>LLM Backend Configuration</h3>
+        <div className={s.sectionContent}>
+          <p className={s.description}>
+            Configure how Zagalin connects to LLM services. You can use grafana-llm-app for centralized configuration, bring your own API keys, or disable LLM features entirely.
+          </p>
+
+          {/* Backend Mode Selection with Visual Cards */}
+          <div className={s.llmBackendCards}>
+            {/* grafana-llm-app Card */}
+            <div
+              className={`${s.llmBackendCard} ${llmBackend === 'grafana-llm-app' ? s.llmBackendCardActive : ''}`}
+              onClick={() => {
+                setLlmBackend('grafana-llm-app');
+                setIsDirty(true);
+              }}
+            >
+              <div className={s.llmBackendCardHeader}>
+                <input
+                  type="radio"
+                  checked={llmBackend === 'grafana-llm-app'}
+                  onChange={() => {
+                    setLlmBackend('grafana-llm-app');
+                    setIsDirty(true);
+                  }}
+                  className={s.llmBackendCardRadio}
+                />
+                <Icon name="plug" size="xl" />
+                <h4>grafana-llm-app</h4>
+              </div>
+              <p className={s.llmBackendCardDescription}>
+                Use the grafana-llm-app plugin as a proxy. Centralize LLM configuration across all plugins. Supports OpenAI, Anthropic, Azure, and more.
+              </p>
+            </div>
+
+            {/* Direct API Card - TEMPORARILY DISABLED */}
+            {/* <div
+              className={`${s.llmBackendCard} ${llmBackend === 'direct' ? s.llmBackendCardActive : ''}`}
+              onClick={() => {
+                setLlmBackend('direct');
+                setIsDirty(true);
+              }}
+            >
+              <div className={s.llmBackendCardHeader}>
+                <input
+                  type="radio"
+                  checked={llmBackend === 'direct'}
+                  onChange={() => {
+                    setLlmBackend('direct');
+                    setIsDirty(true);
+                  }}
+                  className={s.llmBackendCardRadio}
+                />
+                <Icon name="key-skeleton-alt" size="xl" />
+                <h4>Direct API</h4>
+              </div>
+              <p className={s.llmBackendCardDescription}>
+                Call LLM providers directly with your own API keys. Full control over provider, model, and endpoint configuration.
+              </p>
+            </div> */}
+
+            {/* Disabled Card */}
+            <div
+              className={`${s.llmBackendCard} ${llmBackend === 'disabled' ? s.llmBackendCardActive : ''}`}
+              onClick={() => {
+                setLlmBackend('disabled');
+                setIsDirty(true);
+              }}
+            >
+              <div className={s.llmBackendCardHeader}>
+                <input
+                  type="radio"
+                  checked={llmBackend === 'disabled'}
+                  onChange={() => {
+                    setLlmBackend('disabled');
+                    setIsDirty(true);
+                  }}
+                  className={s.llmBackendCardRadio}
+                />
+                <Icon name="times" size="xl" />
+                <h4>Disable LLM Features</h4>
+              </div>
+              <p className={s.llmBackendCardDescription}>
+                Turn off all LLM-powered features. Zagalin will not make any LLM API calls.
+              </p>
+            </div>
+          </div>
+
+          {/* grafana-llm-app Mode Info */}
+          {llmBackend === 'grafana-llm-app' && (
+            <Alert title="Using grafana-llm-app Plugin" severity="info">
+              <p>
+                Zagalin will use the grafana-llm-app plugin for LLM functionality. Make sure the plugin is installed and configured with your preferred provider.
+              </p>
+              <p>
+                <strong>Prerequisites:</strong>
+              </p>
+              <ol>
+                <li>Install grafana-llm-app plugin from Grafana catalog</li>
+                <li>Configure it with your LLM provider (Administration → Plugins → LLM App → Configuration)</li>
+                <li>Service account authentication will be provisioned automatically</li>
+              </ol>
+            </Alert>
+          )}
+
+          {/* Direct API Configuration - TEMPORARILY DISABLED */}
+          {/* {llmBackend === 'direct' && (
+            <>
+              <Alert title="Direct API Mode" severity="warning">
+                <p>
+                  You are configuring Zagalin to call LLM providers directly. This requires your own API keys and may incur costs based on usage.
+                </p>
+              </Alert>
+
+              <Field label="Provider" description="Select your LLM provider">
+                <div className={s.providerCards}>
+                  <div
+                    className={`${s.providerCard} ${llmProvider === 'openai' ? s.providerCardActive : ''}`}
+                    onClick={() => {
+                      setLlmProvider('openai');
+                      setLlmModel('gpt-4o-mini');
+                      setIsDirty(true);
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      checked={llmProvider === 'openai'}
+                      onChange={() => {
+                        setLlmProvider('openai');
+                        setLlmModel('gpt-4o-mini');
+                        setIsDirty(true);
+                      }}
+                      className={s.providerCardRadio}
+                    />
+                    <Icon name="cloud" size="lg" />
+                    <span className={s.providerCardLabel}>OpenAI</span>
+                  </div>
+
+                  <div
+                    className={`${s.providerCard} ${llmProvider === 'anthropic' ? s.providerCardActive : ''}`}
+                    onClick={() => {
+                      setLlmProvider('anthropic');
+                      setLlmModel('claude-3-5-sonnet-20241022');
+                      setIsDirty(true);
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      checked={llmProvider === 'anthropic'}
+                      onChange={() => {
+                        setLlmProvider('anthropic');
+                        setLlmModel('claude-3-5-sonnet-20241022');
+                        setIsDirty(true);
+                      }}
+                      className={s.providerCardRadio}
+                    />
+                    <Icon name="cloud" size="lg" />
+                    <span className={s.providerCardLabel}>Anthropic</span>
+                  </div>
+
+                  <div
+                    className={`${s.providerCard} ${llmProvider === 'azure-openai' ? s.providerCardActive : ''}`}
+                    onClick={() => {
+                      setLlmProvider('azure-openai');
+                      setLlmModel('gpt-4o-mini');
+                      setIsDirty(true);
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      checked={llmProvider === 'azure-openai'}
+                      onChange={() => {
+                        setLlmProvider('azure-openai');
+                        setLlmModel('gpt-4o-mini');
+                        setIsDirty(true);
+                      }}
+                      className={s.providerCardRadio}
+                    />
+                    <Icon name="cloud" size="lg" />
+                    <span className={s.providerCardLabel}>Azure OpenAI</span>
+                  </div>
+
+                  <div
+                    className={`${s.providerCard} ${llmProvider === 'custom' ? s.providerCardActive : ''}`}
+                    onClick={() => {
+                      setLlmProvider('custom');
+                      setIsDirty(true);
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      checked={llmProvider === 'custom'}
+                      onChange={() => {
+                        setLlmProvider('custom');
+                        setIsDirty(true);
+                      }}
+                      className={s.providerCardRadio}
+                    />
+                    <Icon name="cog" size="lg" />
+                    <span className={s.providerCardLabel}>Custom API</span>
+                  </div>
+                </div>
+              </Field>
+
+              <Field
+                label="Model"
+                description="Specify the model to use for completions"
+              >
+                <Input
+                  value={llmModel}
+                  onChange={(e) => {
+                    setLlmModel(e.currentTarget.value);
+                    setIsDirty(true);
+                  }}
+                  placeholder={
+                    llmProvider === 'openai' || llmProvider === 'azure-openai'
+                      ? 'gpt-4o-mini'
+                      : llmProvider === 'anthropic'
+                      ? 'claude-3-5-sonnet-20241022'
+                      : 'model-name'
+                  }
+                  width={50}
+                />
+              </Field>
+
+              {(llmProvider === 'custom' || llmProvider === 'azure-openai') && (
+                <Field
+                  label="API Endpoint"
+                  description={
+                    llmProvider === 'azure-openai'
+                      ? 'Your Azure OpenAI endpoint URL (e.g., https://YOUR-RESOURCE.openai.azure.com)'
+                      : 'Custom API endpoint URL compatible with OpenAI API format'
+                  }
+                >
+                  <Input
+                    value={llmEndpoint}
+                    onChange={(e) => {
+                      setLlmEndpoint(e.currentTarget.value);
+                      setIsDirty(true);
+                    }}
+                    placeholder={
+                      llmProvider === 'azure-openai'
+                        ? 'https://YOUR-RESOURCE.openai.azure.com'
+                        : 'https://api.example.com/v1/chat/completions'
+                    }
+                    width={50}
+                  />
+                </Field>
+              )}
+
+              <Field
+                label="API Key"
+                description="Your LLM provider API key. This is stored securely in Grafana's encrypted storage."
+              >
+                <Input
+                  type="password"
+                  value={llmApiKey}
+                  onChange={(e) => {
+                    setLlmApiKey(e.currentTarget.value);
+                    setIsDirty(true);
+                  }}
+                  placeholder={
+                    llmProvider === 'openai' || llmProvider === 'azure-openai'
+                      ? 'sk-...'
+                      : llmProvider === 'anthropic'
+                      ? 'sk-ant-...'
+                      : 'your-api-key'
+                  }
+                  width={50}
+                />
+              </Field>
+
+              {!llmApiKey && (
+                <Alert title="API Key Required" severity="error">
+                  Direct mode requires an API key to be configured. Enter your provider's API key above to enable LLM functionality.
+                </Alert>
+              )}
+
+              {llmProvider === 'openai' && (
+                <Alert title="OpenAI Configuration" severity="info">
+                  <p>Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI Platform</a>.</p>
+                  <p><strong>Recommended models:</strong> gpt-4o, gpt-4o-mini, gpt-4-turbo</p>
+                </Alert>
+              )}
+
+              {llmProvider === 'anthropic' && (
+                <Alert title="Anthropic Configuration" severity="info">
+                  <p>Get your API key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">Anthropic Console</a>.</p>
+                  <p><strong>Recommended models:</strong> claude-3-5-sonnet-20241022, claude-3-opus-20240229</p>
+                </Alert>
+              )}
+
+              {llmProvider === 'azure-openai' && (
+                <Alert title="Azure OpenAI Configuration" severity="info">
+                  <p>You'll need:</p>
+                  <ul>
+                    <li>Your Azure OpenAI resource endpoint</li>
+                    <li>API key from Azure Portal</li>
+                    <li>Deployed model name</li>
+                  </ul>
+                </Alert>
+              )}
+            </>
+          )} */}
+
+          {/* Disabled Mode Info */}
+          {llmBackend === 'disabled' && (
+            <Alert title="LLM Features Disabled" severity="info">
+              <p>
+                All LLM-powered features are disabled. Zagalin will not make any API calls to LLM providers.
+              </p>
+              <p>
+                You can re-enable LLM features at any time by selecting grafana-llm-app or Direct API mode above.
+              </p>
+            </Alert>
           )}
         </div>
       </div>
@@ -986,6 +1342,101 @@ const getStyles = (theme: GrafanaTheme2) => ({
   `,
   datasourceName: css`
     font-weight: ${theme.typography.fontWeightMedium};
+  `,
+  llmBackendCards: css`
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: ${theme.spacing(2)};
+    margin-bottom: ${theme.spacing(3)};
+  `,
+  llmBackendCard: css`
+    padding: ${theme.spacing(2.5)};
+    border: 2px solid ${theme.colors.border.weak};
+    border-radius: ${theme.shape.radius.default};
+    background: ${theme.colors.background.primary};
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+
+    &:hover {
+      border-color: ${theme.colors.primary.border};
+      background: ${theme.colors.background.canvas};
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+  `,
+  llmBackendCardActive: css`
+    border-color: ${theme.colors.primary.main};
+    background: ${theme.colors.background.canvas};
+    box-shadow: 0 0 0 2px ${theme.colors.primary.transparent};
+  `,
+  llmBackendCardHeader: css`
+    display: flex;
+    align-items: center;
+    gap: ${theme.spacing(1.5)};
+    margin-bottom: ${theme.spacing(1.5)};
+
+    h4 {
+      margin: 0;
+      font-size: ${theme.typography.h5.fontSize};
+      font-weight: ${theme.typography.fontWeightMedium};
+      flex: 1;
+    }
+  `,
+  llmBackendCardRadio: css`
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+    accent-color: ${theme.colors.primary.main};
+  `,
+  llmBackendCardDescription: css`
+    margin: 0;
+    color: ${theme.colors.text.secondary};
+    font-size: ${theme.typography.bodySmall.fontSize};
+    line-height: 1.5;
+  `,
+  providerCards: css`
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: ${theme.spacing(1.5)};
+    margin-top: ${theme.spacing(1)};
+  `,
+  providerCard: css`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: ${theme.spacing(1)};
+    padding: ${theme.spacing(2)};
+    border: 2px solid ${theme.colors.border.weak};
+    border-radius: ${theme.shape.radius.default};
+    background: ${theme.colors.background.primary};
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    position: relative;
+
+    &:hover {
+      border-color: ${theme.colors.primary.border};
+      background: ${theme.colors.background.canvas};
+      transform: translateY(-2px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+  `,
+  providerCardActive: css`
+    border-color: ${theme.colors.primary.main};
+    background: ${theme.colors.background.canvas};
+    box-shadow: 0 0 0 2px ${theme.colors.primary.transparent};
+  `,
+  providerCardRadio: css`
+    position: absolute;
+    top: ${theme.spacing(1)};
+    right: ${theme.spacing(1)};
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+    accent-color: ${theme.colors.primary.main};
+  `,
+  providerCardLabel: css`
+    font-weight: ${theme.typography.fontWeightMedium};
+    font-size: ${theme.typography.body.fontSize};
+    text-align: center;
   `,
 });
 

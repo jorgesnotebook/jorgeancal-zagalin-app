@@ -7,8 +7,15 @@ import (
 
 // PluginSettings contains the plugin configuration
 // This is stored in Grafana's jsonData field (non-secure)
-// All LLM provider configuration is handled by grafana-llm-app plugin
 type PluginSettings struct {
+	// LLM Backend selection
+	LLMBackend string `json:"llmBackend"` // "grafana-llm-app" (default) | "direct"
+
+	// Direct LLM provider configuration (only used when llmBackend = "direct")
+	LLMProvider string `json:"llmProvider"` // "openai" | "anthropic" | "azure-openai"
+	LLMModel    string `json:"llmModel"`    // e.g. "gpt-4o-mini", "claude-3-5-sonnet-20241022"
+	LLMEndpoint string `json:"llmEndpoint"` // Optional custom endpoint URL
+
 	// Rate limits
 	MaxRequestsPerMinute int     `json:"maxRequestsPerMinute"`
 	MonthlyBudgetUSD     float64 `json:"monthlyBudgetUSD"`
@@ -56,6 +63,8 @@ type QueryValidationSettings struct {
 // Settings represents the plugin settings
 type Settings struct {
 	PluginSettings
+	// Secure settings (from decryptedSecureJSONData)
+	LLMAPIKey string // LLM provider API key (only used when llmBackend = "direct")
 }
 
 // LoadSettings loads and validates settings from Grafana backend settings
@@ -67,6 +76,11 @@ func LoadSettings(jsonData json.RawMessage, decryptedSecureJSONData map[string]s
 		if err := json.Unmarshal(jsonData, &settings.PluginSettings); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal plugin settings: %w", err)
 		}
+	}
+
+	// Extract secure settings (LLM API key)
+	if apiKey, ok := decryptedSecureJSONData["llmApiKey"]; ok {
+		settings.LLMAPIKey = apiKey
 	}
 
 	// Apply defaults
@@ -82,6 +96,17 @@ func LoadSettings(jsonData json.RawMessage, decryptedSecureJSONData map[string]s
 
 // applyDefaults sets default values for settings
 func applyDefaults(s *PluginSettings) {
+	// LLM backend defaults
+	if s.LLMBackend == "" {
+		s.LLMBackend = "grafana-llm-app" // Default to grafana-llm-app for backwards compatibility
+	}
+	if s.LLMProvider == "" {
+		s.LLMProvider = "openai" // Default provider for direct mode
+	}
+	if s.LLMModel == "" {
+		s.LLMModel = "gpt-4o-mini" // Default model
+	}
+
 	if s.MaxRequestsPerMinute == 0 {
 		s.MaxRequestsPerMinute = 60
 	}

@@ -26,6 +26,7 @@ type App struct {
 	storage         *UserStorage
 	datasourceCache *datasourceCache
 	queryValidator  *QueryValidator
+	runManager      *RunManager
 }
 
 func NewApp(ctx context.Context, appSettings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -41,6 +42,9 @@ func NewApp(ctx context.Context, appSettings backend.AppInstanceSettings) (insta
 	app.contextManager = contextmgr.NewManager()
 	app.datasourceCache = newDatasourceCache()
 	backend.Logger.Debug("Datasource cache initialized")
+
+	app.runManager = NewRunManager(backend.Logger)
+	backend.Logger.Info("Run manager initialized")
 
 	settings, err := LoadSettings(appSettings.JSONData, appSettings.DecryptedSecureJSONData)
 
@@ -88,6 +92,11 @@ func (a *App) Dispose() {
 	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
 		a.guardrails.rateLimiter.Stop()
 		backend.Logger.Info("Guardrails stopped")
+	}
+
+	if a.runManager != nil {
+		a.runManager.Stop()
+		backend.Logger.Info("Run manager stopped")
 	}
 }
 

@@ -214,11 +214,11 @@ Files: `src/globalChatMount.tsx`, `src/components/FloatingChat/`
 ### LLM Streaming
 
 Uses RxJS for streaming responses:
-- Frontend calls grafana-llm-app streaming API
+- Frontend calls backend /llm/chat, backend calls grafana-llm-app streaming API
 - Backend proxies with guardrails
 - Supports function calling
 
-Files: `src/services/queryService.ts`, `src/services/assistantSkills.ts`
+Files: `src/services/queryService.ts`, `pkg/plugin/assistant_prompts.go (backend)`
 
 ## File Organization
 

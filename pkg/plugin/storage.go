@@ -18,7 +18,7 @@ import (
 
 const (
 	MaxConversations           = 50
-	MaxMessagesPerConversation = 100
+	MaxMessagesPerConversation = 1000 // Increased for long conversations with infinite scroll
 )
 
 type StoredMessage struct {
@@ -559,4 +559,77 @@ func (a *App) handleTogglePin(w http.ResponseWriter, req *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 	})
+}
+
+func (a *App) handleExportConversation(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract conversation ID from path: /conversations/{id}/export
+	path := strings.TrimPrefix(req.URL.Path, "/conversations/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	conversationID := parts[0]
+	if err := validateConversationID(conversationID); err != nil {
+		sendErrorResponse(w, "Invalid conversation ID", err, http.StatusBadRequest)
+		return
+	}
+
+	// Get format from query param
+	formatParam := req.URL.Query().Get("format")
+	if formatParam == "" {
+		formatParam = "json"
+	}
+
+	var format ExportFormat
+	switch formatParam {
+	case "json":
+		format = ExportFormatJSON
+	case "markdown", "md":
+		format = ExportFormatMarkdown
+	default:
+		http.Error(w, "invalid format (use json or markdown)", http.StatusBadRequest)
+		return
+	}
+
+	// Get user
+	userLogin, err := getUserLogin(req)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Export conversation
+	data, err := a.storage.ExportConversation(userLogin, conversationID, format)
+	if err != nil {
+		backend.Logger.Error("Export failed", "error", err, "conversationId", conversationID, "user", userLogin)
+		sendErrorResponse(w, "Export failed", err, http.StatusInternalServerError)
+		return
+	}
+
+	// Set headers
+	var contentType, extension string
+	switch format {
+	case ExportFormatJSON:
+		contentType = "application/json"
+		extension = "json"
+	case ExportFormatMarkdown:
+		contentType = "text/markdown"
+		extension = "md"
+	}
+
+	filename := fmt.Sprintf("conversation_%s.%s", conversationID, extension)
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+
+	w.Write(data)
+
+	backend.Logger.Info("Conversation exported", "conversationId", conversationID, "format", format, "user", userLogin)
 }
