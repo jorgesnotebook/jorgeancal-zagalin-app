@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+## [0.0.3] - 2025-12-28
+
+### 🎯 Release Theme: "Service Account Authentication"
+
+**This release adds proper service account token support for reliable backend-to-backend authentication with grafana-llm-app.**
+
+### Added
+
+#### Authentication
+- **Service Account Token Support** - Optional but recommended for production deployments
+  - Backend settings field for storing service account token securely
+  - Frontend configuration UI with clear setup instructions
+  - Automatic fallback to plugin context authentication when token not provided
+  - Enhanced authentication logging for debugging
+  - Files: `pkg/plugin/settings.go`, `pkg/plugin/assistant.go`, `src/components/AppConfig/AppConfig.tsx`
+
+#### Developer Experience
 - Comprehensive documentation system with feature inventory, API reference, and configuration guides
 - Privacy-conscious usage logging with signal type detection (metrics/logs/traces/dashboard/investigation)
 - Frontend orchestration system for structured investigation workflows with planning and step execution
@@ -16,11 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Disabled Direct API configuration option in UI (still available via backend for future use)
 - Enhanced LLM integration with smart routing between dashboard questions and investigations
+- Improved authentication flow with better error messages and debug logging
 
 ### Fixed
 - TypeScript type consistency across ExecutionPlan interfaces
 - Linting errors in frontend orchestration components
-- React effect setState warnings with async wrappers
+- React effect setState warnings with async wrappers and proper ref usage
 
 ## [0.0.2] - 2025-12-27
 
