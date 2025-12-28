@@ -10,6 +10,7 @@ import {
   type ConversationMessage,
   type ConversationMetadata
 } from '../services/conversationStorage';
+import { useConversationStorage } from './useConversationStorage';
 import type { GrafanaContext } from '../services/contextTypes';
 
 export interface UseConversationReturn {
@@ -36,6 +37,7 @@ export interface UseConversationReturn {
 }
 
 export function useConversation(): UseConversationReturn {
+  const storage = useConversationStorage();
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [conversations, setConversations] = useState<ConversationMetadata[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -48,9 +50,9 @@ export function useConversation(): UseConversationReturn {
 
   // Refresh the conversation list
   const refreshConversationList = useCallback(async () => {
-    const list = await ConversationStorage.getConversationList();
+    const list = await ConversationStorage.getConversationList(storage);
     setConversations(list);
-  }, []);
+  }, [storage]);
 
   // Load conversation list on mount and auto-load most recent conversation
   useEffect(() => {
@@ -59,12 +61,12 @@ export function useConversation(): UseConversationReturn {
 
       // If no active conversation, load the most recent one
       if (!conversationRef.current) {
-        const list = await ConversationStorage.getConversationList();
+        const list = await ConversationStorage.getConversationList(storage);
         if (list.length > 0) {
           // Load the most recent conversation (first in the sorted list)
           const mostRecent = list[0];
           console.log('[useConversation] Auto-loading most recent conversation:', mostRecent.id);
-          const conv = await ConversationStorage.getConversation(mostRecent.id);
+          const conv = await ConversationStorage.getConversation(storage, mostRecent.id);
           if (conv) {
             setConversation(conv);
             conversationRef.current = conv;
@@ -74,7 +76,7 @@ export function useConversation(): UseConversationReturn {
     };
 
     initConversations();
-  }, [refreshConversationList]);
+  }, [refreshConversationList, storage]);
 
   /**
    * Create a new conversation
@@ -88,12 +90,12 @@ export function useConversation(): UseConversationReturn {
       timeRange: grafanaContext.timeRange
     } : undefined;
 
-    const newConv = await ConversationStorage.createConversation(context);
+    const newConv = await ConversationStorage.createConversation(storage, context);
     setConversation(newConv);
     conversationRef.current = newConv; // Update ref immediately
-    await ConversationStorage.saveConversation(newConv);
+    await ConversationStorage.saveConversation(storage, newConv);
     await refreshConversationList();
-  }, [refreshConversationList]);
+  }, [refreshConversationList, storage]);
 
   /**
    * Load an existing conversation
@@ -101,7 +103,7 @@ export function useConversation(): UseConversationReturn {
   const loadConversation = useCallback(async (id: string) => {
     setIsLoading(true);
     try {
-      const conv = await ConversationStorage.getConversation(id);
+      const conv = await ConversationStorage.getConversation(storage, id);
       if (conv) {
         setConversation(conv);
         conversationRef.current = conv; // Update ref too
@@ -113,7 +115,7 @@ export function useConversation(): UseConversationReturn {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [storage]);
 
   /**
    * Add a message to the current conversation
@@ -136,7 +138,7 @@ export function useConversation(): UseConversationReturn {
         timeRange: grafanaContext.timeRange
       } : undefined;
 
-      const newConv = await ConversationStorage.createConversation(context);
+      const newConv = await ConversationStorage.createConversation(storage, context);
       const updatedConv = {
         ...newConv,
         messages: [message]
@@ -144,7 +146,7 @@ export function useConversation(): UseConversationReturn {
       console.log('[useConversation] Created new conversation:', updatedConv.id);
       setConversation(updatedConv);
       conversationRef.current = updatedConv; // Update ref immediately
-      await ConversationStorage.saveConversation(updatedConv);
+      await ConversationStorage.saveConversation(storage, updatedConv);
       await refreshConversationList();
       console.log('[useConversation] New conversation saved');
       return;
@@ -167,9 +169,9 @@ export function useConversation(): UseConversationReturn {
 
     setConversation(updated);
     conversationRef.current = updated; // Update ref immediately
-    await ConversationStorage.saveConversation(updated);
+    await ConversationStorage.saveConversation(storage, updated);
     await refreshConversationList();
-  }, [refreshConversationList]);
+  }, [refreshConversationList, storage]);
 
   /**
    * Delete a conversation
@@ -177,7 +179,7 @@ export function useConversation(): UseConversationReturn {
   const deleteConversation = useCallback(async (id: string) => {
     console.log('[useConversation] Deleting conversation:', id);
     try {
-      await ConversationStorage.deleteConversation(id);
+      await ConversationStorage.deleteConversation(storage, id);
 
       if (conversation?.id === id) {
         setConversation(null);
@@ -190,7 +192,7 @@ export function useConversation(): UseConversationReturn {
       console.error('[useConversation] Failed to delete conversation:', error);
       throw error;
     }
-  }, [conversation, refreshConversationList]);
+  }, [conversation, refreshConversationList, storage]);
 
   /**
    * Delete all conversations
@@ -198,7 +200,7 @@ export function useConversation(): UseConversationReturn {
   const deleteAll = useCallback(async () => {
     console.log('[useConversation] Deleting all conversations');
     try {
-      await ConversationStorage.clearAll();
+      await ConversationStorage.clearAll(storage);
       setConversation(null);
       conversationRef.current = null; // Clear the ref too
       await refreshConversationList();
@@ -207,7 +209,7 @@ export function useConversation(): UseConversationReturn {
       console.error('[useConversation] Failed to delete all conversations:', error);
       throw error;
     }
-  }, [refreshConversationList]);
+  }, [refreshConversationList, storage]);
 
   /**
    * Update conversation title
@@ -227,7 +229,7 @@ export function useConversation(): UseConversationReturn {
       return;
     }
 
-    await ConversationStorage.updateTitle(id, sanitizedTitle);
+    await ConversationStorage.updateTitle(storage, id, sanitizedTitle);
 
     if (conversation?.id === id) {
       setConversation({
@@ -237,13 +239,13 @@ export function useConversation(): UseConversationReturn {
     }
 
     await refreshConversationList();
-  }, [conversation, refreshConversationList]);
+  }, [conversation, refreshConversationList, storage]);
 
   /**
    * Toggle pin status
    */
   const togglePin = useCallback(async (id: string) => {
-    await ConversationStorage.togglePin(id);
+    await ConversationStorage.togglePin(storage, id);
 
     if (conversation?.id === id) {
       setConversation({
@@ -253,7 +255,7 @@ export function useConversation(): UseConversationReturn {
     }
 
     await refreshConversationList();
-  }, [conversation, refreshConversationList]);
+  }, [conversation, refreshConversationList, storage]);
 
   /**
    * Clear the current conversation (start fresh)

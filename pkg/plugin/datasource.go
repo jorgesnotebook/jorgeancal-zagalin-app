@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
@@ -46,10 +45,11 @@ func newDatasourceCache() *datasourceCache {
 
 // fetchDatasources fetches all datasources from Grafana
 func (a *App) fetchDatasources(ctx context.Context, req *http.Request) ([]DatasourceInfo, error) {
-	// Get Grafana URL from environment or use localhost
-	grafanaURL := os.Getenv("GF_URL")
-	if grafanaURL == "" {
-		grafanaURL = "http://localhost:3000"
+	// Get Grafana URL from context
+	cfg := backend.GrafanaConfigFromContext(ctx)
+	grafanaURL, err := cfg.AppURL()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Grafana URL: %w", err)
 	}
 
 	datasourcesURL := fmt.Sprintf("%s/api/datasources", grafanaURL)

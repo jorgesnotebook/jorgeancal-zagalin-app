@@ -8,7 +8,6 @@ import (
 	"hash/fnv"
 	"io"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -142,10 +141,11 @@ func (a *App) executeQueries(ctx context.Context, incomingReq *http.Request, que
 		return nil, fmt.Errorf("failed to marshal query request: %w", err)
 	}
 
-	// Get Grafana URL from environment or use localhost
-	grafanaURL := os.Getenv("GF_URL")
-	if grafanaURL == "" {
-		grafanaURL = "http://localhost:3000"
+	// Get Grafana URL from context
+	cfg := backend.GrafanaConfigFromContext(ctx)
+	grafanaURL, err := cfg.AppURL()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Grafana URL: %w", err)
 	}
 
 	queryURL := fmt.Sprintf("%s/api/ds/query", grafanaURL)
