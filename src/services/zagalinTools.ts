@@ -200,6 +200,25 @@ export async function executeToolCall(toolCall: ToolCall): Promise<any> {
     return { error: 'Invalid tool arguments' };
   }
 
+  // Check for backend validation errors
+  if (args._validation_error) {
+    console.error('[zagalinTools] Validation failed:', {
+      tool: toolCall.function.name,
+      error: args._validation_error,
+      type: args._validation_type,
+    });
+
+    return {
+      error: `Query validation failed: ${args._validation_error}`,
+      validationType: args._validation_type,
+    };
+  }
+
+  // Use sanitized query if provided
+  if (args._sanitized_query) {
+    console.info('[zagalinTools] Using sanitized query:', args._sanitized_query);
+  }
+
   switch (toolCall.function.name) {
     case 'navigate_to_dashboard':
       return navigateToDashboard(args.dashboardUid, args.panelId);
@@ -252,6 +271,15 @@ function navigateToDashboard(uid: string, panelId?: number): any {
 }
 
 function createPromQLQuery(params: any): any {
+  // Use sanitized query if backend provided it
+  if (params._sanitized_query) {
+    return {
+      query: params._sanitized_query,
+      description: 'PromQL query (sanitized)',
+      sanitized: true,
+    };
+  }
+
   const { metric, filters, aggregation, timeRange } = params;
 
   let query = metric;
@@ -277,6 +305,15 @@ function createPromQLQuery(params: any): any {
 }
 
 function createLogQLQuery(params: any): any {
+  // Use sanitized query if backend provided it
+  if (params._sanitized_query) {
+    return {
+      query: params._sanitized_query,
+      description: 'LogQL query (sanitized)',
+      sanitized: true,
+    };
+  }
+
   const { logStream, filter, parser } = params;
 
   let query = logStream;

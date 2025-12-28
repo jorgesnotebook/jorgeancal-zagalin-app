@@ -31,7 +31,8 @@ type PluginSettings struct {
 	OtelEnforcement OtelEnforcementSettings `json:"otelEnforcement"`
 
 	// Query validation settings
-	QueryValidation QueryValidationSettings `json:"queryValidation"`
+	QueryValidation     QueryValidationSettings `json:"queryValidation"`
+	ToolCallValidation  bool                    `json:"toolCallValidation"` // Validate tool-generated queries (default: true)
 }
 
 // OtelEnforcementSettings configures OpenTelemetry scope enforcement
@@ -64,7 +65,8 @@ type QueryValidationSettings struct {
 type Settings struct {
 	PluginSettings
 	// Secure settings (from decryptedSecureJSONData)
-	LLMAPIKey string // LLM provider API key (only used when llmBackend = "direct")
+	LLMAPIKey              string // LLM provider API key (only used when llmBackend = "direct")
+	ServiceAccountToken    string // Grafana service account token for backend-to-backend auth with grafana-llm-app
 }
 
 // LoadSettings loads and validates settings from Grafana backend settings
@@ -78,9 +80,12 @@ func LoadSettings(jsonData json.RawMessage, decryptedSecureJSONData map[string]s
 		}
 	}
 
-	// Extract secure settings (LLM API key)
+	// Extract secure settings
 	if apiKey, ok := decryptedSecureJSONData["llmApiKey"]; ok {
 		settings.LLMAPIKey = apiKey
+	}
+	if serviceAccountToken, ok := decryptedSecureJSONData["serviceAccountToken"]; ok {
+		settings.ServiceAccountToken = serviceAccountToken
 	}
 
 	// Apply defaults
@@ -140,6 +145,16 @@ func applyDefaults(s *PluginSettings) {
 		if s.QueryValidation.EnableLLMValidation && s.QueryValidation.LLMValidationMode == "" {
 			s.QueryValidation.LLMValidationMode = "advisory"
 		}
+	}
+
+	// Tool call validation defaults - enabled by default for security
+	// Set to true if not explicitly set to false
+	// Note: In Go, bool zero value is false, so we can't distinguish unset from explicitly false
+	// For now, assume if QueryValidation is enabled, ToolCallValidation should also be enabled
+	if s.QueryValidation.Enabled {
+		// ToolCallValidation inherits from QueryValidation.Enabled by default
+		// This ensures tool-generated queries are validated when validation is enabled
+		s.ToolCallValidation = true
 	}
 }
 

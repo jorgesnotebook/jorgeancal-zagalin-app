@@ -80,74 +80,25 @@ export interface ToolCallChunk {
 }
 
 /**
- * Get the LLM backend mode from plugin configuration
- */
-async function getLLMBackendMode(): Promise<string> {
-  try {
-    const response = await fetch('/api/plugins/jorgeancal-zagalin-app/resources/settings');
-    if (!response.ok) {
-      console.warn('Failed to fetch plugin settings, defaulting to grafana-llm-app mode');
-      return 'grafana-llm-app';
-    }
-    const settings = await response.json();
-    return settings?.jsonData?.llmBackend || 'grafana-llm-app';
-  } catch (error) {
-    console.warn('Error fetching plugin settings:', error);
-    return 'grafana-llm-app'; // Safe fallback
-  }
-}
-
-/**
  * Stream chat with the assistant
  *
- * Routing logic:
- * - grafana-llm-app mode: Call grafana-llm-app directly from frontend (as per their docs)
- * - direct mode: Call backend which then calls OpenAI/Anthropic/etc
- * - disabled mode: Return error
+ * All requests route through the backend for validation and security.
  *
  * @param request The assistant request
  * @returns Observable stream of response chunks
  */
 export function streamAssistantChat(request: AssistantRequest): Observable<StreamChunk> {
   return new Observable<StreamChunk>((subscriber) => {
-    // First, determine which backend mode we're using
-    getLLMBackendMode().then((backendMode) => {
-      if (backendMode === 'disabled') {
-        subscriber.error(new Error('LLM features are disabled in plugin configuration'));
-        return;
-      }
+    // ALWAYS call backend (unified routing for validation)
+    const url = '/api/plugins/jorgeancal-zagalin-app/resources/llm/chat';
 
-      let url: string;
-      let backendRequest: any;
-
-      if (backendMode === 'grafana-llm-app') {
-        // Call grafana-llm-app directly (as per grafana-llm-app documentation)
-        url = '/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions';
-
-        // Build OpenAI-compatible request
-        const messages = [...request.history];
-        if (request.enrichedMessage || request.message) {
-          messages.push({ role: 'user', content: request.enrichedMessage || request.message });
-        }
-
-        backendRequest = {
-          model: 'gpt-4o-mini', // Will use model configured in grafana-llm-app
-          messages: messages,
-          stream: true,
-          temperature: 0.7,
-          max_tokens: 2000,
-        };
-      } else {
-        // Direct mode: Call backend which handles OpenAI/Anthropic/etc
-        url = '/api/plugins/jorgeancal-zagalin-app/resources/llm/chat';
-
-        backendRequest = {
-          message: request.message,
-          history: request.history,
-          context: request.context,
-          skillHint: request.skillHint,
-        };
-      }
+    const backendRequest = {
+      message: request.message,
+      history: request.history,
+      context: request.context,
+      skillHint: request.skillHint,
+      enrichedMessage: request.enrichedMessage,
+    };
 
       // Create fetch request for SSE
       fetch(url, {
@@ -201,33 +152,16 @@ export function streamAssistantChat(request: AssistantRequest): Observable<Strea
                 }
 
                 try {
-                  if (backendMode === 'grafana-llm-app') {
-                    // Parse OpenAI format from grafana-llm-app
-                    const openaiChunk = JSON.parse(data);
-                    const delta = openaiChunk.choices?.[0]?.delta?.content;
+                  // Parse backend format
+                  const chunk = JSON.parse(data) as StreamChunk;
 
-                    if (delta) {
-                      subscriber.next({ chunk: delta });
-                    }
+                  // Emit chunk
+                  subscriber.next(chunk);
 
-                    // Check if done
-                    if (openaiChunk.choices?.[0]?.finish_reason) {
-                      subscriber.next({ done: true });
-                      subscriber.complete();
-                      return;
-                    }
-                  } else {
-                    // Parse backend format (direct mode)
-                    const chunk = JSON.parse(data) as StreamChunk;
-
-                    // Emit chunk
-                    subscriber.next(chunk);
-
-                    // Check if done
-                    if (chunk.done || chunk.error) {
-                      subscriber.complete();
-                      return;
-                    }
+                  // Check if done
+                  if (chunk.done || chunk.error) {
+                    subscriber.complete();
+                    return;
                   }
                 } catch (parseError) {
                   console.warn('Failed to parse SSE chunk:', data, parseError);
@@ -241,9 +175,6 @@ export function streamAssistantChat(request: AssistantRequest): Observable<Strea
         .catch((fetchError) => {
           subscriber.error(fetchError);
         });
-    }).catch((error) => {
-      subscriber.error(error);
-    });
 
     // Cleanup function
     return () => {

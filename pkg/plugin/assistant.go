@@ -231,44 +231,30 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		MaxTokens:   2000,   // Default max tokens
 		Tools:       GetTools(true), // Function calling enabled by default
 		ToolChoice:  "auto",
+		Stream:      true, // Enable SSE streaming
 	}
 
-	// Create LLM client based on settings
-	var chunkChan <-chan LLMStreamChunk
-
-	// Check if LLM features are disabled
-	if a.settings.LLMBackend == "disabled" {
-		backend.Logger.Info("LLM features disabled", "user", user.UserLogin)
-		sendErrorResponse(rw, "LLM features are disabled", fmt.Errorf("LLM backend is set to disabled mode"), http.StatusServiceUnavailable)
-		return
-	}
-
-	if a.settings.LLMBackend == "direct" {
-		// Direct mode
-		if a.settings.LLMAPIKey == "" {
-			sendErrorResponse(rw, "Direct LLM mode requires an API key", fmt.Errorf("no API key configured"), http.StatusBadRequest)
-			return
-		}
-
-		directClient := NewDirectLLMClient(
-			a.settings.LLMProvider,
-			a.settings.LLMModel,
-			a.settings.LLMEndpoint,
-			a.settings.LLMAPIKey,
-			http.DefaultClient,
-			backend.Logger,
-		)
-
-		chunkChan, err = directClient.StreamChat(ctx, llmReq)
-		if err != nil {
-			backend.Logger.Error("Failed to call direct LLM", "error", err, "user", user.UserLogin)
-			sendErrorResponse(rw, "Failed to call LLM", err, http.StatusInternalServerError)
-			return
-		}
+	// Always proxy through grafana-llm-app (unified backend routing)
+	// Use service account token from settings if available, otherwise rely on plugin context
+	serviceAccountToken := ""
+	if a.settings != nil && a.settings.ServiceAccountToken != "" {
+		serviceAccountToken = a.settings.ServiceAccountToken
+		backend.Logger.Debug("Using service account token from plugin settings")
 	} else {
-		// grafana-llm-app mode (default) - frontend should call grafana-llm-app directly
-		backend.Logger.Warn("grafana-llm-app mode called from backend. Frontend should call grafana-llm-app directly.", "user", user.UserLogin)
-		sendErrorResponse(rw, "grafana-llm-app mode should be called from frontend", fmt.Errorf("use frontend to call grafana-llm-app directly"), http.StatusBadRequest)
+		backend.Logger.Debug("No service account token in settings, will try plugin context fallback")
+	}
+
+	llmClient := NewLLMClient(
+		getGrafanaURL(),
+		serviceAccountToken,
+		http.DefaultClient,
+		backend.Logger,
+	)
+
+	chunkChan, err := llmClient.StreamChat(ctx, llmReq, req)
+	if err != nil {
+		backend.Logger.Error("Failed to call grafana-llm-app", "error", err, "user", user.UserLogin)
+		sendErrorResponse(rw, "Failed to call LLM", err, http.StatusInternalServerError)
 		return
 	}
 
@@ -286,8 +272,8 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		"historyLength", len(assistantReq.History),
 	)
 
-	// Stream response as SSE
-	streamSSEResponse(ctx, rw, chunkChan, skill)
+	// Stream response as SSE with validation
+	a.streamSSEResponseWithValidation(ctx, rw, chunkChan, skill, user)
 }
 
 // streamSSEResponse streams LLM chunks to the client as Server-Sent Events
@@ -342,6 +328,276 @@ func streamSSEResponse(ctx context.Context, rw http.ResponseWriter, chunkChan <-
 			}
 		}
 	}
+}
+
+// streamSSEResponseWithValidation streams LLM chunks while validating tool calls
+func (a *App) streamSSEResponseWithValidation(ctx context.Context, rw http.ResponseWriter, chunkChan <-chan LLMStreamChunk, skill string, user *UserInfo) {
+	// Set SSE headers
+	rw.Header().Set("Content-Type", "text/event-stream")
+	rw.Header().Set("Cache-Control", "no-cache")
+	rw.Header().Set("Connection", "keep-alive")
+	rw.WriteHeader(http.StatusOK)
+
+	flusher, ok := rw.(http.Flusher)
+	if !ok {
+		backend.Logger.Error("ResponseWriter does not support flushing")
+		return
+	}
+
+	// Send initial metadata (optional)
+	if skill != "" {
+		metadataJSON, _ := json.Marshal(map[string]string{"skill": skill})
+		fmt.Fprintf(rw, "data: %s\n\n", string(metadataJSON))
+		flusher.Flush()
+	}
+
+	// Accumulate tool calls (OpenAI streams incrementally)
+	toolCallAccumulator := make(map[string]*ToolCallChunk)
+
+	backend.Logger.Debug("Starting SSE stream with validation")
+
+	// Stream chunks
+	for {
+		select {
+		case <-ctx.Done():
+			backend.Logger.Debug("Client disconnected")
+			return
+
+		case chunk, ok := <-chunkChan:
+			if !ok {
+				// Channel closed - send done event
+				backend.Logger.Debug("LLM channel closed, sending done")
+				fmt.Fprintf(rw, "data: {\"done\":true}\n\n")
+				flusher.Flush()
+				return
+			}
+
+			backend.Logger.Debug("Received chunk from LLM", "hasToolCall", chunk.ToolCall != nil, "hasChunk", chunk.Chunk != "", "hasError", chunk.Error != "", "done", chunk.Done)
+
+			// Handle tool calls
+			if chunk.ToolCall != nil {
+				// Accumulate incremental JSON
+				if existing, exists := toolCallAccumulator[chunk.ToolCall.ID]; exists {
+					existing.Function.Arguments += chunk.ToolCall.Function.Arguments
+				} else {
+					toolCallAccumulator[chunk.ToolCall.ID] = chunk.ToolCall
+				}
+
+				// Check if JSON is complete
+				accumulated := toolCallAccumulator[chunk.ToolCall.ID]
+				if isCompleteJSON(accumulated.Function.Arguments) {
+					// VALIDATE
+					validatedChunk := a.validateToolCall(ctx, accumulated, user)
+
+					// Emit to frontend
+					chunkJSON, err := json.Marshal(validatedChunk)
+					if err != nil {
+						backend.Logger.Error("Failed to marshal validated chunk", "error", err)
+						continue
+					}
+
+					fmt.Fprintf(rw, "data: %s\n\n", string(chunkJSON))
+					flusher.Flush()
+
+					delete(toolCallAccumulator, chunk.ToolCall.ID)
+				}
+				continue
+			}
+
+			// Regular text chunk - pass through
+			chunkJSON, err := json.Marshal(chunk)
+			if err != nil {
+				backend.Logger.Error("Failed to marshal chunk", "error", err)
+				continue
+			}
+
+			backend.Logger.Debug("Sending chunk to client", "chunkSize", len(chunkJSON))
+			fmt.Fprintf(rw, "data: %s\n\n", string(chunkJSON))
+			flusher.Flush()
+
+			// Check if done or error
+			if chunk.Done || chunk.Error != "" {
+				return
+			}
+		}
+	}
+}
+
+// isCompleteJSON checks if a JSON string is complete (balanced braces)
+func isCompleteJSON(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) == 0 || s[0] != '{' {
+		return false
+	}
+	braceCount := 0
+	for _, ch := range s {
+		if ch == '{' {
+			braceCount++
+		} else if ch == '}' {
+			braceCount--
+		}
+	}
+	return braceCount == 0
+}
+
+// validateToolCall validates tool arguments and injects validation results
+func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, user *UserInfo) LLMStreamChunk {
+	var args map[string]interface{}
+	if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+		return LLMStreamChunk{
+			Error: "Invalid tool arguments: " + err.Error(),
+		}
+	}
+
+	// Check if tool call validation is enabled
+	if a.settings != nil && !a.settings.ToolCallValidation {
+		// Validation disabled, pass through
+		return LLMStreamChunk{
+			ToolCall: toolCall,
+		}
+	}
+
+	// Validate PromQL
+	if toolCall.Function.Name == "create_promql_query" {
+		query := extractPromQLFromToolArgs(args)
+		if query != "" {
+			result := a.queryValidator.ValidateQuery(ctx, query, DatasourcePrometheus)
+
+			if !result.Valid {
+				// Inject error
+				args["_validation_error"] = result.Error.Error()
+				args["_validation_type"] = result.ViolationType
+
+				backend.Logger.Warn("Tool PromQL validation failed",
+					"user", user.UserLogin,
+					"violation", result.ViolationType,
+					"query", query)
+
+				// Convert UserInfo to UserIdentity for logging
+				userIdentity := &UserIdentity{
+					UserID:    0, // Not available in UserInfo
+					UserLogin: user.UserLogin,
+					UserEmail: "", // Not available in UserInfo
+					OrgID:     user.OrgID,
+					OrgName:   "", // Not available in UserInfo
+				}
+				a.logQueryValidationFailure(userIdentity, "prometheus", result)
+
+			} else if result.Sanitized {
+				// Inject sanitized version
+				args["_sanitized_query"] = result.SanitizedQuery
+
+				backend.Logger.Info("Tool PromQL sanitized",
+					"user", user.UserLogin,
+					"original", query,
+					"sanitized", result.SanitizedQuery)
+			}
+
+			// Update arguments with validation results
+			modifiedArgs, _ := json.Marshal(args)
+			toolCall.Function.Arguments = string(modifiedArgs)
+		}
+	}
+
+	// Validate LogQL
+	if toolCall.Function.Name == "create_logql_query" {
+		query := extractLogQLFromToolArgs(args)
+		if query != "" {
+			result := a.queryValidator.ValidateQuery(ctx, query, DatasourceLoki)
+
+			if !result.Valid {
+				// Inject error
+				args["_validation_error"] = result.Error.Error()
+				args["_validation_type"] = result.ViolationType
+
+				backend.Logger.Warn("Tool LogQL validation failed",
+					"user", user.UserLogin,
+					"violation", result.ViolationType,
+					"query", query)
+
+				// Convert UserInfo to UserIdentity for logging
+			userIdentity := &UserIdentity{
+				UserID:    0, // Not available in UserInfo
+				UserLogin: user.UserLogin,
+				UserEmail: "", // Not available in UserInfo
+				OrgID:     user.OrgID,
+				OrgName:   "", // Not available in UserInfo
+			}
+			a.logQueryValidationFailure(userIdentity, "loki", result)
+
+			} else if result.Sanitized {
+				// Inject sanitized version
+				args["_sanitized_query"] = result.SanitizedQuery
+
+				backend.Logger.Info("Tool LogQL sanitized",
+					"user", user.UserLogin,
+					"original", query,
+					"sanitized", result.SanitizedQuery)
+			}
+
+			// Update arguments with validation results
+			modifiedArgs, _ := json.Marshal(args)
+			toolCall.Function.Arguments = string(modifiedArgs)
+		}
+	}
+
+	return LLMStreamChunk{
+		ToolCall: toolCall,
+	}
+}
+
+// extractPromQLFromToolArgs reconstructs a PromQL query from tool call arguments
+func extractPromQLFromToolArgs(args map[string]interface{}) string {
+	metric, _ := args["metric"].(string)
+	if metric == "" {
+		return ""
+	}
+
+	query := metric
+
+	// Add filters: {label="value"}
+	if filters, ok := args["filters"].(map[string]interface{}); ok {
+		var filterParts []string
+		for k, v := range filters {
+			filterParts = append(filterParts, fmt.Sprintf("%s=\"%v\"", k, v))
+		}
+		query = fmt.Sprintf("%s{%s}", metric, strings.Join(filterParts, ","))
+	}
+
+	// Add aggregation: rate(...), sum(...)
+	if agg, ok := args["aggregation"].(string); ok && agg != "" {
+		if agg == "rate" {
+			timeRange, _ := args["timeRange"].(string)
+			if timeRange == "" {
+				timeRange = "5m"
+			}
+			query = fmt.Sprintf("rate(%s[%s])", query, timeRange)
+		} else {
+			query = fmt.Sprintf("%s(%s)", agg, query)
+		}
+	}
+
+	return query
+}
+
+// extractLogQLFromToolArgs reconstructs a LogQL query from tool call arguments
+func extractLogQLFromToolArgs(args map[string]interface{}) string {
+	logStream, _ := args["logStream"].(string)
+	if logStream == "" {
+		return ""
+	}
+
+	query := logStream
+
+	if filter, ok := args["filter"].(string); ok && filter != "" {
+		query += fmt.Sprintf(" |= \"%s\"", filter)
+	}
+
+	if parser, ok := args["parser"].(string); ok && parser != "" {
+		query += fmt.Sprintf(" | %s", parser)
+	}
+
+	return query
 }
 
 // extractUserFromRequest extracts user info from Grafana request context

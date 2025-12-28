@@ -75,5 +75,15 @@
         "version": "1.0.0"
       }
     ]
+  },
+  "iam": {
+    "permissions": [
+      { "action": "plugins.app:access", "scope": "plugins:id:grafana-llm-app" },
+      { "action": "datasources:read", "scope": "datasources:*" },
+      { "action": "datasources:query", "scope": "datasources:*" },
+      { "action": "dashboards:read", "scope": "dashboards:*" },
+      { "action": "dashboards:write", "scope": "dashboards:*" },
+      { "action": "folders:read", "scope": "folders:*" }
+    ]
   }
 }
