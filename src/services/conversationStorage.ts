@@ -14,6 +14,7 @@ export interface StoredMessage {
   timestamp: Date;
   tokens?: number;
   cost?: number;
+  artifacts?: any[]; // Optional artifacts for messages
 }
 
 export type ConversationMessage = StoredMessage;

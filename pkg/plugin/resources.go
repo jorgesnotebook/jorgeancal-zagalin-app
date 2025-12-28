@@ -36,14 +36,50 @@ func (a *App) handleEcho(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (a *App) handleGetSettings(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Return plugin settings (jsonData only, no secure fields)
+	settings := map[string]interface{}{
+		"jsonData": map[string]interface{}{},
+	}
+
+	if a.settings != nil {
+		settings["jsonData"] = map[string]interface{}{
+			"llmBackend":             a.settings.LLMBackend,
+			"llmProvider":            a.settings.LLMProvider,
+			"llmModel":               a.settings.LLMModel,
+			"maxRequestsPerMinute":   a.settings.MaxRequestsPerMinute,
+			"monthlyBudgetUSD":       a.settings.MonthlyBudgetUSD,
+			"contextRefreshMinutes":  a.settings.ContextRefreshMinutes,
+		}
+	}
+
+	w.Header().Add("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(settings); err != nil {
+		sendErrorResponse(w, "Failed to encode settings response", err, http.StatusInternalServerError)
+		return
+	}
+}
+
 func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/ping", a.handlePing)
 	mux.HandleFunc("/echo", a.handleEcho)
+	mux.HandleFunc("/settings", a.handleGetSettings)
 	mux.HandleFunc("/context/status", a.handleContextStatus)
 	mux.HandleFunc("/context/refresh", a.handleContextRefresh)
 
 	mux.HandleFunc("/query", a.handleQuery)
 	mux.HandleFunc("/datasources", a.handleListDatasources)
+
+	mux.HandleFunc("/llm/chat", a.handleLLMChat)
+
+	// Run-based orchestration endpoints
+	mux.HandleFunc("/runs/start", a.handleStartRun)
+	mux.HandleFunc("/runs/", a.handleRunRoutes)
 
 	mux.HandleFunc("/storage/conversations", a.handleGetConversations)
 	mux.HandleFunc("/storage/conversation", a.handleGetConversation)
@@ -51,6 +87,7 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/storage/conversation/delete", a.handleDeleteConversation)
 	mux.HandleFunc("/storage/conversation/title", a.handleUpdateConversationTitle)
 	mux.HandleFunc("/storage/conversation/pin", a.handleTogglePin)
+	mux.HandleFunc("/conversations/", a.handleExportConversation)
 }
 
 func (a *App) handleContextStatus(w http.ResponseWriter, req *http.Request) {

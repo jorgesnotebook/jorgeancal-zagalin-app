@@ -15,8 +15,19 @@ type OtelScope struct {
 	Source          string // "context", "defaults", or "missing"
 }
 
+// DatasourceType represents supported datasource types
+type DatasourceType string
+
+const (
+	DatasourcePrometheus DatasourceType = "prometheus"
+	DatasourceLoki       DatasourceType = "loki"
+	DatasourceTempo      DatasourceType = "tempo"
+	DatasourceOther      DatasourceType = "other"
+)
+
 // extractOtelScopeFromQuery attempts to extract OTel scope from query labels
-func (a *App) extractOtelScopeFromQuery(queryReq QueryRequest) *OtelScope {
+// Supports PromQL, LogQL, and TraceQL syntax
+func (a *App) extractOtelScopeFromQuery(queryReq QueryRequest, dsType DatasourceType) *OtelScope {
 	scope := &OtelScope{Source: "missing"}
 
 	// Parse queries to find service.name and deployment.environment.name labels
@@ -31,15 +42,37 @@ func (a *App) extractOtelScopeFromQuery(queryReq QueryRequest) *OtelScope {
 			continue
 		}
 
-		// Simple pattern matching for PromQL/LogQL labels
-		// Look for service_name="..." or service.name="..."
-		if strings.Contains(exprStr, "service_name=") || strings.Contains(exprStr, "service.name=") {
-			scope.ServiceName = extractLabelValue(exprStr, []string{"service_name", "service.name"})
-		}
+		// Extract based on datasource type
+		switch dsType {
+		case DatasourcePrometheus, DatasourceLoki:
+			// PromQL/LogQL: service_name="..." or service.name="..."
+			if strings.Contains(exprStr, "service_name=") || strings.Contains(exprStr, "service.name=") {
+				scope.ServiceName = extractLabelValue(exprStr, []string{"service_name", "service.name"})
+			}
+			if strings.Contains(exprStr, "deployment_environment_name=") || strings.Contains(exprStr, "deployment.environment.name=") {
+				scope.EnvironmentName = extractLabelValue(exprStr, []string{"deployment_environment_name", "deployment.environment.name"})
+			}
 
-		// Look for deployment_environment_name="..." or deployment.environment.name="..."
-		if strings.Contains(exprStr, "deployment_environment_name=") || strings.Contains(exprStr, "deployment.environment.name=") {
-			scope.EnvironmentName = extractLabelValue(exprStr, []string{"deployment_environment_name", "deployment.environment.name"})
+		case DatasourceTempo:
+			// TraceQL: span.service.name or resource.service.name
+			if strings.Contains(exprStr, "service.name=") || strings.Contains(exprStr, "span.service.name=") || strings.Contains(exprStr, "resource.service.name=") {
+				scope.ServiceName = extractLabelValue(exprStr, []string{"span.service.name", "resource.service.name", "service.name"})
+			}
+			if strings.Contains(exprStr, "deployment.environment.name=") {
+				scope.EnvironmentName = extractLabelValue(exprStr, []string{"deployment.environment.name"})
+			}
+
+		case DatasourceOther:
+			// For other datasources, try to detect service/environment in query text
+			// Look for common patterns but don't inject
+			if strings.Contains(exprStr, "service") && (strings.Contains(exprStr, "name") || strings.Contains(exprStr, "=")) {
+				// Query mentions service - consider it present
+				scope.ServiceName = "detected"
+			}
+			if strings.Contains(exprStr, "environment") || strings.Contains(exprStr, "env") {
+				// Query mentions environment - consider it present
+				scope.EnvironmentName = "detected"
+			}
 		}
 	}
 
@@ -123,15 +156,21 @@ func (a *App) validateOtelScope(scope *OtelScope) error {
 	return nil
 }
 
-// injectOtelScope injects OTel scope labels into queries
-// This is a simplified implementation that handles basic PromQL/LogQL queries
-func (a *App) injectOtelScope(queryReq *QueryRequest, scope *OtelScope) error {
+// injectOtelScope injects OTel scope labels into queries based on datasource type
+// Handles PromQL, LogQL, and TraceQL. For other datasources, no injection is performed.
+func (a *App) injectOtelScope(queryReq *QueryRequest, scope *OtelScope, dsType DatasourceType) error {
 	if a.settings == nil || !a.settings.OtelEnforcement.Enabled {
 		return nil
 	}
 
 	if scope.ServiceName == "" && scope.EnvironmentName == "" {
 		return nil // Nothing to inject
+	}
+
+	// For other datasources, don't inject - validation only
+	if dsType == DatasourceOther {
+		backend.Logger.Debug("Skipping injection for non-standard datasource", "datasourceType", dsType)
+		return nil
 	}
 
 	for i := range queryReq.Queries {
@@ -145,18 +184,35 @@ func (a *App) injectOtelScope(queryReq *QueryRequest, scope *OtelScope) error {
 			continue
 		}
 
-		// Build label selectors to inject
-		var labels []string
-		if scope.ServiceName != "" {
-			labels = append(labels, fmt.Sprintf(`service_name="%s"`, scope.ServiceName))
-		}
-		if scope.EnvironmentName != "" {
-			labels = append(labels, fmt.Sprintf(`deployment_environment_name="%s"`, scope.EnvironmentName))
-		}
+		var injectedExpr string
 
-		// Inject labels into query
-		// This is a simplified implementation - in production, use a proper PromQL/LogQL parser
-		injectedExpr := injectLabelsIntoQuery(exprStr, labels)
+		switch dsType {
+		case DatasourcePrometheus, DatasourceLoki:
+			// PromQL/LogQL: Inject as metric/stream labels
+			var labels []string
+			if scope.ServiceName != "" {
+				labels = append(labels, fmt.Sprintf(`service_name="%s"`, scope.ServiceName))
+			}
+			if scope.EnvironmentName != "" {
+				labels = append(labels, fmt.Sprintf(`deployment_environment_name="%s"`, scope.EnvironmentName))
+			}
+			injectedExpr = injectLabelsIntoQuery(exprStr, labels)
+
+		case DatasourceTempo:
+			// TraceQL: Inject as span selectors
+			var spanSelectors []string
+			if scope.ServiceName != "" {
+				spanSelectors = append(spanSelectors, fmt.Sprintf(`span.service.name="%s"`, scope.ServiceName))
+			}
+			if scope.EnvironmentName != "" {
+				spanSelectors = append(spanSelectors, fmt.Sprintf(`deployment.environment.name="%s"`, scope.EnvironmentName))
+			}
+			injectedExpr = injectTraceQLSelectors(exprStr, spanSelectors)
+
+		default:
+			// Unknown type - skip injection
+			continue
+		}
 
 		// Update the appropriate field
 		if queryReq.Queries[i].Expr != "" {
@@ -166,6 +222,7 @@ func (a *App) injectOtelScope(queryReq *QueryRequest, scope *OtelScope) error {
 		}
 
 		backend.Logger.Debug("Injected OTel scope into query",
+			"datasourceType", dsType,
 			"originalExpr", exprStr,
 			"injectedExpr", injectedExpr,
 			"scope", scope,
@@ -218,6 +275,40 @@ func injectLabelsIntoQuery(expr string, labels []string) string {
 
 	// Existing labels: {label1="value1"} -> {label1="value1",injected_labels}
 	return expr[:closeBrace] + "," + labelsStr + expr[closeBrace:]
+}
+
+// injectTraceQLSelectors injects span selectors into a TraceQL query
+// TraceQL syntax: {span.service.name="service" && span.http.method="GET"}
+func injectTraceQLSelectors(expr string, selectors []string) string {
+	if len(selectors) == 0 {
+		return expr
+	}
+
+	selectorsStr := strings.Join(selectors, " && ")
+
+	// Find the first { in the query
+	openBrace := strings.Index(expr, "{")
+	if openBrace == -1 {
+		// No selectors in query, add them: {} -> {injected_selectors}
+		return "{" + selectorsStr + "}"
+	}
+
+	// Find the matching closing brace
+	closeBrace := strings.Index(expr[openBrace:], "}")
+	if closeBrace == -1 {
+		return expr // Malformed query, don't modify
+	}
+	closeBrace += openBrace
+
+	// Check if there are existing selectors
+	existingSelectors := strings.TrimSpace(expr[openBrace+1 : closeBrace])
+	if existingSelectors == "" {
+		// Empty selectors: {} -> {injected_selectors}
+		return expr[:openBrace+1] + selectorsStr + expr[closeBrace:]
+	}
+
+	// Existing selectors: {span.foo="bar"} -> {span.foo="bar" && injected_selectors}
+	return expr[:closeBrace] + " && " + selectorsStr + expr[closeBrace:]
 }
 
 // logOtelScopeUsage logs the OTel scope usage for audit purposes

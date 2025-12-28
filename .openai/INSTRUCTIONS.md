@@ -123,7 +123,7 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 - RxJS observables for streaming responses
 - Backend proxy adds guardrails (rate limiting, validation)
 - Supports function calling
-- Files: `src/services/queryService.ts`, `src/services/assistantSkills.ts`
+- Files: `src/services/queryService.ts`, `pkg/plugin/assistant_prompts.go (backend)`
 
 ## Code Style
 

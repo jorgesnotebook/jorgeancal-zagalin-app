@@ -8,9 +8,12 @@ import {
   useStyles2,
   Tooltip,
   Badge,
+  Dropdown,
+  Menu,
 } from '@grafana/ui';
 import type { ConversationMetadata } from '../../services/conversationStorage';
 import { ZagalinColors } from '../../theme/colors';
+import { exportConversation, type ExportFormat } from '../../services/conversationExport';
 
 interface ConversationListSidebarProps {
   conversations: ConversationMetadata[];
@@ -30,6 +33,7 @@ interface ConversationItemProps {
   onRename: (newTitle: string) => void;
   onDelete: () => void;
   onTogglePin: () => void;
+  onExport: (format: ExportFormat) => void;
 }
 
 function ConversationItem({
@@ -39,6 +43,7 @@ function ConversationItem({
   onRename,
   onDelete,
   onTogglePin,
+  onExport,
 }: ConversationItemProps) {
   const s = useStyles2(getItemStyles);
   const [isEditing, setIsEditing] = useState(false);
@@ -131,6 +136,32 @@ function ConversationItem({
               onClick={handleStartEdit}
               tooltip="Rename"
             />
+            <Dropdown
+              overlay={
+                <Menu>
+                  <Menu.Item
+                    label="Export as JSON"
+                    onClick={() => {
+                      onExport('json');
+                    }}
+                  />
+                  <Menu.Item
+                    label="Export as Markdown"
+                    onClick={() => {
+                      onExport('markdown');
+                    }}
+                  />
+                </Menu>
+              }
+              placement="bottom-end"
+            >
+              <IconButton
+                name="download-alt"
+                size="sm"
+                tooltip="Export conversation"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </Dropdown>
             <IconButton
               name="trash-alt"
               size="sm"
@@ -198,6 +229,14 @@ export function ConversationListSidebar({
     setShowDeleteAll(false);
   };
 
+  const handleExport = async (conversationId: string, format: ExportFormat) => {
+    try {
+      await exportConversation(conversationId, format);
+    } catch (error) {
+      console.error('Failed to export conversation:', error);
+    }
+  };
+
   const deletingConversation = conversations.find((c) => c.id === deletingId);
 
   return (
@@ -254,6 +293,7 @@ export function ConversationListSidebar({
               onRename={(newTitle) => onRenameConversation(conversation.id, newTitle)}
               onDelete={() => handleDelete(conversation.id)}
               onTogglePin={() => onTogglePin(conversation.id)}
+              onExport={(format) => handleExport(conversation.id, format)}
             />
           ))
         )}

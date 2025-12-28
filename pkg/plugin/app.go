@@ -20,10 +20,13 @@ var (
 
 type App struct {
 	backend.CallResourceHandler
-	settings       *Settings
-	contextManager *contextmgr.Manager
-	guardrails     *Guardrails
-	storage        *UserStorage
+	settings        *Settings
+	contextManager  *contextmgr.Manager
+	guardrails      *Guardrails
+	storage         *UserStorage
+	datasourceCache *datasourceCache
+	queryValidator  *QueryValidator
+	runManager      *RunManager
 }
 
 func NewApp(ctx context.Context, appSettings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -37,6 +40,11 @@ func NewApp(ctx context.Context, appSettings backend.AppInstanceSettings) (insta
 	backend.Logger.Info("User storage initialized", "dataDir", dataDir)
 
 	app.contextManager = contextmgr.NewManager()
+	app.datasourceCache = newDatasourceCache()
+	backend.Logger.Debug("Datasource cache initialized")
+
+	app.runManager = NewRunManager(backend.Logger)
+	backend.Logger.Info("Run manager initialized")
 
 	settings, err := LoadSettings(appSettings.JSONData, appSettings.DecryptedSecureJSONData)
 
@@ -58,6 +66,14 @@ func NewApp(ctx context.Context, appSettings backend.AppInstanceSettings) (insta
 
 		app.contextManager.Start(ctx)
 		backend.Logger.Info("Context manager started")
+
+		// Initialize query validator
+		app.queryValidator = NewQueryValidator(&settings.QueryValidation, &app)
+		backend.Logger.Info("Query validator initialized",
+			"enabled", settings.QueryValidation.Enabled,
+			"strictMode", settings.QueryValidation.StrictMode,
+			"llmValidation", settings.QueryValidation.EnableLLMValidation,
+		)
 	}
 
 	mux := http.NewServeMux()
@@ -76,6 +92,11 @@ func (a *App) Dispose() {
 	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
 		a.guardrails.rateLimiter.Stop()
 		backend.Logger.Info("Guardrails stopped")
+	}
+
+	if a.runManager != nil {
+		a.runManager.Stop()
+		backend.Logger.Info("Run manager stopped")
 	}
 }
 

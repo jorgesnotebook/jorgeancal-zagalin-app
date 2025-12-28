@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
@@ -328,5 +329,119 @@ func TestRateLimitingPerUser(t *testing.T) {
 
 	if !rateLimited {
 		t.Error("expected to hit rate limit, but didn't")
+	}
+}
+
+// TestQueryValidationIntegration tests query validation in the full request pipeline
+func TestQueryValidationIntegration(t *testing.T) {
+	// Create app with validation enabled
+	app := &App{
+		settings: &Settings{
+			PluginSettings: PluginSettings{
+				QueryValidation: QueryValidationSettings{
+					Enabled:                 true,
+					EnablePromQLValidation:  true,
+					EnableLogQLValidation:   true,
+					EnableTraceQLValidation: true,
+					StrictMode:              true,
+					MaxQueryComplexity:      100,
+				},
+			},
+		},
+		guardrails:     NewGuardrails(60),
+		queryValidator: NewQueryValidator(&QueryValidationSettings{
+			Enabled:                 true,
+			EnablePromQLValidation:  true,
+			EnableLogQLValidation:   true,
+			EnableTraceQLValidation: true,
+			StrictMode:              true,
+			MaxQueryComplexity:      100,
+		}, nil),
+		datasourceCache: newDatasourceCache(),
+	}
+
+	tests := []struct {
+		name           string
+		query          string
+		datasourceType string
+		expectedStatus int
+	}{
+		{
+			name:           "valid PromQL query",
+			query:          "up",
+			datasourceType: "prometheus",
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "invalid PromQL query in strict mode",
+			query:          "up{{{",
+			datasourceType: "prometheus",
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "valid LogQL query",
+			query:          `{job="test"}`,
+			datasourceType: "loki",
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "invalid LogQL query",
+			query:          `{job=`,
+			datasourceType: "loki",
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Pre-populate datasource cache with the datasource type for this test
+			app.datasourceCache.mu.Lock()
+			app.datasourceCache.datasources["test-ds-uid"] = DatasourceInfo{
+				UID:  "test-ds-uid",
+				Name: "Test Datasource",
+				Type: tt.datasourceType,
+			}
+			// Set lastRefresh to now so cache is considered fresh
+			app.datasourceCache.lastRefresh = time.Now()
+			app.datasourceCache.mu.Unlock()
+
+			queryReq := QueryRequest{
+				Datasource: "test-ds-uid",
+				Queries: []QueryPayload{
+					{
+						RefID: "A",
+						Expr:  tt.query,
+					},
+				},
+				TimeRange: TimeRange{
+					From: "now-1h",
+					To:   "now",
+				},
+			}
+
+			bodyBytes, _ := json.Marshal(queryReq)
+			ctx := backend.WithPluginContext(context.Background(), backend.PluginContext{
+				User:  &backend.User{Login: "testuser"},
+				OrgID: 1,
+			})
+
+			req := httptest.NewRequest(http.MethodPost, "/query", bytes.NewReader(bodyBytes))
+			req = req.WithContext(ctx)
+			w := httptest.NewRecorder()
+
+			app.handleQuery(w, req)
+
+			// Check status (allow InternalServerError for Grafana connectivity issues in valid query tests)
+			if tt.expectedStatus == http.StatusBadRequest {
+				if w.Code != http.StatusBadRequest {
+					t.Errorf("expected status %d for invalid query, got %d: %s", http.StatusBadRequest, w.Code, w.Body.String())
+				}
+			} else if tt.expectedStatus == http.StatusOK {
+				// For valid queries, accept either OK or InternalServerError (if Grafana is not running)
+				if w.Code != http.StatusOK && w.Code != http.StatusInternalServerError {
+					t.Errorf("expected status %d or %d, got %d: %s", http.StatusOK, http.StatusInternalServerError, w.Code, w.Body.String())
+				}
+			}
+		})
 	}
 }

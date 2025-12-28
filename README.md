@@ -3,7 +3,7 @@ Zagalin - AI Assistant for Grafana
 
 **Zagalin** is a context-aware AI assistant that brings the power of Large Language Models (LLMs) directly into your Grafana experience. Chat with your metrics, generate queries, and troubleshoot issues using natural language.
 
-![Zagalin Logo](https://raw.githubusercontent.com/jorgesnotebook/jorgeancal-zagalin-app/main/src/img/logo.png)
+<img src="https://raw.githubusercontent.com/jorgesnotebook/jorgeancal-zagalin-app/main/src/img/logo.png" alt="Zagalin Logo" width="200"/>
 
 ## ✨ Features
 
@@ -213,51 +213,98 @@ Enable or disable specific capabilities:
 
 ## 🔒 Privacy & Security
 
+Zagalin implements multiple layers of security to protect your data and infrastructure:
+
+### Data Privacy
 - **No Data Storage**: Zagalin doesn't store your queries or responses
 - **API Keys**: Managed securely through Grafana's secrets management
 - **Context Optimization**: Only sends relevant context to minimize data exposure
 - **Provider Choice**: Use your own LLM provider for full control
+- **User Isolation**: Conversations are stored per-user with access control
 
-## 🛠️ Development
+### Query Security
+- **Query Validation**: Parser-based validation for PromQL, LogQL, and TraceQL queries
+  - Prevents injection attacks using official parsers
+  - Configurable complexity limits and function allowlists
+  - Comprehensive audit logging of validation events
+- **Datasource Governance**: Allowlist-based datasource access control
+- **Rate Limiting**: Per-user rate limiting to prevent abuse (default: 60 req/min)
+- **User Context**: All queries execute with the user's security context and permissions
+- **OTel Enforcement**: Automatic scope injection for multi-tenant observability
 
-### Prerequisites
-- Node.js 20+
-- Go 1.21+
-- Docker (for local testing)
+### Defense in Depth
+The plugin implements multiple security layers that work together:
+1. User authentication and identity extraction
+2. Per-user rate limiting
+3. Datasource allowlist validation
+4. Query injection prevention and validation
+5. OpenTelemetry scope enforcement
+6. Query execution with user permissions
+7. Comprehensive audit logging
 
-### Local Development
-```bash
-# Clone the repository
-git clone https://github.com/jorgesnotebook/jorgeancal-zagalin-app.git
-cd jorgeancal-zagalin-app
+For detailed security documentation, see [`.claude/CLAUDE.md`](https://github.com/jorgesnotebook/jorgeancal-zagalin-app/blob/main/.claude/CLAUDE.md#security-first-development).
 
-# Install dependencies
-npm install
+## 📖 Version History & Releases
 
-# Build frontend
-npm run build
+### Current Version: 0.0.2 - "Security & Governance" (December 27, 2025)
 
-# Build backend
-mage -v
+This release transforms Zagalin into a production-ready observability assistant with enterprise-grade security controls.
 
-# Run in development mode
-npm run dev
+**Highlights**:
+- ✅ **Query Validation System** - Pattern-based validation for PromQL, LogQL, TraceQL
+- ✅ **OpenTelemetry Scope Enforcement** - Automatic service/environment labeling
+- ✅ **Datasource Governance** - Allowlist system for approved datasources
+- ✅ **Conversation History** - Persistent storage with dual-tier architecture
+- ✅ **AI Development Tools** - Configurations for Claude, ChatGPT, Copilot, Cursor
+- ✅ **Privacy-Conscious Logging** - Usage analytics without exposing queries
 
-# Start Grafana with plugin
-npm run server
-```
+**Security Pipeline**: Every query now flows through 6 security validation stages
+**Configuration**: 25+ new settings (all opt-in, disabled by default)
+**Breaking Changes**: None
 
-### Testing
-```bash
-# Run unit tests
-npm run test
+**Documentation**:
+- 📄 [Release Notes](docs/releases/v0.0.2.md)
+- 📄 [Detailed Changelog](CHANGELOG.md#002---2025-12-27)
+- 📄 [Upgrade Guide](CHANGELOG.md#upgrading-to-002-from-001)
 
-# Run E2E tests
-npm run e2e
+### Previous Versions
 
-# Run linter
-npm run lint
-```
+#### Version 0.0.1 - "Foundation" (December 24, 2025)
+Initial release with core AI assistant capabilities.
+
+**Highlights**:
+- Context-aware chat with dashboard, panel, and time range awareness
+- Floating chat interface on every dashboard
+- Query generation for PromQL, LogQL, TraceQL
+- Skills system (explain_panel, generate_query, troubleshoot, analyze_dashboard)
+- LLM integration via grafana-llm-app
+- Function calling for structured tool execution
+
+**Documentation**:
+- 📄 [Changelog](CHANGELOG.md#001---2025-12-24)
+
+### Coming Soon: v0.0.3 - "Intelligence & Orchestration" (Expected: January 2026)
+
+Next release will focus on structured investigation workflows:
+- Frontend orchestration with planning and step execution
+- Artifact management with syntax highlighting
+- Smart routing between dashboard questions and investigations
+- Enhanced context extraction and summarization
+- Conversation export to JSON/Markdown
+
+### Full Documentation
+
+- 📖 **Changelog**: [CHANGELOG.md](CHANGELOG.md) - Detailed changes following Keep a Changelog format
+- 📖 **Version History**: [docs/VERSION_HISTORY.md](docs/VERSION_HISTORY.md) - Comprehensive version overview
+- 📖 **Release Notes**: [docs/releases/](docs/releases/) - Detailed release narratives
+- 📖 **GitHub Releases**: [Releases Page](https://github.com/jorgesnotebook/jorgeancal-zagalin-app/releases)
+
+### Version Comparison
+
+| Version | Release Date | Theme | Major Features | Breaking Changes |
+|---------|-------------|-------|----------------|------------------|
+| **0.0.2** | Dec 27, 2025 | Security & Governance | Query validation, OTel enforcement, datasource governance, conversation history | None |
+| 0.0.1 | Dec 24, 2025 | Foundation | Context-aware chat, floating UI, query generation, skills system | N/A |
 
 ## 📝 License
 

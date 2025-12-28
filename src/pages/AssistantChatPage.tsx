@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
-import { llm } from '@grafana/llm';
 import {
   Button,
   TextArea,
@@ -17,8 +16,9 @@ import { marked } from 'marked';
 import { ZagalinColors } from '../theme/colors';
 import { isLLMReady } from '../services/llmHealthService';
 import { VectorSearchService } from '../services/vectorSearchService';
-import { ZAGALIN_TOOLS, type ToolCall } from '../services/zagalinTools';
+import { type ToolCall } from '../services/zagalinTools';
 import { useZagalinConfig } from '../hooks/useZagalinConfig';
+import { streamAssistantChat, type AssistantRequest, type StreamChunk } from '../services/assistantService';
 
 interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -102,46 +102,38 @@ function AssistantChatPage() {
         }
       }
 
-      const allMessages = [...messages, userMessage].map(m => ({
-        role: m.role,
-        content: m.content,
-      }));
-
-      // If vector search enhanced the query, update the last message
-      if (enhancedQuery !== userMessage.content) {
-        allMessages[allMessages.length - 1] = {
-          role: 'user',
-          content: enhancedQuery,
-        };
-      }
-
-      // Stream the completions using grafana-llm-app with tool support
-      let accumulatedContent = '';
-      const streamOptions: any = {
-        model: 'gpt-4o-mini',
-        messages: allMessages,
-        temperature: zagalinConfig.temperature,
-        max_tokens: zagalinConfig.maxTokens,
+      // Prepare request for backend
+      // Backend handles: skill detection, system prompts, context injection
+      const assistantRequest: AssistantRequest = {
+        message: enhancedQuery || userMessage.content,
+        history: messages.map(m => ({
+          role: m.role,
+          content: m.content,
+        })),
+        context: {}, // No specific context in standalone chat page
       };
 
-      // Add tools if function calling is enabled
-      if (zagalinConfig.enabledSkills.functionCalling) {
-        streamOptions.tools = ZAGALIN_TOOLS;
-        streamOptions.tool_choice = 'auto';
-      }
-
-      const stream = llm.streamChatCompletions(streamOptions).pipe(
-        llm.accumulateContent(),
+      // Stream from backend
+      let accumulatedContent = '';
+      const stream = streamAssistantChat(assistantRequest).pipe(
         finalize(() => {
           setIsStreaming(false);
         })
       );
 
-      // Subscribe to the stream and accumulate content
+      // Subscribe to the stream
       stream.subscribe({
-        next: (content: string) => {
-          accumulatedContent = content;
-          setStreamingContent(content);
+        next: (chunk: StreamChunk) => {
+          if (chunk.chunk) {
+            accumulatedContent += chunk.chunk;
+            setStreamingContent(accumulatedContent);
+          }
+          if (chunk.error) {
+            console.error('Zagalin: Backend error', chunk.error);
+            setError(chunk.error);
+            setIsStreaming(false);
+            setStreamingContent('');
+          }
         },
         complete: () => {
           // Add assistant message when streaming completes

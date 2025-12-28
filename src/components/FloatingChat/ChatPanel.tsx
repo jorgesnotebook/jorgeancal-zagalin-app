@@ -11,29 +11,35 @@ import {
   Badge,
   Tooltip,
 } from '@grafana/ui';
-import { llm } from '@grafana/llm';
-import { finalize } from 'rxjs';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { useGrafanaContext } from '../../services/useGrafanaContext';
-import { detectSkill } from '../../services/assistantSkills';
 import { createExploreLink } from '../../services/actionExtractor';
 import { useZagalinConfig } from '../../hooks/useZagalinConfig';
-import { getFullSystemPrompt } from '../../types/zagalinConfig';
 import type { AssistantAction } from '../../services/contextTypes';
 import { ZagalinColors } from '../../theme/colors';
 import { isLLMReady } from '../../services/llmHealthService';
 import { VectorSearchService } from '../../services/vectorSearchService';
-import { ZAGALIN_TOOLS, type ToolCall } from '../../services/zagalinTools';
-import { optimizeContext } from '../../services/contextOptimizer';
+import { type ToolCall } from '../../services/zagalinTools';
 import { useConversation } from '../../hooks/useConversation';
 import type { ConversationMessage } from '../../services/conversationStorage';
 import { ConversationListSidebar } from './ConversationListSidebar';
+import { useRunState } from '../../hooks/useRunState';
+import { PlanVisualization } from './PlanVisualization';
+import { ArtifactCard } from './ArtifactCard';
+import { RunControls } from './RunControls';
+import type { Artifact } from '../../services/runService';
+import { streamAssistantChat } from '../../services/assistantService';
+import { FrontendOrchestrator, type OrchestratorEvent } from '../../services/frontendOrchestrator';
+import type { ExecutionPlan } from '../../services/frontendPrompts';
+import { needsOrchestration } from '../../services/orchestrationDetector';
+import { isDashboardQuestion, readDashboardPanels, buildDashboardSummaryPrompt } from '../../services/dashboardReader';
 
 // Internal Message type for UI (extends ConversationMessage)
 interface Message extends ConversationMessage {
   actions?: AssistantAction[];
   toolCalls?: ToolCall[];
+  artifacts?: Artifact[];
 }
 
 // Helper function to safely render markdown content
@@ -53,14 +59,29 @@ function sanitizeMarkdown(content: string): string {
 export function ChatPanel() {
   const s = useStyles2(getStyles);
   const [input, setInput] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [streamingContent, setStreamingContent] = useState('');
+  const [displayedContent, setDisplayedContent] = useState('');
   const [llmReady, setLlmReady] = useState<boolean | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
+  const [llmBackendMode, setLlmBackendMode] = useState<string>('grafana-llm-app'); // 'grafana-llm-app' | 'direct' | 'disabled'
+
+  // Frontend orchestrator state (for grafana-llm-app mode with orchestration)
+  const [frontendPlan, setFrontendPlan] = useState<ExecutionPlan | null>(null);
+  const [frontendCurrentStepIndex, setFrontendCurrentStepIndex] = useState(0);
+  const [frontendArtifacts, setFrontendArtifacts] = useState<Artifact[]>([]);
+  const [frontendStreamingText, setFrontendStreamingText] = useState('');
+  const [isFrontendOrchestrating, setIsFrontendOrchestrating] = useState(false);
+
+  // Simple streaming state (for grafana-llm-app mode without orchestration)
+  const [isSimpleStreaming, setIsSimpleStreaming] = useState(false);
+  const [simpleStreamingContent, setSimpleStreamingContent] = useState('');
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const vectorSearchRef = useRef(new VectorSearchService());
+  const typewriterTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const frontendOrchestratorRef = useRef<FrontendOrchestrator | null>(null);
+  const simpleStreamingContentRef = useRef<string>(''); // Accumulates simple streaming content
 
   // Get Grafana context
   const { context, hasContext, loading: contextLoading } = useGrafanaContext();
@@ -84,6 +105,30 @@ export function ChatPanel() {
     currentId,
   } = useConversation();
 
+  // Run state management with callbacks
+  const handleRunComplete = (finalMessage: string, artifacts: Artifact[]) => {
+    const assistantMessage: ConversationMessage = {
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+      role: 'assistant',
+      content: finalMessage,
+      timestamp: new Date(),
+      artifacts,
+    };
+    addMessage(assistantMessage);
+    setOptimisticMessages([]);
+  };
+
+  const handleRunError = (errorMessage: string) => {
+    setError(errorMessage);
+    setOptimisticMessages([]);
+  };
+
+  const runState = useRunState({
+    conversationId: conversation?.id || 'temp',
+    onComplete: handleRunComplete,
+    onError: handleRunError,
+  });
+
   // Handle new chat
   const handleNewChat = () => {
     clearCurrent();
@@ -93,6 +138,24 @@ export function ChatPanel() {
 
   // Convert conversation messages to UI messages, including optimistic messages
   const messages: Message[] = useMemo(() => [...conversationMessages, ...optimisticMessages], [conversationMessages, optimisticMessages]);
+
+  // Fetch LLM backend mode on mount
+  useEffect(() => {
+    const fetchBackendMode = async () => {
+      try {
+        const response = await fetch('/api/plugins/jorgeancal-zagalin-app/resources/settings');
+        if (response.ok) {
+          const settings = await response.json();
+          const mode = settings?.jsonData?.llmBackend || 'grafana-llm-app';
+          setLlmBackendMode(mode);
+          console.log('[ChatPanel] LLM backend mode:', mode);
+        }
+      } catch (error) {
+        console.warn('[ChatPanel] Failed to fetch backend mode, defaulting to grafana-llm-app');
+      }
+    };
+    fetchBackendMode();
+  }, []);
 
   // Check LLM health on mount
   useEffect(() => {
@@ -124,10 +187,52 @@ export function ChatPanel() {
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingContent]);
+  }, [messages, displayedContent]);
+
+  // Typewriter effect: gradually display streaming content (from various sources)
+  useEffect(() => {
+    // Determine streaming content source based on mode and state
+    let streamingContent = '';
+    if (llmBackendMode === 'direct') {
+      streamingContent = runState.streamingText;
+    } else if (isFrontendOrchestrating) {
+      streamingContent = frontendStreamingText;
+    } else if (isSimpleStreaming) {
+      streamingContent = simpleStreamingContent;
+    }
+
+    if (streamingContent.length === 0 && displayedContent.length > 0) {
+      // Content was cleared, reset display (async to avoid setState-in-effect warning)
+      setTimeout(() => setDisplayedContent(''), 0);
+    } else if (displayedContent.length < streamingContent.length) {
+      // Clear any existing timeout
+      if (typewriterTimeoutRef.current) {
+        clearTimeout(typewriterTimeoutRef.current);
+      }
+
+      // Add next character(s) with a small delay
+      typewriterTimeoutRef.current = setTimeout(() => {
+        // Display 2-4 characters at a time for a natural feel
+        const charsToAdd = Math.min(3, streamingContent.length - displayedContent.length);
+        setDisplayedContent(streamingContent.substring(0, displayedContent.length + charsToAdd));
+      }, 20); // 20ms delay for smooth typing effect
+    } else if (displayedContent.length > streamingContent.length) {
+      // Handle case where streaming content was reset (async to avoid setState-in-effect warning)
+      setTimeout(() => setDisplayedContent(streamingContent), 0);
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (typewriterTimeoutRef.current) {
+        clearTimeout(typewriterTimeoutRef.current);
+      }
+    };
+  }, [runState.streamingText, frontendStreamingText, simpleStreamingContent, displayedContent, llmBackendMode, isFrontendOrchestrating, isSimpleStreaming]);
 
   const handleSend = async () => {
-    if (!input.trim() || isStreaming) {return;}
+    if (!input.trim() || runState.isRunning || isFrontendOrchestrating || isSimpleStreaming) {
+      return;
+    }
 
     // Health check before sending
     if (llmReady === false) {
@@ -148,9 +253,8 @@ export function ChatPanel() {
     // Show message immediately (optimistic update)
     setOptimisticMessages([userMessage]);
     setInput('');
-    setIsStreaming(true);
     setError(null);
-    setStreamingContent('');
+    setDisplayedContent('');
 
     try {
       // Save user message to conversation (with context if this is the first message)
@@ -161,6 +265,7 @@ export function ChatPanel() {
 
       // Clear optimistic messages once saved
       setOptimisticMessages([]);
+
       // Enhance query with vector search if available
       let enhancedQuery = userMessage.content;
       if (zagalinConfig.enabledSkills.searchContext) {
@@ -170,106 +275,234 @@ export function ChatPanel() {
         }
       }
 
-      // Detect if a skill should be used (only if skill is enabled)
-      const skill = detectSkill(userMessage.content, context);
-      const shouldUseSkill = skill && (
-        skill.name === 'analyze_dashboard' || // Always enabled - core functionality
-        (skill.name === 'explain_panel' && zagalinConfig.enabledSkills.explainPanel) ||
-        (skill.name === 'generate_query' && zagalinConfig.enabledSkills.generateQuery) ||
-        (skill.name === 'guided_troubleshooting' && zagalinConfig.enabledSkills.troubleshooting)
-      );
+      // Route based on backend mode
+      if (llmBackendMode === 'grafana-llm-app') {
+        // Check if this is a dashboard question that needs enriched context
+        if (isDashboardQuestion(userMessage.content, context)) {
+          console.log('[ChatPanel] Dashboard question detected - using enriched context');
 
-      // Build messages array
-      let allMessages;
-      if (shouldUseSkill && skill) {
-        allMessages = [
-          { role: 'system' as const, content: skill.systemPrompt },
-          { role: 'user' as const, content: skill.userPrompt },
-        ];
-      } else {
-        allMessages = [...messages, userMessage].map(m => ({
-          role: m.role,
-          content: m.content,
-        }));
+          // Extract dashboard panel data
+          const panels = await readDashboardPanels(context);
+          console.log(`[ChatPanel] Extracted ${panels.length} panels from dashboard`);
 
-        // Add full system prompt (base + custom instructions)
-        allMessages.unshift({
-          role: 'system',
-          content: getFullSystemPrompt(zagalinConfig),
-        });
+          // Build enriched prompt with actual panel queries
+          const enrichedPrompt = buildDashboardSummaryPrompt(userMessage.content, context, panels);
 
-        if (hasContext) {
-          // Optimize context to fit token budget
-          const optimized = optimizeContext(context, 1000);
-          const contextPrompt = `\n\n## Current Grafana Context\n${optimized.essential}`;
+          // Use simple streaming with enriched message
+          console.log('[ChatPanel] Starting simple streaming with dashboard context');
+          setIsSimpleStreaming(true);
+          simpleStreamingContentRef.current = '';
 
-          // Add context after system prompt
-          allMessages.splice(1, 0, {
-            role: 'system',
-            content: contextPrompt,
+          streamAssistantChat({
+            message: userMessage.content,
+            enrichedMessage: enrichedPrompt, // Pass enriched version with panel details
+            history: messages.map(m => ({
+              role: m.role,
+              content: m.content,
+            })),
+            context: {
+              dashboard: context.dashboard,
+              panel: context.panel,
+              timeRange: context.timeRange,
+              templateVars: context.templateVariables,
+            },
+          }).subscribe({
+            next: (chunk) => {
+              if (chunk.chunk) {
+                simpleStreamingContentRef.current += chunk.chunk;
+                setSimpleStreamingContent(simpleStreamingContentRef.current);
+              }
+            },
+            complete: async () => {
+              console.log('[ChatPanel] Dashboard question streaming complete');
+              const finalContent = simpleStreamingContentRef.current;
+
+              // Save assistant message
+              const assistantMessage: ConversationMessage = {
+                id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+                role: 'assistant',
+                content: finalContent,
+                timestamp: new Date(),
+              };
+
+              await addMessage(assistantMessage);
+              setIsSimpleStreaming(false);
+              setSimpleStreamingContent('');
+              simpleStreamingContentRef.current = '';
+            },
+            error: (err) => {
+              console.error('[ChatPanel] Dashboard question streaming error:', err);
+              setError(err instanceof Error ? err.message : 'Streaming failed');
+              setIsSimpleStreaming(false);
+              setSimpleStreamingContent('');
+              simpleStreamingContentRef.current = '';
+            },
+          });
+
+          return; // Don't continue to orchestration or other streaming
+        }
+
+        // Detect if this message needs orchestration
+        const shouldOrchestrate = needsOrchestration(userMessage.content);
+
+        if (shouldOrchestrate) {
+          // Frontend orchestration mode - structured planning with grafana-llm-app
+          console.log('[ChatPanel] Using frontend orchestration mode (complex query)');
+
+          // Reset state
+          setIsFrontendOrchestrating(true);
+          setFrontendPlan(null);
+          setFrontendCurrentStepIndex(0);
+          setFrontendArtifacts([]);
+          setFrontendStreamingText('');
+
+          // Create orchestrator
+          const orchestrator = new FrontendOrchestrator();
+          frontendOrchestratorRef.current = orchestrator;
+
+          // Start orchestration
+          orchestrator.start(
+            enhancedQuery || userMessage.content,
+            messages.map(m => ({
+              role: m.role,
+              content: m.content,
+            })),
+            {
+              dashboard: context.dashboard,
+              panel: context.panel,
+              timeRange: context.timeRange,
+              templateVars: context.templateVariables,
+            }
+          ).subscribe({
+            next: (event: OrchestratorEvent) => {
+              console.log('[ChatPanel] Frontend orchestrator event:', event.type);
+
+              switch (event.type) {
+                case 'plan':
+                  setFrontendPlan({
+                    goal: event.data.goal,
+                    steps: event.data.steps,
+                    estimatedDuration: event.data.estimatedDuration || 'Estimating...',
+                  });
+                  break;
+
+                case 'step_started':
+                  setFrontendCurrentStepIndex(event.data.stepIndex);
+                  setFrontendStreamingText(''); // Reset for new step
+                  break;
+
+                case 'artifact':
+                  setFrontendArtifacts(prev => [...prev, event.data]);
+                  break;
+
+                case 'assistant_delta':
+                  setFrontendStreamingText(prev => prev + event.data.delta);
+                  break;
+
+                case 'assistant_message':
+                  // Save final message
+                  const assistantMessage: ConversationMessage = {
+                    id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+                    role: 'assistant',
+                    content: event.data.text,
+                    timestamp: new Date(),
+                    artifacts: event.data.artifacts,
+                  };
+                  addMessage(assistantMessage);
+                  break;
+
+                case 'error':
+                  setError(event.data.message);
+                  break;
+              }
+            },
+            complete: () => {
+              console.log('[ChatPanel] Frontend orchestration complete');
+              setIsFrontendOrchestrating(false);
+              setOptimisticMessages([]);
+            },
+            error: (err) => {
+              console.error('[ChatPanel] Frontend orchestration error:', err);
+              setError(err instanceof Error ? err.message : 'Orchestration failed');
+              setIsFrontendOrchestrating(false);
+              setOptimisticMessages([]);
+            },
+          });
+        } else {
+          // Simple streaming mode - for greetings and simple questions
+          console.log('[ChatPanel] Using simple streaming mode (greeting/simple query)');
+          setIsSimpleStreaming(true);
+          setSimpleStreamingContent('');
+          simpleStreamingContentRef.current = '';
+
+          streamAssistantChat({
+            message: enhancedQuery || userMessage.content,
+            history: messages.map(m => ({
+              role: m.role,
+              content: m.content,
+            })),
+            context: {
+              dashboard: context.dashboard,
+              panel: context.panel,
+              timeRange: context.timeRange,
+              templateVars: context.templateVariables,
+            },
+          }).subscribe({
+            next: (chunk) => {
+              if (chunk.chunk) {
+                simpleStreamingContentRef.current += chunk.chunk;
+                setSimpleStreamingContent(simpleStreamingContentRef.current);
+              }
+            },
+            complete: async () => {
+              console.log('[ChatPanel] Simple streaming complete');
+              const finalContent = simpleStreamingContentRef.current;
+
+              // Save assistant message
+              const assistantMessage: ConversationMessage = {
+                id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+                role: 'assistant',
+                content: finalContent,
+                timestamp: new Date(),
+              };
+
+              await addMessage(assistantMessage);
+              setIsSimpleStreaming(false);
+              setSimpleStreamingContent('');
+              simpleStreamingContentRef.current = '';
+            },
+            error: (err) => {
+              console.error('[ChatPanel] Simple streaming error:', err);
+              setError(err instanceof Error ? err.message : 'Streaming failed');
+              setIsSimpleStreaming(false);
+              setSimpleStreamingContent('');
+              simpleStreamingContentRef.current = '';
+            },
           });
         }
-
-        // If vector search found relevant context, add it
-        if (enhancedQuery !== userMessage.content) {
-          allMessages[allMessages.length - 1] = {
-            role: 'user',
-            content: enhancedQuery,
-          };
-        }
+      } else if (llmBackendMode === 'direct') {
+        // Run orchestration mode - use backend with planning/steps/artifacts
+        console.log('[ChatPanel] Using run orchestration mode (direct)');
+        await runState.start(
+          enhancedQuery || userMessage.content,
+          messages.map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
+          {
+            dashboard: context.dashboard,
+            panel: context.panel,
+            timeRange: context.timeRange,
+            templateVars: context.templateVariables,
+          }
+        );
+      } else {
+        // Disabled mode
+        setError('LLM features are disabled in plugin configuration');
       }
-
-      // Use grafana-llm-app plugin for streaming with tool support
-      let accumulatedContent = '';
-      const streamOptions: any = {
-        model: 'gpt-4o-mini',
-        messages: allMessages,
-        temperature: zagalinConfig.temperature,
-        max_tokens: zagalinConfig.maxTokens,
-      };
-
-      // Add tools if function calling is enabled
-      if (zagalinConfig.enabledSkills.functionCalling) {
-        streamOptions.tools = ZAGALIN_TOOLS;
-        streamOptions.tool_choice = 'auto';
-      }
-
-      const stream = llm.streamChatCompletions(streamOptions).pipe(
-        llm.accumulateContent(),
-        finalize(() => {
-          setIsStreaming(false);
-        })
-      );
-
-      // Subscribe to the stream
-      stream.subscribe({
-        next: (content: string) => {
-          accumulatedContent = content;
-          setStreamingContent(content);
-        },
-        complete: async () => {
-          const assistantMessage: ConversationMessage = {
-            id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-            role: 'assistant',
-            content: accumulatedContent,
-            timestamp: new Date(),
-          };
-
-          // Save assistant message to conversation
-          addMessage(assistantMessage);
-          setStreamingContent('');
-        },
-        error: (err: any) => {
-          console.error('Zagalin: Stream error', err);
-          setError(err.message || 'Failed to send message');
-          setIsStreaming(false);
-          setOptimisticMessages([]);
-        }
-      });
     } catch (err) {
       console.error('Zagalin: Send error', err);
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
-      setIsStreaming(false);
       setOptimisticMessages([]);
     }
   };
@@ -428,6 +661,13 @@ export function ChatPanel() {
               }}
             />
             {message.actions && message.actions.length > 0 && renderActions(message.actions)}
+            {message.artifacts && message.artifacts.length > 0 && (
+              <div className={s.artifactsSection}>
+                {message.artifacts.map(artifact => (
+                  <ArtifactCard key={artifact.id} artifact={artifact} />
+                ))}
+              </div>
+            )}
             {message.role === 'assistant' && (
               <div className={s.messageActions}>
                 <IconButton
@@ -441,21 +681,79 @@ export function ChatPanel() {
           </div>
         ))}
 
-        {streamingContent && (
+        {/* Plan visualization - for both modes */}
+        {llmBackendMode === 'direct' && runState.plan && runState.isRunning && (
+          <PlanVisualization
+            plan={runState.plan}
+            currentStepIndex={runState.currentStepIndex}
+          />
+        )}
+
+        {llmBackendMode === 'grafana-llm-app' && frontendPlan && isFrontendOrchestrating && (
+          <PlanVisualization
+            plan={frontendPlan}
+            currentStepIndex={frontendCurrentStepIndex}
+          />
+        )}
+
+        {/* Artifacts - for both modes */}
+        {llmBackendMode === 'direct' && runState.artifacts.length > 0 && runState.isRunning && (
+          <div className={s.artifactsSection}>
+            <h4 className={s.artifactsHeading}>Evidence</h4>
+            {runState.artifacts.map(artifact => (
+              <ArtifactCard key={artifact.id} artifact={artifact} />
+            ))}
+          </div>
+        )}
+
+        {llmBackendMode === 'grafana-llm-app' && frontendArtifacts.length > 0 && isFrontendOrchestrating && (
+          <div className={s.artifactsSection}>
+            <h4 className={s.artifactsHeading}>Evidence</h4>
+            {frontendArtifacts.map(artifact => (
+              <ArtifactCard key={artifact.id} artifact={artifact} />
+            ))}
+          </div>
+        )}
+
+        {/* Thinking indicator for all modes */}
+        {((llmBackendMode === 'direct' && runState.isRunning) || (llmBackendMode === 'grafana-llm-app' && (isFrontendOrchestrating || isSimpleStreaming))) && !displayedContent && (
+          <div className={`${s.message} ${s.assistantMessage}`}>
+            <div className={s.thinkingIndicator}>
+              <span className={s.thinkingDot}></span>
+              <span className={s.thinkingDot}></span>
+              <span className={s.thinkingDot}></span>
+            </div>
+          </div>
+        )}
+
+        {/* Streaming content display for both modes */}
+        {displayedContent && (
           <div className={`${s.message} ${s.assistantMessage} ${s.streamingMessage}`}>
             <div className={s.messageContent}>
               <span
                 dangerouslySetInnerHTML={{
-                  __html: sanitizeMarkdown(streamingContent)
+                  __html: sanitizeMarkdown(displayedContent)
                 }}
               />
-              <Spinner inline className={s.streamingSpinner} />
+              {displayedContent.length < (llmBackendMode === 'direct' ? runState.streamingText : frontendStreamingText).length && (
+                <span className={s.cursor}>▊</span>
+              )}
             </div>
           </div>
         )}
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Run controls - only for direct mode */}
+      {llmBackendMode === 'direct' && runState.isRunning && (
+        <RunControls
+          status={runState.status}
+          onPause={runState.pause}
+          onResume={runState.resume}
+          onCancel={runState.cancel}
+        />
+      )}
 
       <div className={s.inputArea}>
         <TextArea
@@ -465,7 +763,7 @@ export function ChatPanel() {
           placeholder="Ask anything..."
           rows={2}
           className={s.input}
-          disabled={isStreaming}
+          disabled={runState.isRunning || isFrontendOrchestrating || isSimpleStreaming}
           style={{
             height: 'auto',
             minHeight: '44px',
@@ -480,12 +778,11 @@ export function ChatPanel() {
           <Button
             icon="comment-alt"
             onClick={handleSend}
-            variant="primary"
-            disabled={!input.trim() || isStreaming}
+            disabled={!input.trim() || runState.isRunning || isFrontendOrchestrating || isSimpleStreaming}
             size="sm"
             className={s.sendButton}
           >
-            {isStreaming ? 'Sending...' : 'Send'}
+            {(runState.isRunning || isFrontendOrchestrating || isSimpleStreaming) ? 'Running...' : 'Send'}
           </Button>
         </div>
       </div>
@@ -561,6 +858,54 @@ const getStyles = (theme: GrafanaTheme2) => ({
       50% { opacity: 0.8; }
     }
   `,
+  thinkingIndicator: css`
+    display: flex;
+    gap: ${theme.spacing(0.75)};
+    align-items: center;
+    padding: ${theme.spacing(1.5, 2)};
+  `,
+  thinkingDot: css`
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: ${ZagalinColors.orange};
+    animation: thinking 1.4s ease-in-out infinite;
+
+    &:nth-child(1) {
+      animation-delay: 0s;
+    }
+    &:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+    &:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    @keyframes thinking {
+      0%, 60%, 100% {
+        opacity: 0.3;
+        transform: scale(1) translateY(0);
+      }
+      30% {
+        opacity: 1;
+        transform: scale(1.3) translateY(-4px);
+      }
+    }
+  `,
+  cursor: css`
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 4px;
+    background: ${ZagalinColors.orange};
+    vertical-align: middle;
+    animation: blink 0.9s ease-in-out infinite;
+
+    @keyframes blink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
+  `,
   messageContent: css`
     word-break: break-word;
     line-height: 1.5;
@@ -606,6 +951,18 @@ const getStyles = (theme: GrafanaTheme2) => ({
     gap: ${theme.spacing(1)};
     margin-top: ${theme.spacing(1)};
     flex-wrap: wrap;
+  `,
+  artifactsSection: css`
+    margin-top: ${theme.spacing(1.5)};
+    display: flex;
+    flex-direction: column;
+    gap: ${theme.spacing(1)};
+  `,
+  artifactsHeading: css`
+    font-size: ${theme.typography.body.fontSize};
+    font-weight: ${theme.typography.fontWeightMedium};
+    color: ${theme.colors.text.primary};
+    margin-bottom: ${theme.spacing(0.5)};
   `,
   inputArea: css`
     padding: ${theme.spacing(2)};
