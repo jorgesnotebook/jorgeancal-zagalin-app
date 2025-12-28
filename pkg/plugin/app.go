@@ -3,7 +3,6 @@ package plugin
 import (
 	"context"
 	"net/http"
-	"os"
 	"strconv"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -23,7 +22,6 @@ type App struct {
 	settings        *Settings
 	contextManager  *contextmgr.Manager
 	guardrails      *Guardrails
-	storage         *UserStorage
 	datasourceCache *datasourceCache
 	queryValidator  *QueryValidator
 	runManager      *RunManager
@@ -31,13 +29,6 @@ type App struct {
 
 func NewApp(ctx context.Context, appSettings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
 	var app App
-
-	dataDir := os.Getenv("GF_PLUGIN_APP_DATA_PATH")
-	if dataDir == "" {
-		dataDir = "./data" // Fallback for development
-	}
-	app.storage = NewUserStorage(dataDir)
-	backend.Logger.Info("User storage initialized", "dataDir", dataDir)
 
 	app.contextManager = contextmgr.NewManager()
 	app.datasourceCache = newDatasourceCache()

@@ -19,6 +19,10 @@ jest.mock('@grafana/runtime', () => ({
       json: jest.fn().mockResolvedValue({}),
     }),
   }),
+  usePluginUserStorage: jest.fn().mockReturnValue({
+    getItem: jest.fn().mockResolvedValue(null),
+    setItem: jest.fn().mockResolvedValue(undefined),
+  }),
   config: {
     buildInfo: {
       version: '9.0.0',
@@ -53,19 +57,6 @@ jest.mock('@grafana/llm', () => ({
   vector: {
     enabled: jest.fn().mockResolvedValue(false),
   },
-}));
-
-jest.mock('../../services/storageApiClient', () => ({
-  StorageApiClient: {
-    getConversations: jest.fn().mockResolvedValue([]),
-    getConversation: jest.fn().mockResolvedValue(null),
-    saveConversation: jest.fn().mockResolvedValue({}),
-    deleteConversation: jest.fn().mockResolvedValue({}),
-    updateTitle: jest.fn().mockResolvedValue({}),
-    togglePin: jest.fn().mockResolvedValue({}),
-    isAvailable: jest.fn().mockResolvedValue(true),
-  },
-  migrateFromLocalStorage: jest.fn().mockResolvedValue({ success: true, migrated: 0, errors: 0 }),
 }));
 
 describe('Components/App', () => {

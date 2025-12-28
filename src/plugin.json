@@ -7,7 +7,7 @@
   "executable": "gpx_zagalin",
   "info": {
     "keywords": ["ai", "llm", "chat", "assistant", "openai", "promql", "logql", "observability", "monitoring"],
-    "description": "Zagalin - Context-aware AI assistant for Grafana. Chat with your metrics, generate queries, and troubleshoot issues using natural language powered by OpenAI.",
+    "description": "Zagalin - Context-aware AI assistant for Grafana. Chat with your metrics, generate queries, and troubleshoot issues using natural language powered by LLMs.",
     "author": {
       "name": "Jorge Andreu Calatayud",
       "url": "https://github.com/jorgeancal"

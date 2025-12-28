@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -763,36 +762,6 @@ func (a *App) orchestrateRunFull(ctx context.Context, run *RunState, req Assista
 
 // generateExecutionPlan calls LLM to generate a structured execution plan
 func (a *App) generateExecutionPlan(ctx context.Context, req AssistantRequest, incomingReq *http.Request) (*ExecutionPlan, error) {
-	// Check if we should use mock mode (for testing without LLM)
-	// Set environment variable ZAGALIN_MOCK_LLM=true to enable
-	if os.Getenv("ZAGALIN_MOCK_LLM") == "true" {
-		backend.Logger.Info("Using mock LLM mode for planning")
-		return &ExecutionPlan{
-			Goal: fmt.Sprintf("Mock analysis of: %s", req.Message),
-			Steps: []PlannedStep{
-				{
-					Index:       0,
-					Title:       "Step 1: Analyze metrics",
-					Description: "Check key performance indicators and identify anomalies",
-					Status:      "pending",
-				},
-				{
-					Index:       1,
-					Title:       "Step 2: Review logs",
-					Description: "Examine error logs for patterns and root causes",
-					Status:      "pending",
-				},
-				{
-					Index:       2,
-					Title:       "Step 3: Trace requests",
-					Description: "Follow distributed traces to identify bottlenecks",
-					Status:      "pending",
-				},
-			},
-			EstimatedDuration: "2-3 minutes",
-		}, nil
-	}
-
 	// Build planning prompt
 	planningPrompt := BuildPlanningPrompt(req.Message, req.Context)
 
@@ -896,49 +865,6 @@ func (a *App) generateExecutionPlan(ctx context.Context, req AssistantRequest, i
 
 // executeStep executes a single step and returns the result and artifacts
 func (a *App) executeStep(ctx context.Context, run *RunState, req AssistantRequest, step PlannedStep, stepIndex int, incomingReq *http.Request) (string, []Artifact, error) {
-	// Check if we should use mock mode
-	if os.Getenv("ZAGALIN_MOCK_LLM") == "true" {
-		backend.Logger.Info("Using mock LLM mode for step execution", "step", stepIndex)
-
-		// Simulate some processing time
-		time.Sleep(1 * time.Second)
-
-		// Generate mock response with artifacts
-		mockResponse := fmt.Sprintf("Executing %s...\n\nBased on the analysis, here are the key findings:\n\n", step.Title)
-		mockResponse += "1. System is operating within normal parameters\n"
-		mockResponse += "2. No critical errors detected in the timeframe\n"
-		mockResponse += "3. Query: rate(http_requests_total[5m])\n\n"
-		mockResponse += "The metrics show stable performance with no anomalies."
-
-		// Create mock artifacts
-		artifacts := []Artifact{
-			{
-				ID:        fmt.Sprintf("artifact_%s", uuid.New().String()),
-				Type:      "query",
-				Content:   "rate(http_requests_total[5m])",
-				Metadata: map[string]interface{}{
-					"signal":       "metrics",
-					"format":       "promql",
-					"datasource":   "prometheus",
-					"datasourceUid": "prom-1",
-				},
-				Timestamp: time.Now(),
-			},
-		}
-
-		// Emit the response text gradually (simulate streaming)
-		words := strings.Split(mockResponse, " ")
-		for i, word := range words {
-			if i > 0 {
-				EmitAssistantDelta(run.EventChan, run.RunID, " ")
-			}
-			EmitAssistantDelta(run.EventChan, run.RunID, word)
-			time.Sleep(50 * time.Millisecond)
-		}
-
-		return mockResponse, artifacts, nil
-	}
-
 	// Detect skill for this step
 	skill := DetectSkill(step.Description, req.Context)
 

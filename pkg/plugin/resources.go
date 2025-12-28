@@ -80,14 +80,6 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 	// Run-based orchestration endpoints
 	mux.HandleFunc("/runs/start", a.handleStartRun)
 	mux.HandleFunc("/runs/", a.handleRunRoutes)
-
-	mux.HandleFunc("/storage/conversations", a.handleGetConversations)
-	mux.HandleFunc("/storage/conversation", a.handleGetConversation)
-	mux.HandleFunc("/storage/conversation/save", a.handleSaveConversation)
-	mux.HandleFunc("/storage/conversation/delete", a.handleDeleteConversation)
-	mux.HandleFunc("/storage/conversation/title", a.handleUpdateConversationTitle)
-	mux.HandleFunc("/storage/conversation/pin", a.handleTogglePin)
-	mux.HandleFunc("/conversations/", a.handleExportConversation)
 }
 
 func (a *App) handleContextStatus(w http.ResponseWriter, req *http.Request) {
