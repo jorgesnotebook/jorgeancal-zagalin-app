@@ -244,6 +244,68 @@ The plugin implements multiple security layers that work together:
 
 For detailed security documentation, see [`.claude/CLAUDE.md`](https://github.com/jorgesnotebook/jorgeancal-zagalin-app/blob/main/.claude/CLAUDE.md#security-first-development).
 
+## 📖 Version History & Releases
+
+### Current Version: 0.0.2 - "Security & Governance" (December 27, 2025)
+
+This release transforms Zagalin into a production-ready observability assistant with enterprise-grade security controls.
+
+**Highlights**:
+- ✅ **Query Validation System** - Pattern-based validation for PromQL, LogQL, TraceQL
+- ✅ **OpenTelemetry Scope Enforcement** - Automatic service/environment labeling
+- ✅ **Datasource Governance** - Allowlist system for approved datasources
+- ✅ **Conversation History** - Persistent storage with dual-tier architecture
+- ✅ **AI Development Tools** - Configurations for Claude, ChatGPT, Copilot, Cursor
+- ✅ **Privacy-Conscious Logging** - Usage analytics without exposing queries
+
+**Security Pipeline**: Every query now flows through 6 security validation stages
+**Configuration**: 25+ new settings (all opt-in, disabled by default)
+**Breaking Changes**: None
+
+**Documentation**:
+- 📄 [Release Notes](docs/releases/v0.0.2.md)
+- 📄 [Detailed Changelog](CHANGELOG.md#002---2025-12-27)
+- 📄 [Upgrade Guide](CHANGELOG.md#upgrading-to-002-from-001)
+
+### Previous Versions
+
+#### Version 0.0.1 - "Foundation" (December 24, 2025)
+Initial release with core AI assistant capabilities.
+
+**Highlights**:
+- Context-aware chat with dashboard, panel, and time range awareness
+- Floating chat interface on every dashboard
+- Query generation for PromQL, LogQL, TraceQL
+- Skills system (explain_panel, generate_query, troubleshoot, analyze_dashboard)
+- LLM integration via grafana-llm-app
+- Function calling for structured tool execution
+
+**Documentation**:
+- 📄 [Changelog](CHANGELOG.md#001---2025-12-24)
+
+### Coming Soon: v0.0.3 - "Intelligence & Orchestration" (Expected: January 2026)
+
+Next release will focus on structured investigation workflows:
+- Frontend orchestration with planning and step execution
+- Artifact management with syntax highlighting
+- Smart routing between dashboard questions and investigations
+- Enhanced context extraction and summarization
+- Conversation export to JSON/Markdown
+
+### Full Documentation
+
+- 📖 **Changelog**: [CHANGELOG.md](CHANGELOG.md) - Detailed changes following Keep a Changelog format
+- 📖 **Version History**: [docs/VERSION_HISTORY.md](docs/VERSION_HISTORY.md) - Comprehensive version overview
+- 📖 **Release Notes**: [docs/releases/](docs/releases/) - Detailed release narratives
+- 📖 **GitHub Releases**: [Releases Page](https://github.com/jorgesnotebook/jorgeancal-zagalin-app/releases)
+
+### Version Comparison
+
+| Version | Release Date | Theme | Major Features | Breaking Changes |
+|---------|-------------|-------|----------------|------------------|
+| **0.0.2** | Dec 27, 2025 | Security & Governance | Query validation, OTel enforcement, datasource governance, conversation history | None |
+| 0.0.1 | Dec 24, 2025 | Foundation | Context-aware chat, floating UI, query generation, skills system | N/A |
+
 ## 📝 License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](https://github.com/jorgesnotebook/jorgeancal-zagalin-app/blob/main/LICENSE) file for details.

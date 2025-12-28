@@ -1,8 +1,11 @@
 module github.com/jorgeancal/zagalin
 
-go 1.25.1
+go 1.24.6
 
-require github.com/grafana/grafana-plugin-sdk-go v0.284.0
+require (
+	github.com/google/uuid v1.6.0
+	github.com/grafana/grafana-plugin-sdk-go v0.284.0
+)
 
 require (
 	github.com/BurntSushi/toml v1.5.0 // indirect
@@ -22,7 +25,6 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/grafana/otel-profiling-go v0.5.1 // indirect
 	github.com/grafana/pyroscope-go/godeltaprof v0.1.9 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.1.0 // indirect
