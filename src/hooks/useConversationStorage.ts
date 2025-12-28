@@ -13,29 +13,39 @@
  * ```
  */
 
-import { usePluginUserStorage } from '@grafana/runtime';
 import { StorageBackend } from '../services/conversationStorage';
+import { useMemo } from 'react';
+
+/**
+ * LocalStorage fallback for when plugin context is not available
+ */
+const localStorageBackend: StorageBackend = {
+  getItem: (key: string) => {
+    return localStorage.getItem(key);
+  },
+  setItem: (key: string, value: string) => {
+    localStorage.setItem(key, value);
+  },
+  removeItem: (key: string) => {
+    localStorage.removeItem(key);
+  },
+};
 
 /**
  * Hook that provides a storage backend for conversation storage
- * Wraps Grafana's usePluginUserStorage() to provide automatic fallback
  *
- * Note: Grafana's PluginUserStorage doesn't have removeItem,
- * so we implement it by setting the value to empty string.
+ * Currently uses localStorage for all scenarios to ensure:
+ * - Consistent storage between main app and floating chat
+ * - No split-brain issues (conversations visible in both places)
+ * - Works everywhere (no plugin context required)
+ * - Grafana validator compliant
+ *
+ * Future: Can be enhanced to use Grafana's User Storage API when available,
+ * with proper migration between localStorage and backend storage.
  */
 export function useConversationStorage(): StorageBackend {
-  const pluginStorage = usePluginUserStorage();
-
-  return {
-    getItem: (key: string) => {
-      return pluginStorage.getItem(key);
-    },
-    setItem: (key: string, value: string) => {
-      return pluginStorage.setItem(key, value);
-    },
-    removeItem: async (key: string) => {
-      // PluginUserStorage doesn't have removeItem, so we clear by setting empty string
-      await pluginStorage.setItem(key, '');
-    },
-  };
+  // Always use localStorage for consistency between main app and floating chat
+  // The floating chat is mounted globally (no plugin context), so it must use localStorage
+  // To avoid split-brain, we use localStorage everywhere
+  return useMemo(() => localStorageBackend, []);
 }
