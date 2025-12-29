@@ -165,10 +165,19 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 	// Fallback: try forwarding headers from incoming HTTP request if service account not available
 	// This is less secure but may work in some Grafana configurations
 	if httpReq.Header.Get("Authorization") == "" {
+		// Try forwarding Authorization header from incoming request (if present)
+		if authHeader := incomingReq.Header.Get("Authorization"); authHeader != "" {
+			httpReq.Header.Set("Authorization", authHeader)
+			c.logger.Debug("Fallback: forwarding Authorization header from incoming request")
+		}
+
+		// Forward X-Grafana-Id JWT for user identification
 		if grafanaID := incomingReq.Header.Get("X-Grafana-Id"); grafanaID != "" {
 			httpReq.Header.Set("X-Grafana-Id", grafanaID)
 			c.logger.Debug("Fallback: forwarding X-Grafana-Id JWT")
 		}
+
+		// Forward cookies for session-based auth
 		if cookies := incomingReq.Header.Get("Cookie"); cookies != "" {
 			httpReq.Header.Set("Cookie", cookies)
 			c.logger.Debug("Fallback: forwarding cookies")
@@ -213,7 +222,7 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 
 		// Provide helpful error message based on status
 		if resp.StatusCode == 401 {
-			return nil, fmt.Errorf("authentication failed (401): %s\n\nPossible causes:\n1. grafana-llm-app may not be properly configured with LLM provider credentials\n2. Check Administration → Plugins → LLM App → Configuration\n3. Ensure your LLM provider API key is set", errorMsg)
+			return nil, fmt.Errorf("authentication failed (401): %s\n\nPossible causes:\n1. Zagalin plugin needs a service account token to communicate with grafana-llm-app\n2. Configure a service account token in: Administration → Plugins → Zagalin → Settings → Service Account Token\n3. Alternatively, ensure grafana-llm-app is configured with LLM provider credentials\n4. Check Administration → Plugins → LLM App → Configuration", errorMsg)
 		}
 
 		return nil, fmt.Errorf("LLM API returned status %d: %s", resp.StatusCode, string(body))

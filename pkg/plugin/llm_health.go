@@ -34,12 +34,23 @@ func CheckLLMHealth(ctx context.Context, grafanaURL string, incomingReq *http.Re
 		}
 	}
 
-	// Forward authentication headers
+	// Forward authentication headers (same order as llm_client.go)
+	// 1. Try Authorization header first (most reliable)
+	if authHeader := incomingReq.Header.Get("Authorization"); authHeader != "" {
+		httpReq.Header.Set("Authorization", authHeader)
+		log.DefaultLogger.Debug("Health check: forwarding Authorization header")
+	}
+
+	// 2. Forward X-Grafana-Id JWT for user identification
 	if grafanaID := incomingReq.Header.Get("X-Grafana-Id"); grafanaID != "" {
 		httpReq.Header.Set("X-Grafana-Id", grafanaID)
+		log.DefaultLogger.Debug("Health check: forwarding X-Grafana-Id")
 	}
+
+	// 3. Forward cookies for session-based auth
 	if cookies := incomingReq.Header.Get("Cookie"); cookies != "" {
 		httpReq.Header.Set("Cookie", cookies)
+		log.DefaultLogger.Debug("Health check: forwarding cookies")
 	}
 
 	// Make request with timeout

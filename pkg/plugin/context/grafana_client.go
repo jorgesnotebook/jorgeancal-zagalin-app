@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -19,11 +20,15 @@ type GrafanaClient struct {
 // NewGrafanaClient creates a new Grafana API client
 func NewGrafanaClient(httpClient *http.Client, baseURL string) *GrafanaClient {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = &http.Client{
+			Timeout: 30 * time.Second, // Set reasonable timeout
+		}
 	}
 	if baseURL == "" {
 		baseURL = "http://localhost:3000"
 	}
+	// Remove trailing slash to prevent double slashes in URLs
+	baseURL = strings.TrimRight(baseURL, "/")
 	return &GrafanaClient{
 		httpClient: httpClient,
 		baseURL:    baseURL,
@@ -179,13 +184,17 @@ func (gc *GrafanaClient) ListDatasources(ctx context.Context) ([]DataSource, err
 
 	resp, err := gc.httpClient.Do(req)
 	if err != nil {
+		// Check if it's a context timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("failed to fetch datasources: %w (timeout - this is expected if the plugin doesn't have direct Grafana API access)", err)
+		}
 		return nil, fmt.Errorf("failed to list datasources: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("list datasources failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("list datasources failed with status %d: %s (URL: %s)", resp.StatusCode, string(body), url)
 	}
 
 	var datasources []DataSource
