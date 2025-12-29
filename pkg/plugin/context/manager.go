@@ -115,13 +115,20 @@ func (m *Manager) Refresh(ctx context.Context) error {
 
 	// If no datasources configured, try to find them automatically
 	if len(datasourceUIDs) == 0 {
-		datasources, err := m.client.ListDatasources(ctx)
+		// Use a shorter timeout for datasource listing to avoid blocking
+		listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
+		datasources, err := m.client.ListDatasources(listCtx)
 		if err != nil {
-			backend.Logger.Warn("Failed to list datasources", "error", err)
+			backend.Logger.Warn("Failed to list datasources - context features will be limited",
+				"error", err,
+				"hint", "Configure specific datasource UIDs in plugin settings, or ensure the plugin has access to Grafana API")
 		} else {
 			for _, ds := range datasources {
 				datasourceUIDs = append(datasourceUIDs, ds.UID)
 			}
+			backend.Logger.Debug("Auto-discovered datasources", "count", len(datasourceUIDs))
 		}
 	}
 

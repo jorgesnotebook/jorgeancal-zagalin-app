@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -147,13 +148,38 @@ func (a *App) handleContextRefresh(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	backend.Logger.Info("Manual context refresh triggered")
-
-	err := a.contextManager.Refresh(req.Context())
+	// Extract user identity for authentication and rate limiting
+	user, err := extractUserIdentity(req)
 	if err != nil {
+		sendErrorResponse(w, "Authentication required", err, http.StatusUnauthorized)
+		return
+	}
+
+	// Apply rate limiting per user (reuse existing guardrails)
+	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
+		if !a.guardrails.rateLimiter.Allow(user.UserLogin) {
+			backend.Logger.Warn("Rate limit exceeded for context refresh", "user", user.UserLogin)
+			sendErrorResponse(w, "Rate limit exceeded", fmt.Errorf("too many requests"), http.StatusTooManyRequests)
+			return
+		}
+	}
+
+	backend.Logger.Info("Manual context refresh triggered",
+		"user", user.UserLogin,
+		"orgId", user.OrgID,
+	)
+
+	err = a.contextManager.Refresh(req.Context())
+	if err != nil {
+		backend.Logger.Error("Context refresh failed",
+			"error", err,
+			"user", user.UserLogin,
+		)
 		sendErrorResponse(w, "Context refresh failed", err, http.StatusInternalServerError)
 		return
 	}
+
+	backend.Logger.Info("Context refresh completed successfully", "user", user.UserLogin)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
