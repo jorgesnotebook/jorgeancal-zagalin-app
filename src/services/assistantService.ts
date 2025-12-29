@@ -61,6 +61,7 @@ export interface AssistantRequest {
   context: AssistantContext;
   skillHint?: string;
   enrichedMessage?: string; // Optional pre-enriched message with full context
+  mode?: 'standard' | 'thinking'; // Chat mode: standard (fast) or thinking (extended reasoning)
 }
 
 export interface StreamChunk {
@@ -98,6 +99,7 @@ export function streamAssistantChat(request: AssistantRequest): Observable<Strea
       context: request.context,
       skillHint: request.skillHint,
       enrichedMessage: request.enrichedMessage,
+      mode: request.mode || 'standard',
     };
 
       // Create fetch request for SSE

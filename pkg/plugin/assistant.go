@@ -20,6 +20,7 @@ type AssistantRequest struct {
 	History  []AssistantMessage `json:"history"`
 	Context  AssistantContext   `json:"context"`
 	SkillHint string            `json:"skillHint,omitempty"`
+	Mode     string             `json:"mode,omitempty"` // "standard" (fast) or "thinking" (extended reasoning)
 }
 
 // AssistantResponse represents the response metadata
@@ -182,8 +183,26 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		skill = DetectSkill(assistantReq.Message, assistantReq.Context)
 	}
 
+	// Determine chat mode (default to standard)
+	mode := assistantReq.Mode
+	if mode == "" {
+		mode = "standard"
+	}
+
 	// Build prompts
 	systemPrompt := BuildSystemPrompt(skill, assistantReq.Context)
+
+	// For thinking mode, enhance system prompt with reasoning instructions
+	if mode == "thinking" {
+		systemPrompt += "\n\n---\n\nIMPORTANT: You are in Deep Thinking mode. Take your time to reason through complex problems:\n" +
+			"1. Break down the problem into components\n" +
+			"2. Consider multiple approaches and their trade-offs\n" +
+			"3. Think through edge cases and potential issues\n" +
+			"4. Provide thorough explanations of your reasoning\n" +
+			"5. Be comprehensive in your analysis\n\n" +
+			"This mode is for complex investigations - use the extra reasoning capacity to provide deeper insights."
+	}
+
 	userPrompt := BuildUserPrompt(skill, assistantReq.Message, assistantReq.Context)
 
 	// Construct full message history
@@ -221,13 +240,38 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		}
 	}
 
+	// Adjust parameters based on mode
+	// Model comes from plugin settings (configured by admin)
+	// We only adjust temperature and token limits based on mode
+	maxTokens := 2000
+	temperature := 0.7
+
+	if mode == "thinking" {
+		// Thinking mode: more tokens and lower temperature for deeper reasoning
+		maxTokens = 4000  // More tokens for comprehensive analysis
+		temperature = 0.5 // Lower temperature for more focused, logical reasoning
+	}
+
+	// Get model from settings
+	// If not configured, use empty string and let grafana-llm-app use its default
+	model := ""
+	if a.settings != nil && a.settings.LLMModel != "" {
+		model = a.settings.LLMModel
+		backend.Logger.Debug("Using model from plugin settings", "model", model, "mode", mode)
+	} else {
+		// Empty model = use default from grafana-llm-app configuration
+		// This works with any provider (OpenAI, Anthropic, Azure, Ollama, etc.)
+		backend.Logger.Debug("Using default model from grafana-llm-app (no model configured in Zagalin settings)", "mode", mode)
+	}
+
 	// Prepare LLM request
-	// LLM configuration is handled by grafana-llm-app plugin, so we use sensible defaults here
+	// Model is configured in plugin settings or uses default
+	// Admin should set LLMModel in plugin config to match their grafana-llm-app setup
 	llmReq := LLMStreamRequest{
-		Model:       "gpt-4o-mini", // Default model
+		Model:       model,
 		Messages:    messages,
-		Temperature: 0.7,    // Default temperature
-		MaxTokens:   2000,   // Default max tokens
+		Temperature: temperature,
+		MaxTokens:   maxTokens,
 		Tools:       GetTools(true), // Function calling enabled by default
 		ToolChoice:  "auto",
 		Stream:      true, // Enable SSE streaming

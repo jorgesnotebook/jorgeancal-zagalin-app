@@ -10,6 +10,7 @@ import {
   Alert,
   Badge,
   Tooltip,
+  RadioButtonGroup,
 } from '@grafana/ui';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
@@ -54,6 +55,8 @@ function sanitizeMarkdown(content: string): string {
   }
 }
 
+export type ChatMode = 'standard' | 'thinking';
+
 export function ChatPanel() {
   const s = useStyles2(getStyles);
   const [input, setInput] = useState('');
@@ -62,6 +65,7 @@ export function ChatPanel() {
   const [llmReady, setLlmReady] = useState<boolean | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
+  const [mode, setMode] = useState<ChatMode>('standard');
 
   // Frontend orchestrator state (for complex query orchestration)
   const [frontendPlan, setFrontendPlan] = useState<ExecutionPlan | null>(null);
@@ -430,6 +434,7 @@ export function ChatPanel() {
               timeRange: context.timeRange,
               templateVars: context.templateVariables,
             },
+            mode,
           }).subscribe({
             next: (chunk) => {
               if (chunk.chunk) {
@@ -676,35 +681,48 @@ export function ChatPanel() {
         <div ref={messagesEndRef} />
       </div>
 
-      <div className={s.inputArea}>
-        <TextArea
-          value={input}
-          onChange={e => setInput(e.currentTarget.value)}
-          onKeyDown={handleKeyPress}
-          placeholder="Ask anything..."
-          rows={2}
-          className={s.input}
-          disabled={isFrontendOrchestrating || isSimpleStreaming}
-          style={{
-            height: 'auto',
-            minHeight: '44px',
-          }}
-          onInput={(e) => {
-            const target = e.target as HTMLTextAreaElement;
-            target.style.height = 'auto';
-            target.style.height = Math.min(target.scrollHeight, 200) + 'px';
-          }}
-        />
-        <div className={s.inputActions}>
-          <Button
-            icon="comment-alt"
-            onClick={handleSend}
-            disabled={!input.trim() || isFrontendOrchestrating || isSimpleStreaming}
+      <div className={s.inputContainer}>
+        <div className={s.modeSelector}>
+          <RadioButtonGroup
+            options={[
+              { label: '⚡ Standard', value: 'standard', description: 'Fast responses' },
+              { label: '🧠 Deep Thinking', value: 'thinking', description: 'Extended reasoning for complex problems' },
+            ]}
+            value={mode}
+            onChange={(value) => setMode(value as ChatMode)}
             size="sm"
-            className={s.sendButton}
-          >
-            {(isFrontendOrchestrating || isSimpleStreaming) ? 'Running...' : 'Send'}
-          </Button>
+          />
+        </div>
+        <div className={s.inputArea}>
+          <TextArea
+            value={input}
+            onChange={e => setInput(e.currentTarget.value)}
+            onKeyDown={handleKeyPress}
+            placeholder={mode === 'thinking' ? 'Ask a complex question...' : 'Ask anything...'}
+            rows={2}
+            className={s.input}
+            disabled={isFrontendOrchestrating || isSimpleStreaming}
+            style={{
+              height: 'auto',
+              minHeight: '44px',
+            }}
+            onInput={(e) => {
+              const target = e.target as HTMLTextAreaElement;
+              target.style.height = 'auto';
+              target.style.height = Math.min(target.scrollHeight, 200) + 'px';
+            }}
+          />
+          <div className={s.inputActions}>
+            <Button
+              icon="comment-alt"
+              onClick={handleSend}
+              disabled={!input.trim() || isFrontendOrchestrating || isSimpleStreaming}
+              size="sm"
+              className={s.sendButton}
+            >
+              {(isFrontendOrchestrating || isSimpleStreaming) ? 'Running...' : 'Send'}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -885,9 +903,18 @@ const getStyles = (theme: GrafanaTheme2) => ({
     color: ${theme.colors.text.primary};
     margin-bottom: ${theme.spacing(0.5)};
   `,
+  inputContainer: css`
+    border-top: 1px solid ${theme.colors.border.weak};
+  `,
+  modeSelector: css`
+    padding: ${theme.spacing(1)} ${theme.spacing(2)};
+    background: ${theme.colors.background.secondary};
+    border-bottom: 1px solid ${theme.colors.border.weak};
+    display: flex;
+    justify-content: center;
+  `,
   inputArea: css`
     padding: ${theme.spacing(2)};
-    border-top: 1px solid ${theme.colors.border.weak};
     display: flex;
     flex-direction: column;
     gap: ${theme.spacing(1)};
