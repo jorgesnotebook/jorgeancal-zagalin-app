@@ -1,3 +1,5 @@
+import type { ReasoningStep, SourceReference } from '../types/explainableAI';
+
 const STORAGE_KEY = 'zagalin-conversations';
 const MAX_CONVERSATIONS = 50;
 const MAX_MESSAGES_PER_CONVERSATION = 100;
@@ -10,6 +12,10 @@ export interface StoredMessage {
   tokens?: number;
   cost?: number;
   artifacts?: any[];
+  reasoning?: ReasoningStep[];
+  sources?: SourceReference[];
+  confidence?: number;
+  caveats?: string[];
 }
 
 export type ConversationMessage = StoredMessage;

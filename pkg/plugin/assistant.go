@@ -195,13 +195,28 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 
 	// For thinking mode, enhance system prompt with reasoning instructions
 	if mode == "thinking" {
-		systemPrompt += "\n\n---\n\nIMPORTANT: You are in Deep Thinking mode. Take your time to reason through complex problems:\n" +
-			"1. Break down the problem into components\n" +
-			"2. Consider multiple approaches and their trade-offs\n" +
-			"3. Think through edge cases and potential issues\n" +
-			"4. Provide thorough explanations of your reasoning\n" +
-			"5. Be comprehensive in your analysis\n\n" +
-			"This mode is for complex investigations - use the extra reasoning capacity to provide deeper insights."
+		systemPrompt += "\n\n---\n\nIMPORTANT: You are in Deep Thinking mode with explainable reasoning.\n\n" +
+			"Structure your response using this pattern:\n\n" +
+			"## 🔍 Observation\n" +
+			"State what data/metrics/context you have available.\n" +
+			"Rate your confidence in the data quality (0-100%).\n\n" +
+			"## 📊 Analysis\n" +
+			"Analyze the situation:\n" +
+			"- What patterns do you see?\n" +
+			"- What stands out as unusual?\n" +
+			"- What are the key metrics?\n\n" +
+			"## 💡 Hypothesis\n" +
+			"List possible explanations, ranked by likelihood:\n" +
+			"1. Most likely explanation (confidence: XX%)\n" +
+			"2. Alternative explanation (confidence: XX%)\n" +
+			"3. Less likely but possible (confidence: XX%)\n\n" +
+			"## ✅ Conclusion\n" +
+			"State your final answer with overall confidence level.\n" +
+			"Format: **Answer: [Your answer here]**\n" +
+			"**Overall Confidence: XX%**\n\n" +
+			"## 🔬 Verification\n" +
+			"How can this be verified? What additional data would help?\n\n" +
+			"Use these emoji headings exactly as shown. Be thorough and provide clear reasoning at each step."
 	}
 
 	userPrompt := BuildUserPrompt(skill, assistantReq.Message, assistantReq.Context)

@@ -28,6 +28,8 @@ import { ConversationListSidebar } from './ConversationListSidebar';
 import { PlanVisualization } from './PlanVisualization';
 import { ArtifactCard } from './ArtifactCard';
 import { ContextBadges } from './ContextBadges';
+import { ReasoningDisplay } from './ReasoningDisplay';
+import { parseReasoningResponse } from '../../services/reasoningParser';
 import type { Artifact } from '../../services/runService';
 import { streamAssistantChatRouted as streamAssistantChat } from '../../services/assistantServiceRouter';
 import { FrontendOrchestrator, type OrchestratorEvent } from '../../services/frontendOrchestrator';
@@ -308,8 +310,18 @@ export function ChatPanel() {
               console.log('[ChatPanel] Dashboard question streaming complete');
               const finalContent = simpleStreamingContentRef.current;
 
-              // Save assistant message
-              const assistantMessage: ConversationMessage = {
+              const explainableResponse = parseReasoningResponse(finalContent);
+
+              const assistantMessage: ConversationMessage = explainableResponse ? {
+                id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+                role: 'assistant',
+                content: explainableResponse.answer,
+                timestamp: new Date(),
+                reasoning: explainableResponse.reasoning,
+                sources: explainableResponse.sources,
+                confidence: explainableResponse.confidence,
+                caveats: explainableResponse.caveats,
+              } : {
                 id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
                 role: 'assistant',
                 content: finalContent,
@@ -451,8 +463,18 @@ export function ChatPanel() {
               console.log('[ChatPanel] Simple streaming complete');
               const finalContent = simpleStreamingContentRef.current;
 
-              // Save assistant message
-              const assistantMessage: ConversationMessage = {
+              const explainableResponse = parseReasoningResponse(finalContent);
+
+              const assistantMessage: ConversationMessage = explainableResponse ? {
+                id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+                role: 'assistant',
+                content: explainableResponse.answer,
+                timestamp: new Date(),
+                reasoning: explainableResponse.reasoning,
+                sources: explainableResponse.sources,
+                confidence: explainableResponse.confidence,
+                caveats: explainableResponse.caveats,
+              } : {
                 id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
                 role: 'assistant',
                 content: finalContent,
@@ -649,6 +671,15 @@ export function ChatPanel() {
                   <ArtifactCard key={artifact.id} artifact={artifact} />
                 ))}
               </div>
+            )}
+            {message.role === 'assistant' && (
+              <ReasoningDisplay
+                reasoning={message.reasoning}
+                sources={message.sources}
+                confidence={message.confidence}
+                caveats={message.caveats}
+                collapsed={true}
+              />
             )}
             {message.role === 'assistant' && (
               <div className={s.messageActions}>

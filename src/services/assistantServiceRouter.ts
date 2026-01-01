@@ -10,6 +10,7 @@ import { Observable } from 'rxjs';
 import { streamAssistantChat as streamBackend, type AssistantRequest, type StreamChunk } from './assistantService';
 import { streamGrafanaLLM } from './llmDirectClient';
 import { getZagalinConfig } from './configHelper';
+import { buildReasoningPrompt } from './reasoningParser';
 
 /**
  * Stream assistant chat with automatic routing based on configuration
@@ -141,5 +142,5 @@ function buildSystemPrompt(request: AssistantRequest): string {
   prompt += `- TraceQL for Tempo\n\n`;
   prompt += `Always provide working, tested query syntax. Explain your reasoning when appropriate.`;
 
-  return prompt;
+  return buildReasoningPrompt(prompt, request.mode || 'standard');
 }
