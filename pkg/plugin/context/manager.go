@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -31,12 +32,19 @@ type Manager struct {
 }
 
 // NewManager creates a new context manager
-// Note: Currently the context manager has limited functionality due to SDK constraints
-// A full implementation would require access to Grafana's internal HTTP client
 func NewManager() *Manager {
-	// For now, create a basic client - this will have limited functionality
-	// In a production setup, you'd want to pass proper authentication
-	client := NewGrafanaClient(http.DefaultClient, "")
+	// Create URL provider that extracts URL from request context
+	// This allows the manager to work in any environment (localhost, production, etc.)
+	urlProvider := func(ctx context.Context) (string, error) {
+		cfg := backend.GrafanaConfigFromContext(ctx)
+		grafanaURL, err := cfg.AppURL()
+		if err != nil {
+			return "", fmt.Errorf("failed to get Grafana URL from context: %w", err)
+		}
+		return grafanaURL, nil
+	}
+
+	client := NewGrafanaClient(http.DefaultClient, urlProvider)
 	return &Manager{
 		client: client,
 		stopCh: make(chan struct{}),

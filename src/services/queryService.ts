@@ -40,6 +40,17 @@ function getBasePath(): string {
 
 export class QueryService {
   static async query(request: QueryRequest): Promise<QueryResponse> {
+    // Always use backend for queries to get:
+    // - Rate limiting
+    // - Query validation
+    // - OTel enforcement
+    // - Datasource allowlist
+    // - Audit logging
+    return this.queryViaBackend(request);
+  }
+
+  // Backend mode (always used for queries)
+  private static async queryViaBackend(request: QueryRequest): Promise<QueryResponse> {
     try {
       const response = await getBackendSrv().post<QueryResponse>(
         `${getBasePath()}/query`,
@@ -47,7 +58,10 @@ export class QueryService {
       );
       return response;
     } catch (error: any) {
-      console.error('Query service error:', error);
+      console.error('Query service error (backend):', error);
+      if (error.status === 503 || error.status === 404) {
+        throw new Error('Backend unavailable. Please check that the Zagalin backend plugin is running.');
+      }
       throw new Error(`Query failed: ${error.message || 'Unknown error'}`);
     }
   }

@@ -67,7 +67,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
 
   // LLM Backend settings
   const [llmBackend, setLlmBackend] = useState<string>(
-    plugin.meta.jsonData?.llmBackend || 'grafana-llm-app'
+    plugin.meta.jsonData?.llmBackend || 'grafana-llm'
   );
   const [llmProvider, setLlmProvider] = useState<string>(
     plugin.meta.jsonData?.llmProvider || 'openai'
@@ -78,12 +78,17 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
   const [llmEndpoint, setLlmEndpoint] = useState<string>(
     plugin.meta.jsonData?.llmEndpoint || ''
   );
+  const [llmOrganization, setLlmOrganization] = useState<string>(
+    plugin.meta.jsonData?.llmOrganization || ''
+  );
   const [llmApiKey, setLlmApiKey] = useState<string>(
     plugin.meta.secureJsonData?.llmApiKey || ''
   );
   const [serviceAccountToken, setServiceAccountToken] = useState<string>(
     plugin.meta.secureJsonData?.serviceAccountToken || ''
   );
+
+  // Removed frontendOnlyMode - now handled by llmBackend setting
 
   // Query Validation state
   const [queryValidationEnabled, setQueryValidationEnabled] = useState<boolean>(
@@ -113,6 +118,39 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
   const [queryValidationLLMMode, setQueryValidationLLMMode] = useState<string>(
     plugin.meta.jsonData?.queryValidation?.llmValidationMode || 'advisory'
   );
+
+  // Sync state with plugin.meta when it changes (handles navigation back to config page)
+  useEffect(() => {
+    if (plugin.meta.jsonData) {
+      setConfig({ ...DEFAULT_CONFIG, ...plugin.meta.jsonData });
+      setAllowedDatasources(plugin.meta.jsonData.allowedDatasources || []);
+      setDefaultDatasource(plugin.meta.jsonData.defaultDatasource || '');
+      setLlmBackend(plugin.meta.jsonData.llmBackend || 'grafana-llm');
+      setLlmProvider(plugin.meta.jsonData.llmProvider || 'openai');
+      setLlmModel(plugin.meta.jsonData.llmModel || 'gpt-4o-mini');
+      setLlmEndpoint(plugin.meta.jsonData.llmEndpoint || '');
+      setLlmOrganization(plugin.meta.jsonData.llmOrganization || '');
+
+      // OTel settings
+      setOtelEnabled(plugin.meta.jsonData.otelEnforcement?.enabled || false);
+      setOtelRequireService(plugin.meta.jsonData.otelEnforcement?.requireServiceName !== false);
+      setOtelRequireEnvironment(plugin.meta.jsonData.otelEnforcement?.requireEnvironmentName !== false);
+      setOtelDefaultService(plugin.meta.jsonData.otelEnforcement?.defaultServiceName || '');
+      setOtelDefaultEnvironment(plugin.meta.jsonData.otelEnforcement?.defaultEnvironmentName || '');
+      setOtelRejectIfNoScope(plugin.meta.jsonData.otelEnforcement?.rejectIfNoScope !== false);
+
+      // Query Validation settings
+      setQueryValidationEnabled(plugin.meta.jsonData.queryValidation?.enabled || false);
+      setQueryValidationEnablePromQL(plugin.meta.jsonData.queryValidation?.enablePromqlValidation || false);
+      setQueryValidationEnableLogQL(plugin.meta.jsonData.queryValidation?.enableLogqlValidation || false);
+      setQueryValidationEnableTraceQL(plugin.meta.jsonData.queryValidation?.enableTraceqlValidation || false);
+      setQueryValidationStrictMode(plugin.meta.jsonData.queryValidation?.strictMode || false);
+      setQueryValidationMaxComplexity(plugin.meta.jsonData.queryValidation?.maxQueryComplexity || 100);
+      setQueryValidationLogAttempts(plugin.meta.jsonData.queryValidation?.logValidationAttempts !== false);
+      setQueryValidationEnableLLM(plugin.meta.jsonData.queryValidation?.enableLlmValidation || false);
+      setQueryValidationLLMMode(plugin.meta.jsonData.queryValidation?.llmValidationMode || 'advisory');
+    }
+  }, [plugin.meta.jsonData]);
 
   // Check health on mount
   useEffect(() => {
@@ -154,6 +192,13 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
   const handleSave = async () => {
     try {
       setError(null);
+
+      // Validate: Backend Proxy mode requires service account token
+      if (llmBackend === 'backend-proxy' && !serviceAccountToken) {
+        setError('Service account token is required when using Backend Proxy mode. Please provide a token or switch to a different LLM backend.');
+        return;
+      }
+
       // Save to Grafana's plugin settings (stored in database)
       const settings: any = {
         enabled: plugin.meta.enabled,
@@ -162,10 +207,11 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
           ...config,
           allowedDatasources,
           defaultDatasource,
-          llmBackend,
+          llmBackend: llmBackend === 'disabled' ? '' : llmBackend, // Empty string for disabled
           llmProvider,
           llmModel,
           llmEndpoint,
+          llmOrganization,
           otelEnforcement: {
             enabled: otelEnabled,
             requireServiceName: otelRequireService,
@@ -216,6 +262,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     setLlmProvider('openai');
     setLlmModel('gpt-4o-mini');
     setLlmEndpoint('');
+    setLlmOrganization('');
     setLlmApiKey('');
     setServiceAccountToken('');
     setOtelEnabled(false);
@@ -281,6 +328,17 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
 
   return (
     <div className={s.container}>
+      {/* Admin-Only Banner */}
+      <Alert title="Admin Configuration" severity="info">
+        <div>
+          <strong>⚠️ Administrator Access Required</strong>
+          <p style={{ marginTop: '8px', marginBottom: '0' }}>
+            This configuration page is only accessible to Organization Administrators.
+            All changes made here affect all users in this Grafana organization.
+          </p>
+        </div>
+      </Alert>
+
       <div className={s.header}>
         <div>
           <h2>Zagalin Configuration</h2>
@@ -384,36 +442,72 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             Configure how Zagalin connects to LLM services. You can use grafana-llm-app for centralized configuration, bring your own API keys, or disable LLM features entirely.
           </p>
 
-          {/* Backend Mode Selection with Visual Cards */}
+          {/* LLM Backend Mode Selection - 3 Options */}
           <div className={s.llmBackendCards}>
-            {/* grafana-llm-app Card */}
+            {/* Option 1: Official Grafana (@grafana/llm) - DEFAULT */}
             <div
-              className={`${s.llmBackendCard} ${llmBackend === 'grafana-llm-app' ? s.llmBackendCardActive : ''}`}
+              className={`${s.llmBackendCard} ${llmBackend === 'grafana-llm' ? s.llmBackendCardActive : ''}`}
               onClick={() => {
-                setLlmBackend('grafana-llm-app');
+                setLlmBackend('grafana-llm');
                 setIsDirty(true);
               }}
             >
               <div className={s.llmBackendCardHeader}>
                 <input
                   type="radio"
-                  checked={llmBackend === 'grafana-llm-app'}
+                  checked={llmBackend === 'grafana-llm'}
                   onChange={() => {
-                    setLlmBackend('grafana-llm-app');
+                    setLlmBackend('grafana-llm');
                     setIsDirty(true);
                   }}
                   className={s.llmBackendCardRadio}
                 />
                 <Icon name="plug" size="xl" />
-                <h4>grafana-llm-app</h4>
+                <h4>Official Grafana (Default)</h4>
               </div>
               <p className={s.llmBackendCardDescription}>
-                Use the grafana-llm-app plugin as a proxy. Centralize LLM configuration across all plugins. Supports OpenAI, Anthropic, Azure, and more.
+                Hybrid mode: Uses @grafana/llm for LLM calls (no service account), backend for queries/security.
               </p>
+              <ul style={{ marginTop: '8px', paddingLeft: '20px', fontSize: '12px' }}>
+                <li>✅ No service account needed</li>
+                <li>✅ Backend query validation</li>
+                <li>✅ Rate limiting & security</li>
+              </ul>
             </div>
 
-            {/* Direct API Card - TEMPORARILY DISABLED */}
-            {/* <div
+            {/* Option 2: Backend Proxy (Production Recommended) */}
+            <div
+              className={`${s.llmBackendCard} ${llmBackend === 'backend-proxy' ? s.llmBackendCardActive : ''}`}
+              onClick={() => {
+                setLlmBackend('backend-proxy');
+                setIsDirty(true);
+              }}
+            >
+              <div className={s.llmBackendCardHeader}>
+                <input
+                  type="radio"
+                  checked={llmBackend === 'backend-proxy'}
+                  onChange={() => {
+                    setLlmBackend('backend-proxy');
+                    setIsDirty(true);
+                  }}
+                  className={s.llmBackendCardRadio}
+                />
+                <Icon name="shield" size="xl" />
+                <h4>Zagalin Backend (Production)</h4>
+              </div>
+              <p className={s.llmBackendCardDescription}>
+                Full security through Zagalin backend. Requires service account token.
+              </p>
+              <ul style={{ marginTop: '8px', paddingLeft: '20px', fontSize: '12px' }}>
+                <li>✅ Rate limiting & validation</li>
+                <li>✅ Full audit trail</li>
+                <li>⚙️ Service account needed</li>
+              </ul>
+            </div>
+
+            {/* Option 3: Direct LLM API */}
+            <div
               className={`${s.llmBackendCard} ${llmBackend === 'direct' ? s.llmBackendCardActive : ''}`}
               onClick={() => {
                 setLlmBackend('direct');
@@ -431,60 +525,66 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                   className={s.llmBackendCardRadio}
                 />
                 <Icon name="key-skeleton-alt" size="xl" />
-                <h4>Direct API</h4>
+                <h4>Direct LLM API</h4>
               </div>
               <p className={s.llmBackendCardDescription}>
-                Call LLM providers directly with your own API keys. Full control over provider, model, and endpoint configuration.
+                Zagalin backend → OpenAI/Anthropic. Full security, no grafana-llm-app needed.
               </p>
-            </div> */}
-
-            {/* Disabled Card */}
-            <div
-              className={`${s.llmBackendCard} ${llmBackend === 'disabled' ? s.llmBackendCardActive : ''}`}
-              onClick={() => {
-                setLlmBackend('disabled');
-                setIsDirty(true);
-              }}
-            >
-              <div className={s.llmBackendCardHeader}>
-                <input
-                  type="radio"
-                  checked={llmBackend === 'disabled'}
-                  onChange={() => {
-                    setLlmBackend('disabled');
-                    setIsDirty(true);
-                  }}
-                  className={s.llmBackendCardRadio}
-                />
-                <Icon name="times" size="xl" />
-                <h4>Disable LLM Features</h4>
-              </div>
-              <p className={s.llmBackendCardDescription}>
-                Turn off all LLM-powered features. Zagalin will not make any LLM API calls.
-              </p>
+              <ul style={{ marginTop: '8px', paddingLeft: '20px', fontSize: '12px' }}>
+                <li>✅ Full security</li>
+                <li>⚙️ More configuration</li>
+              </ul>
             </div>
           </div>
 
-          {/* grafana-llm-app Mode Info */}
-          {llmBackend === 'grafana-llm-app' && (
+          {/* Official Grafana Mode Info */}
+          {llmBackend === 'grafana-llm' && (
+            <Alert title="Official Grafana Mode (Default) - Hybrid Architecture" severity="success">
+              <p>
+                <strong>Best of both worlds!</strong> Uses @grafana/llm for LLM calls (no service account needed) while keeping Zagalin backend for security features.
+              </p>
+              <p style={{ marginTop: '8px' }}>
+                <strong>What you get:</strong>
+              </p>
+              <ul>
+                <li>✅ <strong>No service account needed</strong> - Uses session-based authentication for LLM calls</li>
+                <li>✅ <strong>Backend security features</strong> - Rate limiting, query validation, audit logging</li>
+                <li>✅ <strong>Datasource governance</strong> - Allowlist enforcement, OTel scope checking</li>
+                <li>✅ <strong>Persistent storage</strong> - Conversations saved via Grafana User Storage API</li>
+              </ul>
+              <p style={{ marginTop: '8px' }}>
+                <strong>Prerequisites:</strong>
+              </p>
+              <ol>
+                <li>Install grafana-llm-app plugin from Grafana catalog</li>
+                <li>Configure it with your LLM provider (Administration → Plugins → LLM App)</li>
+                <li>Zagalin backend must be running (for queries and security features)</li>
+              </ol>
+            </Alert>
+          )}
+
+          {/* Backend Proxy Mode Info */}
+          {llmBackend === 'backend-proxy' && (
             <>
-              <Alert title="Using grafana-llm-app Plugin" severity="info">
+              <Alert title="Backend Proxy Mode (Production Recommended)" severity="info">
                 <p>
-                  Zagalin will use the grafana-llm-app plugin for LLM functionality. Make sure the plugin is installed and configured with your preferred provider.
+                  <strong>Full security pipeline.</strong> All requests go through Zagalin backend → grafana-llm-app with rate limiting, validation, and audit logging.
                 </p>
-                <p>
+                <p style={{ marginTop: '8px' }}>
                   <strong>Prerequisites:</strong>
                 </p>
                 <ol>
                   <li>Install grafana-llm-app plugin from Grafana catalog</li>
-                  <li>Configure it with your LLM provider (Administration → Plugins → LLM App → Configuration)</li>
-                  <li>(Optional) Provide a service account token below for backend-to-backend authentication</li>
+                  <li>Configure it with your LLM provider (Administration → Plugins → LLM App)</li>
+                  <li><strong>Required:</strong> Create a service account with <code>Editor</code> role and provide the token below</li>
                 </ol>
               </Alert>
 
               <Field
-                label="Service Account Token (Optional)"
-                description="Grafana service account token for backend-to-backend authentication with grafana-llm-app. If not provided, Zagalin will try to use plugin context authentication. Stored securely in Grafana's encrypted storage."
+                label="Service Account Token (Mandatory)"
+                description="Grafana service account token for backend-to-backend authentication with grafana-llm-app. Required for Backend Proxy mode. Stored securely in Grafana's encrypted storage."
+                invalid={!serviceAccountToken}
+                error={!serviceAccountToken ? 'Service account token is required for Backend Proxy mode' : undefined}
               >
                 <Input
                   type="password"
@@ -495,13 +595,14 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                   }}
                   placeholder="glsa_..."
                   width={50}
+                  invalid={!serviceAccountToken}
                 />
               </Field>
 
               {!serviceAccountToken && (
-                <Alert title="Service Account Token" severity="info">
+                <Alert title="Service Account Token Required" severity="error">
                   <p>
-                    While optional, configuring a service account token is <strong>recommended</strong> for production use. It ensures reliable backend-to-backend authentication.
+                    A service account token is <strong>mandatory</strong> for Backend Proxy mode. It ensures secure backend-to-backend authentication with grafana-llm-app.
                   </p>
                   <p>
                     <strong>To create a service account token:</strong>
@@ -509,7 +610,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                   <ol>
                     <li>Go to Administration → Service Accounts</li>
                     <li>Create a new service account (e.g., &ldquo;Zagalin Plugin&rdquo;)</li>
-                    <li>Assign the <code>Admin</code> or <code>Editor</code> role</li>
+                    <li>Assign the <code>Editor</code> role</li>
                     <li>Generate a token and paste it above</li>
                   </ol>
                 </Alert>
@@ -662,6 +763,23 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                 </Field>
               )}
 
+              {llmProvider === 'openai' && (
+                <Field
+                  label="Organization ID"
+                  description="Your OpenAI Organization ID. Required if your API key belongs to multiple organizations (e.g., org-xxxxx)"
+                >
+                  <Input
+                    value={llmOrganization}
+                    onChange={(e) => {
+                      setLlmOrganization(e.currentTarget.value);
+                      setIsDirty(true);
+                    }}
+                    placeholder="org-xxxxx"
+                    width={50}
+                  />
+                </Field>
+              )}
+
               <Field
                 label="API Key"
                 description="Your LLM provider API key. This is stored securely in Grafana's encrypted storage."
@@ -717,14 +835,15 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             </>
           )} */}
 
-          {/* Disabled Mode Info */}
-          {llmBackend === 'disabled' && (
-            <Alert title="LLM Features Disabled" severity="info">
+
+          {/* Direct LLM Mode Info */}
+          {llmBackend === 'direct' && (
+            <Alert title="Direct LLM Mode" severity="info">
               <p>
-                All LLM-powered features are disabled. Zagalin will not make any API calls to LLM providers.
+                <strong>Backend calls LLM API directly.</strong> Full security features without grafana-llm-app dependency.
               </p>
-              <p>
-                You can re-enable LLM features at any time by selecting grafana-llm-app or Direct API mode above.
+              <p style={{ marginTop: '8px' }}>
+                <strong>Requirements:</strong> Provide LLM provider API key below.
               </p>
             </Alert>
           )}
@@ -913,6 +1032,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
           )}
         </div>
       </div>
+
 
       {/* Query Injection Prevention */}
       <div className={s.section}>

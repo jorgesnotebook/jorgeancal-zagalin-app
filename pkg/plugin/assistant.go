@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -268,13 +269,14 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 	// Model is configured in plugin settings or uses default
 	// Admin should set LLMModel in plugin config to match their grafana-llm-app setup
 	llmReq := LLMStreamRequest{
-		Model:       model,
-		Messages:    messages,
-		Temperature: temperature,
-		MaxTokens:   maxTokens,
-		Tools:       GetTools(true), // Function calling enabled by default
-		ToolChoice:  "auto",
-		Stream:      true, // Enable SSE streaming
+		Model:               model,
+		Messages:            messages,
+		Temperature:         temperature,
+		MaxTokens:           maxTokens,           // For older models
+		MaxCompletionTokens: maxTokens,           // For newer models (same value)
+		Tools:               GetTools(true),      // Function calling enabled by default
+		ToolChoice:          "auto",
+		Stream:              true,                // Enable SSE streaming
 	}
 
 	// Always proxy through grafana-llm-app (unified backend routing)
@@ -673,10 +675,54 @@ type UserInfo struct {
 
 // getGrafanaURL returns the Grafana URL for making internal API calls
 func getGrafanaURL() string {
-	// Get Grafana URL from environment or default to localhost
+	// Priority 1: Check explicit GF_URL override (for special deployments)
+	// Use this in Docker, Kubernetes, or when Grafana is behind a reverse proxy
+	if url := os.Getenv("GF_URL"); url != "" {
+		backend.Logger.Debug("Using GF_URL override from environment", "url", url)
+		return url
+	}
+
+	// Priority 2: Check individual component overrides (for flexibility)
+	// These are NOT set by Grafana automatically - they're only for manual override
+	protocol := os.Getenv("GF_SERVER_PROTOCOL")
+	domain := os.Getenv("GF_SERVER_DOMAIN")
+	port := os.Getenv("GF_SERVER_HTTP_PORT")
+
+	// If any component is overridden, construct URL from overrides
+	if protocol != "" || domain != "" || port != "" {
+		if protocol == "" {
+			protocol = "http"
+		}
+		if domain == "" {
+			domain = "localhost"
+		}
+		if port == "" {
+			port = "3000"
+		}
+
+		var url string
+		if port == "80" || port == "443" {
+			url = fmt.Sprintf("%s://%s", protocol, domain)
+		} else {
+			url = fmt.Sprintf("%s://%s:%s", protocol, domain, port)
+		}
+
+		backend.Logger.Debug("Using environment variable overrides",
+			"url", url,
+			"protocol", protocol,
+			"domain", domain,
+			"port", port,
+		)
+		return url
+	}
+
+	// Default: Plugins run inside Grafana, so use localhost
+	// This works because:
+	// - The plugin runs as a subprocess of Grafana
+	// - grafana-llm-app is also a plugin in the same Grafana instance
+	// - HTTP calls to localhost will hit the same Grafana instance
 	url := "http://localhost:3000"
-	// In production, this would be set by Grafana environment
-	// For now, we assume local development
+	backend.Logger.Debug("Using default localhost URL (plugin runs inside Grafana)", "url", url)
 	return url
 }
 
@@ -822,12 +868,13 @@ func (a *App) generateExecutionPlan(ctx context.Context, req AssistantRequest, i
 	}
 
 	llmReq := LLMStreamRequest{
-		Model:       "gpt-4o-mini",
-		Messages:    messages,
-		Temperature: 0.3, // Lower temperature for structured output
-		MaxTokens:   1000,
-		Tools:       nil,       // No tools for planning
-		ToolChoice:  "none",
+		Model:               "gpt-4o-mini",
+		Messages:            messages,
+		Temperature:         0.3,                 // Lower temperature for structured output
+		MaxTokens:           1000,                // For older models
+		MaxCompletionTokens: 1000,                // For newer models
+		Tools:               nil,                 // No tools for planning
+		ToolChoice:          "none",
 	}
 
 	// Create LLM client based on settings
@@ -845,6 +892,7 @@ func (a *App) generateExecutionPlan(ctx context.Context, req AssistantRequest, i
 			a.settings.LLMModel,
 			a.settings.LLMEndpoint,
 			a.settings.LLMAPIKey,
+			a.settings.LLMOrganization,
 			http.DefaultClient,
 			backend.Logger,
 		)
@@ -961,12 +1009,13 @@ Please execute this step and provide concrete findings. Generate specific querie
 	}
 
 	llmReq := LLMStreamRequest{
-		Model:       "gpt-4o-mini",
-		Messages:    messages,
-		Temperature: 0.7,
-		MaxTokens:   2000,
-		Tools:       GetTools(true), // Enable tools for execution
-		ToolChoice:  "auto",
+		Model:               "gpt-4o-mini",
+		Messages:            messages,
+		Temperature:         0.7,
+		MaxTokens:           2000,                // For older models
+		MaxCompletionTokens: 2000,                // For newer models
+		Tools:               GetTools(true),      // Enable tools for execution
+		ToolChoice:          "auto",
 	}
 
 	// Create LLM client based on settings
@@ -980,6 +1029,7 @@ Please execute this step and provide concrete findings. Generate specific querie
 			a.settings.LLMModel,
 			a.settings.LLMEndpoint,
 			a.settings.LLMAPIKey,
+			a.settings.LLMOrganization,
 			http.DefaultClient,
 			backend.Logger,
 		)

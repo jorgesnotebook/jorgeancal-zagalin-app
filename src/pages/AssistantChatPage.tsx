@@ -18,7 +18,8 @@ import { isLLMReady } from '../services/llmHealthService';
 import { VectorSearchService } from '../services/vectorSearchService';
 import { type ToolCall } from '../services/zagalinTools';
 import { useZagalinConfig } from '../hooks/useZagalinConfig';
-import { streamAssistantChat, type AssistantRequest, type StreamChunk } from '../services/assistantService';
+import { streamAssistantChatRouted as streamAssistantChat } from '../services/assistantServiceRouter';
+import type { AssistantRequest, StreamChunk } from '../services/assistantService';
 
 interface Message {
   role: 'user' | 'assistant' | 'system';

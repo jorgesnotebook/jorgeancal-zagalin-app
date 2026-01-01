@@ -27,8 +27,9 @@ import type { ConversationMessage } from '../../services/conversationStorage';
 import { ConversationListSidebar } from './ConversationListSidebar';
 import { PlanVisualization } from './PlanVisualization';
 import { ArtifactCard } from './ArtifactCard';
+import { ContextBadges } from './ContextBadges';
 import type { Artifact } from '../../services/runService';
-import { streamAssistantChat } from '../../services/assistantService';
+import { streamAssistantChatRouted as streamAssistantChat } from '../../services/assistantServiceRouter';
 import { FrontendOrchestrator, type OrchestratorEvent } from '../../services/frontendOrchestrator';
 import type { ExecutionPlan } from '../../services/frontendPrompts';
 import { needsOrchestration } from '../../services/orchestrationDetector';
@@ -95,6 +96,8 @@ export function ChatPanel() {
   const {
     messages: conversationMessages,
     addMessage,
+    addContext,
+    removeContext,
     conversation,
     conversations,
     createNew,
@@ -293,6 +296,7 @@ export function ChatPanel() {
               timeRange: context.timeRange,
               templateVars: context.templateVariables,
             },
+            attachedContexts: conversation?.contexts, // NEW: Include all attached contexts
           }).subscribe({
             next: (chunk) => {
               if (chunk.chunk) {
@@ -434,6 +438,7 @@ export function ChatPanel() {
               timeRange: context.timeRange,
               templateVars: context.templateVariables,
             },
+            attachedContexts: conversation?.contexts, // NEW: Include all attached contexts
             mode,
           }).subscribe({
             next: (chunk) => {
@@ -596,6 +601,31 @@ export function ChatPanel() {
         <Alert title="Error" severity="error" onRemove={() => setError(null)}>
           {error}
         </Alert>
+      )}
+
+      {/* Context Management Section */}
+      {conversation && (
+        <div className={s.contextSection}>
+          {conversation.contexts && conversation.contexts.length > 0 && (
+            <ContextBadges
+              contexts={conversation.contexts}
+              onRemove={removeContext}
+            />
+          )}
+          {hasContext && (
+            <div className={s.addContextButton}>
+              <Button
+                size="sm"
+                variant="secondary"
+                icon="plus"
+                onClick={() => addContext(context)}
+                tooltip="Attach current dashboard to this conversation"
+              >
+                Add Current Dashboard
+              </Button>
+            </div>
+          )}
+        </div>
       )}
 
       <div className={s.messagesContainer}>
@@ -763,6 +793,15 @@ const getStyles = (theme: GrafanaTheme2) => ({
     display: flex;
     align-items: center;
     gap: ${theme.spacing(1)};
+  `,
+  contextSection: css`
+    padding: ${theme.spacing(2)};
+    padding-top: 0;
+  `,
+  addContextButton: css`
+    display: flex;
+    justify-content: flex-start;
+    margin-top: ${theme.spacing(1)};
   `,
   messagesContainer: css`
     flex: 1;

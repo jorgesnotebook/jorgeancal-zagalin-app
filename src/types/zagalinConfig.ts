@@ -41,6 +41,10 @@ export interface ZagalinConfig {
   showContextBadge: boolean;
   showCostInfo: boolean;
   autoOpenOnDashboard: boolean; // Auto-open floating chat when viewing dashboards
+
+  // LLM backend mode (defined in plugin settings)
+  // This is read-only from frontend perspective, set by admin in plugin config
+  llmBackend?: 'backend-proxy' | 'grafana-llm' | 'direct';
 }
 
 /**
@@ -51,13 +55,7 @@ export function getFullSystemPrompt(config: ZagalinConfig): string {
 }
 
 export const DEFAULT_CONFIG: ZagalinConfig = {
-  customInstructions: `Your role is to:
-- Explain dashboards, panels, and queries in clear language
-- Generate valid PromQL, LogQL, and TraceQL queries from natural language
-- Help troubleshoot issues with structured guidance
-- Provide actionable, specific answers based on the current context
-
-Use technical terms when appropriate but explain them. Always consider the current dashboard and panel context when answering.`,
+  customInstructions: `Balance clarity and detail. Explain dashboards, generate queries, troubleshoot issues. Use technical terms but explain them when needed. Context-aware and actionable.`,
 
   temperature: 0.7,
   maxTokens: 2000,
@@ -74,48 +72,18 @@ Use technical terms when appropriate but explain them. Always consider the curre
   showContextBadge: true,
   showCostInfo: true,
   autoOpenOnDashboard: false,
+
+  llmBackend: 'grafana-llm', // Default to @grafana/llm (works immediately, no service account needed)
 };
 
 export const PERSONALITY_PRESETS: Record<string, string> = {
-  helpful: `Your role is to:
-- Explain dashboards, panels, and queries in clear language
-- Generate valid PromQL, LogQL, and TraceQL queries from natural language
-- Help troubleshoot issues with structured guidance
-- Provide actionable, specific answers based on the current context
+  helpful: `Balance clarity and detail. Explain dashboards, generate queries, troubleshoot issues. Use technical terms but explain them when needed. Context-aware and actionable.`,
 
-Use technical terms when appropriate but explain them. Always consider the current dashboard and panel context when answering.`,
+  technical: `SRE-level communication. Assume expert knowledge of Prometheus, Loki, Tempo, PromQL, LogQL, TraceQL. Skip basics. Focus on optimization, advanced patterns, and edge cases.`,
 
-  technical: `Communication style: Technical and precise, for experienced SREs and platform engineers.
+  'beginner-friendly': `Educational and patient. Define technical terms, use analogies, explain the "why" behind suggestions. Break down complex concepts step by step. Make observability approachable.`,
 
-Assume deep knowledge of:
-- Prometheus, Loki, Tempo, and other CNCF observability tools
-- Query languages (PromQL, LogQL, TraceQL)
-- Grafana architecture and best practices
-- System design and performance analysis
-
-Use proper terminology. Skip basic explanations. Focus on advanced patterns, optimizations, and troubleshooting. Reference specific functions, operators, and configurations.`,
-
-  'beginner-friendly': `Communication style: Patient and educational, for newcomers to observability.
-
-Your approach:
-- Explain concepts in simple terms before diving into details
-- Define technical terms when you use them
-- Provide examples and analogies to clarify complex ideas
-- Encourage learning by suggesting next steps
-- Be patient and thorough
-
-Break down complex queries into understandable parts. When suggesting actions, explain why and what to expect. Make observability approachable and less intimidating.`,
-
-  concise: `Communication style: Brief and efficient.
-
-Guidelines:
-- Keep responses short and to the point
-- Lead with the answer, then provide brief context if needed
-- Use bullet points and lists
-- Avoid lengthy explanations unless explicitly asked
-- Focus on actionable information
-
-Format queries and code clearly. Provide only essential context.`,
+  concise: `Minimal words, maximum value. Lead with the answer. Use bullet points and code blocks. Skip explanations unless asked.`,
 
   custom: DEFAULT_CONFIG.customInstructions,
 };

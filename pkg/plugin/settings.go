@@ -12,9 +12,10 @@ type PluginSettings struct {
 	LLMBackend string `json:"llmBackend"` // "grafana-llm-app" (default) | "direct"
 
 	// Direct LLM provider configuration (only used when llmBackend = "direct")
-	LLMProvider string `json:"llmProvider"` // "openai" | "anthropic" | "azure-openai"
-	LLMModel    string `json:"llmModel"`    // e.g. "gpt-4o-mini", "claude-3-5-sonnet-20241022"
-	LLMEndpoint string `json:"llmEndpoint"` // Optional custom endpoint URL
+	LLMProvider      string `json:"llmProvider"`      // "openai" | "anthropic" | "azure-openai"
+	LLMModel         string `json:"llmModel"`         // e.g. "gpt-4o-mini", "claude-3-5-sonnet-20241022"
+	LLMEndpoint      string `json:"llmEndpoint"`      // Optional custom endpoint URL
+	LLMOrganization  string `json:"llmOrganization"`  // OpenAI Organization ID (optional, for OpenAI only)
 
 	// Rate limits
 	MaxRequestsPerMinute int     `json:"maxRequestsPerMinute"`
@@ -103,7 +104,7 @@ func LoadSettings(jsonData json.RawMessage, decryptedSecureJSONData map[string]s
 func applyDefaults(s *PluginSettings) {
 	// LLM backend defaults
 	if s.LLMBackend == "" {
-		s.LLMBackend = "grafana-llm-app" // Default to grafana-llm-app for backwards compatibility
+		s.LLMBackend = "grafana-llm" // Default to @grafana/llm for easy setup (no service account needed)
 	}
 	if s.LLMProvider == "" {
 		s.LLMProvider = "openai" // Default provider for direct mode

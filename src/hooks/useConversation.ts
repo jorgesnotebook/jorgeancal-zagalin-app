@@ -8,7 +8,8 @@ import {
   ConversationStorage,
   type Conversation,
   type ConversationMessage,
-  type ConversationMetadata
+  type ConversationMetadata,
+  type ConversationContext,
 } from '../services/conversationStorage';
 import { useConversationStorage } from './useConversationStorage';
 import type { GrafanaContext } from '../services/contextTypes';
@@ -25,6 +26,8 @@ export interface UseConversationReturn {
   createNew: (context?: GrafanaContext) => void;
   loadConversation: (id: string) => void;
   addMessage: (message: ConversationMessage, context?: GrafanaContext) => void;
+  addContext: (context: GrafanaContext) => Promise<void>; // NEW
+  removeContext: (dashboardUid: string) => Promise<void>; // NEW
   deleteConversation: (id: string) => void;
   deleteAll: () => void;
   updateTitle: (id: string, title: string) => void;
@@ -34,6 +37,25 @@ export interface UseConversationReturn {
   // State
   isLoading: boolean;
   currentId: string | null;
+}
+
+/**
+ * Helper to convert GrafanaContext to ConversationContext
+ */
+function grafanaContextToConversationContext(grafanaContext?: GrafanaContext): ConversationContext | undefined {
+  if (!grafanaContext?.dashboard?.uid) {
+    return undefined;
+  }
+
+  return {
+    dashboardUid: grafanaContext.dashboard.uid,
+    dashboardTitle: grafanaContext.dashboard.title || 'Unknown Dashboard',
+    panelId: grafanaContext.panel?.id,
+    panelTitle: grafanaContext.panel?.title,
+    timeFrom: grafanaContext.timeRange?.from,
+    timeTo: grafanaContext.timeRange?.to,
+    addedAt: new Date(),
+  };
 }
 
 export function useConversation(): UseConversationReturn {
@@ -82,13 +104,7 @@ export function useConversation(): UseConversationReturn {
    * Create a new conversation
    */
   const createNew = useCallback(async (grafanaContext?: GrafanaContext) => {
-    const context = grafanaContext ? {
-      dashboardUid: grafanaContext.dashboard?.uid,
-      dashboardTitle: grafanaContext.dashboard?.title,
-      panelId: grafanaContext.panel?.id,
-      panelTitle: grafanaContext.panel?.title,
-      timeRange: grafanaContext.timeRange
-    } : undefined;
+    const context = grafanaContextToConversationContext(grafanaContext);
 
     const newConv = await ConversationStorage.createConversation(storage, context);
     setConversation(newConv);
@@ -130,13 +146,7 @@ export function useConversation(): UseConversationReturn {
     if (!currentConv) {
       console.log('[useConversation] No active conversation. Creating new one with context.');
 
-      const context = grafanaContext ? {
-        dashboardUid: grafanaContext.dashboard?.uid,
-        dashboardTitle: grafanaContext.dashboard?.title,
-        panelId: grafanaContext.panel?.id,
-        panelTitle: grafanaContext.panel?.title,
-        timeRange: grafanaContext.timeRange
-      } : undefined;
+      const context = grafanaContextToConversationContext(grafanaContext);
 
       const newConv = await ConversationStorage.createConversation(storage, context);
       const updatedConv = {
@@ -265,6 +275,70 @@ export function useConversation(): UseConversationReturn {
     conversationRef.current = null; // Also clear the ref
   }, []);
 
+  /**
+   * Add a new context (dashboard) to the current conversation
+   */
+  const addContext = useCallback(async (grafanaContext: GrafanaContext) => {
+    const currentConv = conversationRef.current;
+    if (!currentConv) {
+      console.warn('[useConversation] No active conversation to add context to');
+      return;
+    }
+
+    const newContext = grafanaContextToConversationContext(grafanaContext);
+    if (!newContext) {
+      console.warn('[useConversation] Invalid context - missing dashboard UID');
+      return;
+    }
+
+    // Check if this dashboard is already attached
+    const exists = currentConv.contexts.some(
+      ctx => ctx.dashboardUid === newContext.dashboardUid && ctx.panelId === newContext.panelId
+    );
+
+    if (exists) {
+      console.log('[useConversation] Context already attached:', newContext.dashboardUid);
+      return;
+    }
+
+    console.log('[useConversation] Adding context to conversation:', newContext.dashboardUid);
+
+    const updated = {
+      ...currentConv,
+      contexts: [...currentConv.contexts, newContext],
+      updatedAt: new Date(),
+    };
+
+    setConversation(updated);
+    conversationRef.current = updated;
+    await ConversationStorage.saveConversation(storage, updated);
+    console.log('[useConversation] Context added successfully');
+  }, [storage]);
+
+  /**
+   * Remove a context (dashboard) from the current conversation
+   */
+  const removeContext = useCallback(async (dashboardUid: string) => {
+    const currentConv = conversationRef.current;
+    if (!currentConv) {
+      console.warn('[useConversation] No active conversation to remove context from');
+      return;
+    }
+
+    console.log('[useConversation] Removing context from conversation:', dashboardUid);
+
+    const updated = {
+      ...currentConv,
+      contexts: currentConv.contexts.filter(ctx => ctx.dashboardUid !== dashboardUid),
+      updatedAt: new Date(),
+    };
+
+    setConversation(updated);
+    conversationRef.current = updated;
+    await ConversationStorage.saveConversation(storage, updated);
+    console.log('[useConversation] Context removed successfully');
+  }, [storage]);
+
   return {
     conversation,
     messages: conversation?.messages || [],
@@ -272,6 +346,8 @@ export function useConversation(): UseConversationReturn {
     createNew,
     loadConversation,
     addMessage,
+    addContext,
+    removeContext,
     deleteConversation,
     deleteAll,
     updateTitle,

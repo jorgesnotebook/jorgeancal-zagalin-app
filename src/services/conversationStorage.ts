@@ -26,6 +26,16 @@ export interface StoredMessage {
 
 export type ConversationMessage = StoredMessage;
 
+export interface ConversationContext {
+  dashboardUid: string;
+  dashboardTitle: string;
+  panelId?: number;
+  panelTitle?: string;
+  timeFrom?: string;
+  timeTo?: string;
+  addedAt: Date; // Track when this context was added
+}
+
 export interface Conversation {
   id: string;
   title: string;
@@ -33,14 +43,7 @@ export interface Conversation {
   createdAt: Date;
   updatedAt: Date;
   isPinned: boolean;
-  context?: {
-    dashboardUid?: string;
-    dashboardTitle?: string;
-    panelId?: number;
-    panelTitle?: string;
-    timeFrom?: string;
-    timeTo?: string;
-  };
+  contexts: ConversationContext[]; // Changed from single context to array
 }
 
 export interface ConversationMetadata {
@@ -91,15 +94,37 @@ async function loadAllConversations(storage: StorageBackend): Promise<Conversati
 
     const parsed = JSON.parse(data);
 
-    return parsed.map((conv: any) => ({
-      ...conv,
-      createdAt: new Date(conv.createdAt),
-      updatedAt: new Date(conv.updatedAt),
-      messages: conv.messages.map((msg: any) => ({
-        ...msg,
-        timestamp: new Date(msg.timestamp),
-      })),
-    }));
+    return parsed.map((conv: any) => {
+      // Migrate old single context to new contexts array
+      let contexts: ConversationContext[] = [];
+      if (conv.context && conv.context.dashboardUid) {
+        contexts = [{
+          dashboardUid: conv.context.dashboardUid,
+          dashboardTitle: conv.context.dashboardTitle || 'Unknown Dashboard',
+          panelId: conv.context.panelId,
+          panelTitle: conv.context.panelTitle,
+          timeFrom: conv.context.timeFrom,
+          timeTo: conv.context.timeTo,
+          addedAt: new Date(conv.createdAt), // Use conversation creation date
+        }];
+      } else if (conv.contexts) {
+        contexts = conv.contexts.map((ctx: any) => ({
+          ...ctx,
+          addedAt: new Date(ctx.addedAt),
+        }));
+      }
+
+      return {
+        ...conv,
+        contexts, // Always use array
+        createdAt: new Date(conv.createdAt),
+        updatedAt: new Date(conv.updatedAt),
+        messages: conv.messages.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp),
+        })),
+      };
+    });
   } catch (error) {
     console.error('Failed to load conversations:', error);
     return [];
@@ -185,7 +210,7 @@ export class ConversationStorage {
     }
   }
 
-  static async createConversation(storage: StorageBackend, context?: Conversation['context']): Promise<Conversation> {
+  static async createConversation(storage: StorageBackend, context?: ConversationContext): Promise<Conversation> {
     const now = new Date();
     const conversation: Conversation = {
       id: generateId(),
@@ -194,7 +219,7 @@ export class ConversationStorage {
       createdAt: now,
       updatedAt: now,
       isPinned: false,
-      context,
+      contexts: context ? [context] : [], // Initialize with optional context
     };
 
     try {

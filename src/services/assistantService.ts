@@ -60,8 +60,17 @@ export interface AssistantRequest {
   history: AssistantMessage[];
   context: AssistantContext;
   skillHint?: string;
-  enrichedMessage?: string; // Optional pre-enriched message with full context
-  mode?: 'standard' | 'thinking'; // Chat mode: standard (fast) or thinking (extended reasoning)
+  enrichedMessage?: string;
+  mode?: 'standard' | 'thinking';
+  attachedContexts?: Array<{
+    dashboardUid: string;
+    dashboardTitle: string;
+    panelId?: number;
+    panelTitle?: string;
+    timeFrom?: string;
+    timeTo?: string;
+    addedAt: Date;
+  }>;
 }
 
 export interface StreamChunk {

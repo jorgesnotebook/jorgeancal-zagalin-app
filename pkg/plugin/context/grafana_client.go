@@ -11,28 +11,46 @@ import (
 	"time"
 )
 
+// URLProvider is a function that returns the Grafana base URL
+// This allows lazy evaluation when request context is available
+type URLProvider func(ctx context.Context) (string, error)
+
 // GrafanaClient handles API requests to Grafana
 type GrafanaClient struct {
-	httpClient *http.Client
-	baseURL    string
+	httpClient  *http.Client
+	urlProvider URLProvider // Function to get URL from context
 }
 
-// NewGrafanaClient creates a new Grafana API client
-func NewGrafanaClient(httpClient *http.Client, baseURL string) *GrafanaClient {
+// NewGrafanaClient creates a new Grafana API client with a URL provider
+func NewGrafanaClient(httpClient *http.Client, urlProvider URLProvider) *GrafanaClient {
 	if httpClient == nil {
 		httpClient = &http.Client{
 			Timeout: 30 * time.Second, // Set reasonable timeout
 		}
 	}
-	if baseURL == "" {
-		baseURL = "http://localhost:3000"
+
+	// Default URL provider uses localhost (for backwards compatibility)
+	if urlProvider == nil {
+		urlProvider = func(ctx context.Context) (string, error) {
+			return "http://localhost:3000", nil
+		}
+	}
+
+	return &GrafanaClient{
+		httpClient:  httpClient,
+		urlProvider: urlProvider,
+	}
+}
+
+// getBaseURL resolves the base URL using the provider function
+func (gc *GrafanaClient) getBaseURL(ctx context.Context) (string, error) {
+	baseURL, err := gc.urlProvider(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get Grafana URL: %w", err)
 	}
 	// Remove trailing slash to prevent double slashes in URLs
 	baseURL = strings.TrimRight(baseURL, "/")
-	return &GrafanaClient{
-		httpClient: httpClient,
-		baseURL:    baseURL,
-	}
+	return baseURL, nil
 }
 
 // DataSource represents a Grafana datasource
@@ -89,7 +107,11 @@ type Field struct {
 
 // GetDatasource retrieves a datasource by UID
 func (gc *GrafanaClient) GetDatasource(ctx context.Context, uid string) (*DataSource, error) {
-	url := fmt.Sprintf("%s/api/datasources/uid/%s", gc.baseURL, uid)
+	baseURL, err := gc.getBaseURL(ctx)
+	if err != nil {
+		return nil, err
+	}
+	url := fmt.Sprintf("%s/api/datasources/uid/%s", baseURL, uid)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -147,7 +169,11 @@ func (gc *GrafanaClient) QueryDatasource(ctx context.Context, dsUID string, quer
 		return nil, fmt.Errorf("failed to marshal query: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/api/ds/query", gc.baseURL)
+	baseURL, err := gc.getBaseURL(ctx)
+	if err != nil {
+		return nil, err
+	}
+	url := fmt.Sprintf("%s/api/ds/query", baseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -176,7 +202,11 @@ func (gc *GrafanaClient) QueryDatasource(ctx context.Context, dsUID string, quer
 
 // ListDatasources retrieves all datasources
 func (gc *GrafanaClient) ListDatasources(ctx context.Context) ([]DataSource, error) {
-	url := fmt.Sprintf("%s/api/datasources", gc.baseURL)
+	baseURL, err := gc.getBaseURL(ctx)
+	if err != nil {
+		return nil, err
+	}
+	url := fmt.Sprintf("%s/api/datasources", baseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
