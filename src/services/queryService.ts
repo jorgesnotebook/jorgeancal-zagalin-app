@@ -1,4 +1,5 @@
 import { getBackendSrv } from '@grafana/runtime';
+import { getPluginResourcePath } from './pluginUrl';
 
 export interface QueryRequest {
   datasource: string;
@@ -34,95 +35,77 @@ export interface QueryResult {
   meta?: Record<string, any>;
 }
 
-function getBasePath(): string {
-  return '/api/plugins/jorgeancal-zagalin-app/resources';
+export async function executeQuery(request: QueryRequest): Promise<QueryResponse> {
+  try {
+    return await getBackendSrv().post<QueryResponse>(
+      `${getPluginResourcePath()}/query`,
+      request
+    );
+  } catch (error: any) {
+    console.error('Query service error:', error);
+    if (error.status === 503 || error.status === 404) {
+      throw new Error('Backend unavailable. Please check that the Zagalin backend plugin is running.');
+    }
+    throw new Error(`Query failed: ${error.message || 'Unknown error'}`);
+  }
 }
 
-export class QueryService {
-  static async query(request: QueryRequest): Promise<QueryResponse> {
-    // Always use backend for queries to get:
-    // - Rate limiting
-    // - Query validation
-    // - OTel enforcement
-    // - Datasource allowlist
-    // - Audit logging
-    return this.queryViaBackend(request);
-  }
+export async function queryPrometheus(
+  datasourceUid: string,
+  expr: string,
+  from: string,
+  to: string
+): Promise<QueryResponse> {
+  return executeQuery({
+    datasource: datasourceUid,
+    queries: [
+      {
+        refId: 'A',
+        datasourceUid,
+        queryType: 'prometheus',
+        expr,
+      },
+    ],
+    timeRange: { from, to },
+  });
+}
 
-  // Backend mode (always used for queries)
-  private static async queryViaBackend(request: QueryRequest): Promise<QueryResponse> {
-    try {
-      const response = await getBackendSrv().post<QueryResponse>(
-        `${getBasePath()}/query`,
-        request
-      );
-      return response;
-    } catch (error: any) {
-      console.error('Query service error (backend):', error);
-      if (error.status === 503 || error.status === 404) {
-        throw new Error('Backend unavailable. Please check that the Zagalin backend plugin is running.');
-      }
-      throw new Error(`Query failed: ${error.message || 'Unknown error'}`);
-    }
-  }
+export async function queryLoki(
+  datasourceUid: string,
+  query: string,
+  from: string,
+  to: string
+): Promise<QueryResponse> {
+  return executeQuery({
+    datasource: datasourceUid,
+    queries: [
+      {
+        refId: 'A',
+        datasourceUid,
+        queryType: 'loki',
+        query,
+      },
+    ],
+    timeRange: { from, to },
+  });
+}
 
-  static async queryPrometheus(
-    datasourceUid: string,
-    expr: string,
-    from: string,
-    to: string
-  ): Promise<QueryResponse> {
-    return this.query({
-      datasource: datasourceUid,
-      queries: [
-        {
-          refId: 'A',
-          datasourceUid,
-          queryType: 'prometheus',
-          expr,
-        },
-      ],
-      timeRange: { from, to },
-    });
-  }
-
-  static async queryLoki(
-    datasourceUid: string,
-    query: string,
-    from: string,
-    to: string
-  ): Promise<QueryResponse> {
-    return this.query({
-      datasource: datasourceUid,
-      queries: [
-        {
-          refId: 'A',
-          datasourceUid,
-          queryType: 'loki',
-          query,
-        },
-      ],
-      timeRange: { from, to },
-    });
-  }
-
-  static async queryTempo(
-    datasourceUid: string,
-    query: string,
-    from: string,
-    to: string
-  ): Promise<QueryResponse> {
-    return this.query({
-      datasource: datasourceUid,
-      queries: [
-        {
-          refId: 'A',
-          datasourceUid,
-          queryType: 'tempo',
-          query,
-        },
-      ],
-      timeRange: { from, to },
-    });
-  }
+export async function queryTempo(
+  datasourceUid: string,
+  query: string,
+  from: string,
+  to: string
+): Promise<QueryResponse> {
+  return executeQuery({
+    datasource: datasourceUid,
+    queries: [
+      {
+        refId: 'A',
+        datasourceUid,
+        queryType: 'tempo',
+        query,
+      },
+    ],
+    timeRange: { from, to },
+  });
 }

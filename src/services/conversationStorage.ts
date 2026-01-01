@@ -1,15 +1,3 @@
-/**
- * Conversation storage using Grafana's official User Storage API
- *
- * Uses usePluginUserStorage() hook which:
- * - Stores in Grafana DB (11.5+ with userStorageAPI feature flag)
- * - Automatically falls back to localStorage if flag disabled
- * - Per-user storage with no backend code needed
- *
- * Note: This module provides the core storage logic. React components
- * should use the useConversationStorage hook which wraps this.
- */
-
 const STORAGE_KEY = 'zagalin-conversations';
 const MAX_CONVERSATIONS = 50;
 const MAX_MESSAGES_PER_CONVERSATION = 100;
@@ -33,7 +21,7 @@ export interface ConversationContext {
   panelTitle?: string;
   timeFrom?: string;
   timeTo?: string;
-  addedAt: Date; // Track when this context was added
+  addedAt: Date;
 }
 
 export interface Conversation {
@@ -43,7 +31,7 @@ export interface Conversation {
   createdAt: Date;
   updatedAt: Date;
   isPinned: boolean;
-  contexts: ConversationContext[]; // Changed from single context to array
+  contexts: ConversationContext[];
 }
 
 export interface ConversationMetadata {
@@ -53,6 +41,12 @@ export interface ConversationMetadata {
   lastMessagePreview: string;
   updatedAt: Date;
   isPinned: boolean;
+}
+
+export interface StorageBackend {
+  getItem(key: string): Promise<string | null> | string | null;
+  setItem(key: string, value: string): Promise<void> | void;
+  removeItem(key: string): Promise<void> | void;
 }
 
 function generateId(): string {
@@ -72,19 +66,6 @@ function generateTitle(messages: StoredMessage[]): string {
   return `Chat from ${timestamp}`;
 }
 
-/**
- * Storage interface that works with any storage backend
- * (Grafana User Storage API or localStorage fallback)
- */
-export interface StorageBackend {
-  getItem(key: string): Promise<string | null> | string | null;
-  setItem(key: string, value: string): Promise<void> | void;
-  removeItem(key: string): Promise<void> | void;
-}
-
-/**
- * Load conversations from storage backend
- */
 async function loadAllConversations(storage: StorageBackend): Promise<Conversation[]> {
   try {
     const data = await storage.getItem(STORAGE_KEY);
@@ -95,9 +76,8 @@ async function loadAllConversations(storage: StorageBackend): Promise<Conversati
     const parsed = JSON.parse(data);
 
     return parsed.map((conv: any) => {
-      // Migrate old single context to new contexts array
       let contexts: ConversationContext[] = [];
-      if (conv.context && conv.context.dashboardUid) {
+      if (conv.context?.dashboardUid) {
         contexts = [{
           dashboardUid: conv.context.dashboardUid,
           dashboardTitle: conv.context.dashboardTitle || 'Unknown Dashboard',
@@ -105,7 +85,7 @@ async function loadAllConversations(storage: StorageBackend): Promise<Conversati
           panelTitle: conv.context.panelTitle,
           timeFrom: conv.context.timeFrom,
           timeTo: conv.context.timeTo,
-          addedAt: new Date(conv.createdAt), // Use conversation creation date
+          addedAt: new Date(conv.createdAt),
         }];
       } else if (conv.contexts) {
         contexts = conv.contexts.map((ctx: any) => ({
@@ -116,7 +96,7 @@ async function loadAllConversations(storage: StorageBackend): Promise<Conversati
 
       return {
         ...conv,
-        contexts, // Always use array
+        contexts,
         createdAt: new Date(conv.createdAt),
         updatedAt: new Date(conv.updatedAt),
         messages: conv.messages.map((msg: any) => ({
@@ -131,9 +111,6 @@ async function loadAllConversations(storage: StorageBackend): Promise<Conversati
   }
 }
 
-/**
- * Save conversations to storage backend
- */
 async function saveAllConversations(storage: StorageBackend, conversations: Conversation[]): Promise<void> {
   await storage.setItem(STORAGE_KEY, JSON.stringify(conversations));
 }
@@ -167,10 +144,6 @@ function trimMessages(messages: StoredMessage[]): StoredMessage[] {
   return [...systemMessages, ...recentMessages];
 }
 
-/**
- * ConversationStorage class that works with any storage backend
- * Pass in storage from usePluginUserStorage() hook in React components
- */
 export class ConversationStorage {
   static async getConversationList(storage: StorageBackend): Promise<ConversationMetadata[]> {
     try {
@@ -219,7 +192,7 @@ export class ConversationStorage {
       createdAt: now,
       updatedAt: now,
       isPinned: false,
-      contexts: context ? [context] : [], // Initialize with optional context
+      contexts: context ? [context] : [],
     };
 
     try {

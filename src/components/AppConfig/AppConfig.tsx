@@ -20,7 +20,7 @@ import {
 import { getBackendSrv } from '@grafana/runtime';
 import { ZagalinConfig, DEFAULT_CONFIG, PERSONALITY_PRESETS } from '../../types/zagalinConfig';
 import { checkZagalinHealth, type HealthStatus } from '../../services/llmHealthService';
-import { DatasourceService, type DatasourceInfo } from '../../services/datasourceService';
+import { listDatasources, type DatasourceInfo } from '../../services/datasourceService';
 
 export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
   const s = useStyles2(getStyles);
@@ -178,7 +178,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     const loadDatasources = async () => {
       setLoadingDatasources(true);
       try {
-        const response = await DatasourceService.listDatasources();
+        const response = await listDatasources();
         setDatasources(response.datasources);
       } catch (err) {
         console.error('Failed to load datasources:', err);

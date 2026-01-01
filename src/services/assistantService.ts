@@ -1,9 +1,5 @@
-/**
- * Assistant Service - Client for backend LLM API
- * Replaces direct grafana-llm-app calls with backend proxy
- */
-
 import { Observable } from 'rxjs';
+import { getPluginApiUrl } from './pluginUrl';
 
 export interface AssistantMessage {
   role: 'user' | 'assistant' | 'system';
@@ -89,18 +85,9 @@ export interface ToolCallChunk {
   };
 }
 
-/**
- * Stream chat with the assistant
- *
- * All requests route through the backend for validation and security.
- *
- * @param request The assistant request
- * @returns Observable stream of response chunks
- */
 export function streamAssistantChat(request: AssistantRequest): Observable<StreamChunk> {
   return new Observable<StreamChunk>((subscriber) => {
-    // ALWAYS call backend (unified routing for validation)
-    const url = '/api/plugins/jorgeancal-zagalin-app/resources/llm/chat';
+    const url = getPluginApiUrl('/llm/chat');
 
     const backendRequest = {
       message: request.message,
@@ -111,85 +98,73 @@ export function streamAssistantChat(request: AssistantRequest): Observable<Strea
       mode: request.mode || 'standard',
     };
 
-      // Create fetch request for SSE
-      fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
-        },
-        body: JSON.stringify(backendRequest),
-        credentials: 'same-origin', // CRITICAL: Include cookies for authentication
-      })
-        .then(async (response) => {
-          if (!response.ok) {
-            const error = await response.text();
-            throw new Error(`Error: ${response.status} - ${error}`);
-          }
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify(backendRequest),
+      credentials: 'same-origin',
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`Error: ${response.status} - ${error}`);
+        }
 
-          if (!response.body) {
-            throw new Error('No response body');
-          }
+        if (!response.body) {
+          throw new Error('No response body');
+        }
 
-          // Read SSE stream
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
 
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
 
-              if (done) {
-                subscriber.complete();
-                break;
+            if (done) {
+              subscriber.complete();
+              break;
+            }
+
+            const text = decoder.decode(value, { stream: true });
+            const lines = text.split('\n');
+
+            for (const line of lines) {
+              if (!line.trim() || !line.startsWith('data: ')) {
+                continue;
               }
 
-              // Decode chunk
-              const text = decoder.decode(value, { stream: true });
+              const data = line.substring(6);
 
-              // Parse SSE lines
-              const lines = text.split('\n');
-              for (const line of lines) {
-                if (!line.trim() || !line.startsWith('data: ')) {
-                  continue;
-                }
+              if (data === '[DONE]') {
+                subscriber.complete();
+                return;
+              }
 
-                const data = line.substring(6); // Remove "data: " prefix
+              try {
+                const chunk = JSON.parse(data) as StreamChunk;
+                subscriber.next(chunk);
 
-                // Check for done marker
-                if (data === '[DONE]') {
+                if (chunk.done || chunk.error) {
                   subscriber.complete();
                   return;
                 }
-
-                try {
-                  // Parse backend format
-                  const chunk = JSON.parse(data) as StreamChunk;
-
-                  // Emit chunk
-                  subscriber.next(chunk);
-
-                  // Check if done
-                  if (chunk.done || chunk.error) {
-                    subscriber.complete();
-                    return;
-                  }
-                } catch (parseError) {
-                  console.warn('Failed to parse SSE chunk:', data, parseError);
-                }
+              } catch (parseError) {
+                console.warn('Failed to parse SSE chunk:', data, parseError);
               }
             }
-          } catch (readError) {
-            subscriber.error(readError);
           }
-        })
-        .catch((fetchError) => {
-          subscriber.error(fetchError);
-        });
+        } catch (readError) {
+          subscriber.error(readError);
+        }
+      })
+      .catch((fetchError) => {
+        subscriber.error(fetchError);
+      });
 
-    // Cleanup function
-    return () => {
-      // No way to cancel fetch SSE, but we can at least signal we're done
-    };
+    return () => {};
   });
 }
