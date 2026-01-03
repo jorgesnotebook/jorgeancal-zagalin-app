@@ -66,10 +66,80 @@ func (a *App) handleGetSettings(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// handleSetupStatus returns the setup status of the plugin
+// This helps users understand what configuration is needed
+func (a *App) handleSetupStatus(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if service account token is configured
+	hasServiceAccountToken := false
+	hasLLMConfig := false
+	setupComplete := false
+
+	if a.settings != nil {
+		hasServiceAccountToken = a.settings.ServiceAccountToken != ""
+		// Check if LLM is configured (either through grafana-llm-app or direct)
+		hasLLMConfig = a.settings.LLMBackend != "" || a.settings.LLMProvider != ""
+	}
+
+	// Setup is complete if we have either:
+	// 1. Service account token (recommended for production)
+	// 2. Or if we're using grafana-llm-app backend (may work with session auth in dev)
+	setupComplete = hasServiceAccountToken || (a.settings != nil && a.settings.LLMBackend == "grafana-llm-app")
+
+	status := map[string]interface{}{
+		"setupComplete":           setupComplete,
+		"hasServiceAccountToken":  hasServiceAccountToken,
+		"hasLLMConfig":            hasLLMConfig,
+		"llmBackend":              "",
+		"recommendServiceAccount": !hasServiceAccountToken,
+		"steps": []map[string]interface{}{
+			{
+				"id":          "service_account",
+				"title":       "Create Service Account",
+				"description": "Create a Grafana service account for backend authentication",
+				"completed":   hasServiceAccountToken,
+				"required":    true,
+				"url":         "/admin/serviceaccounts",
+			},
+			{
+				"id":          "configure_token",
+				"title":       "Configure Token",
+				"description": "Paste the service account token in plugin settings",
+				"completed":   hasServiceAccountToken,
+				"required":    true,
+				"url":         "/plugins/jorgeancal-zagalin-app?page=configuration",
+			},
+			{
+				"id":          "verify_llm",
+				"title":       "Verify LLM Connection",
+				"description": "Test the connection to grafana-llm-app",
+				"completed":   setupComplete,
+				"required":    true,
+				"url":         "",
+			},
+		},
+	}
+
+	if a.settings != nil {
+		status["llmBackend"] = a.settings.LLMBackend
+	}
+
+	w.Header().Add("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		sendErrorResponse(w, "Failed to encode setup status response", err, http.StatusInternalServerError)
+		return
+	}
+}
+
 func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/ping", a.handlePing)
 	mux.HandleFunc("/echo", a.handleEcho)
 	mux.HandleFunc("/settings", a.handleGetSettings)
+	mux.HandleFunc("/health/setup", a.handleSetupStatus)
 	mux.HandleFunc("/context/status", a.handleContextStatus)
 	mux.HandleFunc("/context/refresh", a.handleContextRefresh)
 

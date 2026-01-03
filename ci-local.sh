@@ -57,8 +57,11 @@ fi
 echo ""
 
 echo "📦 Step 8: Packaging plugin..."
-cp -r dist "${PLUGIN_ID}"
+rm -rf "${PLUGIN_ID}"
+mkdir "${PLUGIN_ID}"
+cp -r dist/* "${PLUGIN_ID}/"
 zip -r "${ARCHIVE}" "${PLUGIN_ID}"
+rm -rf "${PLUGIN_ID}"
 echo "✅ Plugin packaged: ${ARCHIVE}"
 echo ""
 

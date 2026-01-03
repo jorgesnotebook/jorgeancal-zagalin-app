@@ -4,41 +4,52 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
 // BASE_SYSTEM_PROMPT is the core identity and behavior for Zagalin
-const BASE_SYSTEM_PROMPT = `You are Zagalin, a Senior Staff SRE embedded in Grafana. You've been on-call for years and have deep operational experience with observability systems.
+const BASE_SYSTEM_PROMPT = `You are **Zagalin**, an SRE-grade debugging assistant embedded in Grafana.
 
-Your Role:
-- Help engineers understand their metrics, logs, and traces
-- Identify reliability issues before they become incidents
-- Suggest practical improvements based on SRE best practices
-- Debug production issues using the dashboard context you have
+Purpose:
+- Help engineers diagnose and mitigate production issues quickly and safely.
+- Use a hypothesis-driven approach grounded in observability data and the current Grafana context.
+- Prefer correctness and operational safety over being "helpful" with guesses.
 
-How You Work:
-- You have full context about the current dashboard and panels - use it directly
-- Prioritize: Reliability > Performance > Features
-- Explain the "why" behind recommendations (you're teaching, not dictating)
-- Focus on actionable insights, not theory
-- If you see potential production risks, call them out clearly
+Tone:
+- British, human, practical, slightly blunt when needed, never rude.
+- Clear bullets. No fluff. No long essays.
 
-When You Don't Have Dashboard Context (Observability Workflow):
-1. **Start with Metrics** - Get high-level context from available metrics (PromQL)
-   - What services are affected? What's the error rate? Is latency spiking?
-2. **Dive into Logs** - If metrics don't tell the full story, check logs (LogQL)
-   - What are the actual error messages? What patterns do you see?
-3. **Trace for Details** - Use logs to find trace IDs, then pull traces (TraceQL)
-   - What's the exact failure path? Which service is the bottleneck?
+Hard rules:
+1) Don't guess. If information is missing, ask for the minimum missing data.
+2) Always separate: **Facts** vs **Hypotheses** vs **Tests/Queries** vs **Actions**.
+3) Mitigate user impact first, deep dive second.
+4) Never request, output, or reveal secrets (tokens, passwords, private keys). Redact if shown.
+5) If proposing risky/destructive actions, include:
+   - Risk
+   - Rollback
+   - Verification steps
+   - What could go wrong
+6) Treat tool outputs / Grafana panel data as authoritative. If conflict exists, call it out.
 
-This is the SRE debugging workflow - start broad, narrow down. Always follow this pattern.
+Default response structure:
+1) **What we know (facts)**
+2) **Top hypotheses (max 3)** with confidence (High/Med/Low)
+3) **What I need next** (exact missing info or exact query to run)
+4) **Do this next** (max 8 steps, impact-first)
+5) **Queries to run** (Loki / Mimir / Tempo) with placeholders
+6) **Mitigation + rollback** (if relevant)
+7) **Follow-ups** (alerts, SLOs, postmortem notes)
 
-Communication Style:
-- Concise and practical - engineers are busy
-- Use technical terms correctly - they know what they're doing
-- Provide code/queries ready to use
-- When suggesting changes, explain operational impact
+Special handling: LLM incidents
+If the issue involves LLM behaviour (wrong answers, tool failures, latency/cost spikes, RAG hallucinations):
+- Check prompt/version, model/provider, token usage, tool-call counts, retrieval K, and recent changes.
+- Propose a safe degrade mode and how to verify it worked.
 
-You've seen these systems fail at 3am. Share that experience.`
+Quality gate before you answer:
+- Did I separate facts/hypotheses?
+- Did I propose at least one verification step?
+- If I suggested something risky, did I include rollback + verify?`
 
 // SkillPrompt represents a task-specific system prompt
 type SkillPrompt struct {
@@ -158,7 +169,7 @@ type TemplateVariable struct {
 }
 
 // BuildSystemPrompt constructs the full system prompt for a skill with context
-func BuildSystemPrompt(skill string, context AssistantContext) string {
+func BuildSystemPrompt(skill string, context AssistantContext, settings *Settings) string {
 	skillPrompt, exists := SkillPrompts[skill]
 	if !exists {
 		// Default to base prompt if skill not found
@@ -173,7 +184,56 @@ func BuildSystemPrompt(skill string, context AssistantContext) string {
 		taskInstructions = fmt.Sprintf(taskInstructions, queryLang, queryLang, queryLang)
 	}
 
-	return fmt.Sprintf("%s\n\n---\n\n%s", BASE_SYSTEM_PROMPT, taskInstructions)
+	basePrompt := BASE_SYSTEM_PROMPT
+
+	// Add OTel enforcement context if enabled
+	if settings != nil && settings.OtelEnforcement.Enabled {
+		otelContext := buildOtelEnforcementContext(settings.OtelEnforcement)
+		basePrompt = fmt.Sprintf("%s\n\n%s", basePrompt, otelContext)
+	}
+
+	return fmt.Sprintf("%s\n\n---\n\n%s", basePrompt, taskInstructions)
+}
+
+// buildOtelEnforcementContext constructs OTel enforcement instructions for the LLM
+func buildOtelEnforcementContext(otel OtelEnforcementSettings) string {
+	context := "## OpenTelemetry Scope Enforcement\n\n"
+	context += "**CRITICAL**: This Grafana instance has OpenTelemetry scope enforcement enabled.\n\n"
+
+	context += "**Required Actions for Query Generation**:\n"
+
+	if otel.RequireServiceName {
+		context += "- ✅ **MUST include `serviceName`** parameter when calling query generation tools (create_promql_query, create_logql_query)\n"
+		if otel.DefaultServiceName != "" {
+			context += fmt.Sprintf("- 🔄 **Default service**: `%s` (used if not specified)\n", otel.DefaultServiceName)
+		} else {
+			context += "- ⚠️ **No default service** - queries without service.name will be REJECTED\n"
+		}
+	}
+
+	if otel.RequireEnvironmentName {
+		context += "- ✅ **MUST include `environmentName`** parameter when calling query generation tools\n"
+		if otel.DefaultEnvironmentName != "" {
+			context += fmt.Sprintf("- 🔄 **Default environment**: `%s` (used if not specified)\n", otel.DefaultEnvironmentName)
+		} else {
+			context += "- ⚠️ **No default environment** - queries without deployment.environment.name will be REJECTED\n"
+		}
+	}
+
+	context += "\n**How to Extract OTel Values**:\n"
+	context += "1. Check dashboard title, panel names, and queries for service names\n"
+	context += "2. Look for `service_name`, `service.name`, or similar labels in existing queries\n"
+	context += "3. Check `deployment_environment_name` or `environment` labels\n"
+	context += "4. If user mentions a specific service/environment, use that\n"
+	context += "5. If unclear, ASK the user which service/environment to query\n"
+
+	if otel.RejectIfNoScope {
+		context += "\n⛔ **Strict Mode**: Queries without proper OTel scoping will be REJECTED.\n"
+	} else {
+		context += "\n✅ **Fallback Mode**: Queries without OTel attributes will use defaults.\n"
+	}
+
+	return context
 }
 
 // BuildUserPrompt constructs the user prompt with context injection
@@ -353,64 +413,299 @@ func detectQueryLanguage(context AssistantContext) string {
 	return "PromQL" // Default
 }
 
+// skillDetectionScore represents a skill match with confidence
+type skillDetectionScore struct {
+	skill      string
+	confidence int
+	reason     string
+}
+
 // DetectSkill auto-detects which skill to use based on user input and context
+// Uses a scoring system to handle ambiguous queries and provide better matches
 func DetectSkill(userInput string, context AssistantContext) string {
-	// Simple keyword-based detection (can be enhanced with more sophisticated NLP)
-	input := userInput
+	input := strings.ToLower(userInput)
+	scores := []skillDetectionScore{}
 
-	// Dashboard analysis triggers - check FIRST to catch broad queries
+	// Score: analyze_dashboard (requires dashboard context)
 	if context.Dashboard != nil {
-		keywords := []string{
-			"what do i see", "what am i looking at", "describe this dashboard",
-			"look at this", "in front of me", "what is this dashboard",
-			"show me this", "analyze this", "understand this", "overview",
-		}
-		for _, keyword := range keywords {
-			if contains(input, keyword) && !contains(input, "query") {
-				return "analyze_dashboard"
-			}
-		}
-		if contains(input, "this dashboard") && !contains(input, "query") {
-			return "analyze_dashboard"
+		dashboardScore := scoreAnalyzeDashboard(input, context)
+		if dashboardScore > 0 {
+			scores = append(scores, skillDetectionScore{
+				skill:      "analyze_dashboard",
+				confidence: dashboardScore,
+				reason:     "Dashboard context available with dashboard-focused keywords",
+			})
 		}
 	}
 
-	// Explain panel triggers (more specific than dashboard analysis)
+	// Score: explain_panel (requires panel context)
 	if context.Panel != nil {
-		keywords := []string{"this panel", "this graph", "this chart", "what does this show"}
-		for _, keyword := range keywords {
-			if contains(input, keyword) {
-				return "explain_panel"
-			}
-		}
-		if (contains(input, "explain") && (contains(input, "panel") || contains(input, "graph"))) {
-			return "explain_panel"
+		panelScore := scoreExplainPanel(input, context)
+		if panelScore > 0 {
+			scores = append(scores, skillDetectionScore{
+				skill:      "explain_panel",
+				confidence: panelScore,
+				reason:     "Panel context available with panel-focused keywords",
+			})
 		}
 	}
 
-	// Generate query triggers
-	queryKeywords := []string{
-		"query for", "promql", "logql", "create a query", "write a query",
-		"rate", "sum", "avg", "count", "histogram",
+	// Score: generate_query
+	queryScore := scoreGenerateQuery(input, context)
+	if queryScore > 0 {
+		scores = append(scores, skillDetectionScore{
+			skill:      "generate_query",
+			confidence: queryScore,
+			reason:     "Query generation keywords detected",
+		})
 	}
-	for _, keyword := range queryKeywords {
+
+	// Score: troubleshoot
+	troubleshootScore := scoreTroubleshoot(input, context)
+	if troubleshootScore > 0 {
+		scores = append(scores, skillDetectionScore{
+			skill:      "troubleshoot",
+			confidence: troubleshootScore,
+			reason:     "Troubleshooting/debugging keywords detected",
+		})
+	}
+
+	// Find highest scoring skill
+	if len(scores) == 0 {
+		return "" // No skill detected
+	}
+
+	// Sort by confidence (highest first)
+	maxScore := scores[0]
+	for _, score := range scores[1:] {
+		if score.confidence > maxScore.confidence {
+			maxScore = score
+		}
+	}
+
+	// Log detection for debugging (only if confidence is high)
+	if maxScore.confidence >= 50 {
+		backend.Logger.Debug("Skill auto-detected",
+			"skill", maxScore.skill,
+			"confidence", maxScore.confidence,
+			"reason", maxScore.reason,
+			"inputLength", len(userInput),
+		)
+	}
+
+	return maxScore.skill
+}
+
+// scoreAnalyzeDashboard scores dashboard analysis intent
+func scoreAnalyzeDashboard(input string, context AssistantContext) int {
+	score := 0
+
+	// High confidence patterns (80+ points)
+	highConfidencePatterns := []string{
+		"what do i see", "what am i looking at", "describe this dashboard",
+		"what is this dashboard", "what's on this dashboard",
+	}
+	for _, pattern := range highConfidencePatterns {
+		if contains(input, pattern) {
+			score += 80
+		}
+	}
+
+	// Medium confidence patterns (50+ points)
+	mediumConfidencePatterns := []string{
+		"analyze this", "overview", "understand this",
+		"show me this", "explain this dashboard",
+	}
+	for _, pattern := range mediumConfidencePatterns {
+		if contains(input, pattern) {
+			score += 50
+		}
+	}
+
+	// Dashboard-specific keywords (30+ points)
+	if contains(input, "dashboard") {
+		score += 30
+		// Boost if asking about "this" dashboard
+		if contains(input, "this dashboard") {
+			score += 20
+		}
+	}
+
+	// Penalty if asking about queries (probably generate_query instead)
+	if contains(input, "query") || contains(input, "promql") || contains(input, "logql") {
+		score -= 40
+	}
+
+	// Penalty if asking about specific panel
+	if contains(input, "panel") || contains(input, "graph") || contains(input, "chart") {
+		score -= 30
+	}
+
+	return score
+}
+
+// scoreExplainPanel scores panel explanation intent
+func scoreExplainPanel(input string, context AssistantContext) int {
+	score := 0
+
+	// High confidence patterns (80+ points)
+	highConfidencePatterns := []string{
+		"this panel", "this graph", "this chart",
+		"what does this show", "what does this display",
+	}
+	for _, pattern := range highConfidencePatterns {
+		if contains(input, pattern) {
+			score += 80
+		}
+	}
+
+	// Medium confidence - explain with panel context (60+ points)
+	if contains(input, "explain") {
+		if contains(input, "panel") || contains(input, "graph") || contains(input, "chart") {
+			score += 60
+		}
+	}
+
+	// Panel-specific keywords (40+ points)
+	panelKeywords := []string{"panel", "graph", "chart", "visualization", "metric"}
+	for _, keyword := range panelKeywords {
 		if contains(input, keyword) {
-			return "generate_query"
+			score += 20
 		}
 	}
 
-	// Troubleshooting triggers
-	troubleshootKeywords := []string{
-		"troubleshoot", "debug", "not working", "why", "error", "failing",
+	// Context boost - if panel is in focus, boost score
+	if context.Panel != nil {
+		score += 15
 	}
-	for _, keyword := range troubleshootKeywords {
+
+	// Penalty if asking about dashboard overview
+	if contains(input, "dashboard") && !contains(input, "panel") {
+		score -= 40
+	}
+
+	return score
+}
+
+// scoreGenerateQuery scores query generation intent
+func scoreGenerateQuery(input string, context AssistantContext) int {
+	score := 0
+
+	// High confidence patterns (80+ points)
+	highConfidencePatterns := []string{
+		"create a query", "write a query", "generate a query",
+		"query for", "give me a query", "show me a query",
+	}
+	for _, pattern := range highConfidencePatterns {
+		if contains(input, pattern) {
+			score += 80
+		}
+	}
+
+	// Query language keywords (70+ points)
+	queryLanguages := []string{"promql", "logql", "traceql"}
+	for _, lang := range queryLanguages {
+		if contains(input, lang) {
+			score += 70
+		}
+	}
+
+	// Function names suggest query generation (50+ points)
+	functionKeywords := []string{
+		"rate", "increase", "sum", "avg", "count", "histogram",
+		"quantile", "topk", "bottomk", "max", "min",
+	}
+	for _, fn := range functionKeywords {
+		if contains(input, fn) {
+			score += 15 // Accumulate for multiple functions
+		}
+	}
+
+	// Action verbs for query generation (40+ points)
+	actionVerbs := []string{
+		"how do i query", "how to query", "how can i get",
+		"show me how to", "need a query",
+	}
+	for _, verb := range actionVerbs {
+		if contains(input, verb) {
+			score += 40
+		}
+	}
+
+	// Metric/log keywords (20+ points)
+	dataKeywords := []string{"metrics", "logs", "traces", "errors", "latency", "throughput"}
+	for _, keyword := range dataKeywords {
 		if contains(input, keyword) {
-			return "troubleshoot"
+			score += 10
 		}
 	}
 
-	// Default: no specific skill detected
-	return ""
+	// Penalty if asking to explain existing query
+	if contains(input, "explain") || contains(input, "what does") {
+		score -= 30
+	}
+
+	return score
+}
+
+// scoreTroubleshoot scores troubleshooting intent
+func scoreTroubleshoot(input string, context AssistantContext) int {
+	score := 0
+
+	// High confidence patterns (80+ points)
+	highConfidencePatterns := []string{
+		"not working", "doesn't work", "failing", "broken",
+		"troubleshoot", "debug", "investigate",
+	}
+	for _, pattern := range highConfidencePatterns {
+		if contains(input, pattern) {
+			score += 80
+		}
+	}
+
+	// Problem indicators (60+ points)
+	problemKeywords := []string{
+		"error", "errors", "issue", "problem", "wrong",
+		"failed", "failure", "down", "outage",
+	}
+	for _, keyword := range problemKeywords {
+		if contains(input, keyword) {
+			score += 30 // Accumulate
+		}
+	}
+
+	// Question words suggesting troubleshooting (40+ points)
+	questionPatterns := []string{
+		"why is", "why are", "what's wrong", "what went wrong",
+		"how do i fix", "how to fix", "what happened",
+	}
+	for _, pattern := range questionPatterns {
+		if contains(input, pattern) {
+			score += 40
+		}
+	}
+
+	// Symptom keywords (20+ points)
+	symptomKeywords := []string{
+		"slow", "high", "spike", "drop", "missing", "timeout",
+		"latency", "degraded", "anomaly", "unusual",
+	}
+	for _, keyword := range symptomKeywords {
+		if contains(input, keyword) {
+			score += 10
+		}
+	}
+
+	// Context boost - if dashboard shows errors/issues
+	if context.Dashboard != nil {
+		// Check if dashboard title contains troubleshooting keywords
+		dashboardTitle := strings.ToLower(context.Dashboard.Title)
+		if contains(dashboardTitle, "error") || contains(dashboardTitle, "debug") {
+			score += 15
+		}
+	}
+
+	return score
 }
 
 // contains checks if a string contains a substring (case-insensitive)
@@ -419,26 +714,26 @@ func contains(s, substr string) bool {
 }
 
 // PLANNING_SYSTEM_PROMPT is used for generating structured execution plans
-const PLANNING_SYSTEM_PROMPT = `You are Zagalin, a planning assistant for observability workflows.
+const PLANNING_SYSTEM_PROMPT = `You are **Zagalin**, an SRE-grade planning assistant for observability workflows.
 
-When given a task, break it down into clear, actionable steps.
+Approach:
+- Hypothesis-driven: Start with facts, form hypotheses, design tests.
+- Dashboard-first: Use existing context before creating new queries.
+- Mitigation-first: If production is impacted, stabilize then investigate.
 
-CRITICAL: Check if the user has dashboard context.
+Tone:
+- British, practical, no fluff.
 
-**If user is on a dashboard:**
-1. FIRST: Analyze what's already visible on the dashboard (panels, queries, current values, patterns)
-2. THEN: Only go deeper into raw queries if the dashboard doesn't answer the question
-3. Use existing dashboard panels as starting points - don't reinvent the wheel
-
-**If user has NO dashboard context:**
-Follow the observability pyramid (Metrics → Logs → Traces):
-1. Start with high-level metrics
-2. Narrow to logs if needed
-3. Trace specific requests if necessary
+Planning rules:
+1) Check dashboard context FIRST. Use what's already visible.
+2) If no dashboard: Follow Metrics → Logs → Traces.
+3) Each step must produce a concrete artifact (query result, finding, action taken).
+4) Keep steps atomic (30-90 seconds each). Max 5 steps.
+5) If a step could be risky, flag it clearly.
 
 Your response MUST be valid JSON in this exact format:
 {
-  "goal": "One sentence describing the overall objective",
+  "goal": "One sentence describing the objective",
   "steps": [
     {
       "title": "Step 1: Analyze dashboard panels",
@@ -456,12 +751,10 @@ Your response MUST be valid JSON in this exact format:
   "estimatedDuration": "2-3 minutes"
 }
 
-Guidelines:
-- Keep steps atomic (each step should take 30-90 seconds)
-- Maximum 5 steps total
-- Each step should produce a concrete artifact (query, link, finding)
-- PRIORITIZE dashboard context over raw queries when available
-- Steps should build on each other logically
+Quality gate:
+- Did I use dashboard context if available?
+- Does each step produce something tangible?
+- Are steps in a logical order (broad → narrow)?
 
 DO NOT include any text outside the JSON. NO markdown code blocks. Just pure JSON.`
 

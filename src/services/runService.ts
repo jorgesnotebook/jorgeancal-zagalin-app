@@ -1,9 +1,6 @@
-/**
- * Run Service - Client for run-based orchestration API
- */
-
 import { Observable } from 'rxjs';
 import { AssistantMessage, AssistantContext } from './assistantService';
+import { getPluginResourcePath } from './pluginUrl';
 
 export interface RunStartRequest {
   conversationId: string;
@@ -66,41 +63,34 @@ export interface RunEvent {
   data: any;
 }
 
-const BASE_URL = '/api/plugins/jorgeancal-zagalin-app/resources';
-
-/**
- * Start a new run
- */
-export async function startRun(request: RunStartRequest): Promise<RunStartResponse> {
-  const response = await fetch(`${BASE_URL}/runs/start`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(request),
+async function fetchRun(endpoint: string, method = 'POST', body?: any): Promise<Response> {
+  const response = await fetch(`${getPluginResourcePath()}${endpoint}`, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
   });
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Failed to start run: ${response.status} - ${error}`);
+    throw new Error(`${response.status} - ${error}`);
   }
 
+  return response;
+}
+
+export async function startRun(request: RunStartRequest): Promise<RunStartResponse> {
+  const response = await fetchRun('/runs/start', 'POST', request);
   return response.json();
 }
 
-/**
- * Stream SSE events for a run
- */
 export function streamRunEvents(runId: string): Observable<RunEvent> {
   return new Observable<RunEvent>((subscriber) => {
-    const url = `${BASE_URL}/runs/${runId}/events`;
+    const url = `${getPluginResourcePath()}/runs/${runId}/events`;
 
     fetch(url, {
       method: 'GET',
-      headers: {
-        Accept: 'text/event-stream',
-      },
+      headers: { Accept: 'text/event-stream' },
       credentials: 'same-origin',
     })
       .then(async (response) => {
@@ -126,17 +116,15 @@ export function streamRunEvents(runId: string): Observable<RunEvent> {
             }
 
             const text = decoder.decode(value, { stream: true });
-
-            // Parse SSE lines
             const lines = text.split('\n');
+
             for (const line of lines) {
               if (!line.trim() || !line.startsWith('data: ')) {
                 continue;
               }
 
-              const data = line.substring(6); // Remove "data: " prefix
+              const data = line.substring(6);
 
-              // Check for done marker
               if (data === '[DONE]') {
                 subscriber.complete();
                 return;
@@ -160,64 +148,19 @@ export function streamRunEvents(runId: string): Observable<RunEvent> {
   });
 }
 
-/**
- * Pause a run
- */
 export async function pauseRun(runId: string): Promise<void> {
-  const response = await fetch(`${BASE_URL}/runs/${runId}/pause`, {
-    method: 'POST',
-    credentials: 'same-origin',
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to pause run: ${response.status} - ${error}`);
-  }
+  await fetchRun(`/runs/${runId}/pause`);
 }
 
-/**
- * Resume a run
- */
 export async function resumeRun(runId: string): Promise<void> {
-  const response = await fetch(`${BASE_URL}/runs/${runId}/resume`, {
-    method: 'POST',
-    credentials: 'same-origin',
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to resume run: ${response.status} - ${error}`);
-  }
+  await fetchRun(`/runs/${runId}/resume`);
 }
 
-/**
- * Cancel a run
- */
 export async function cancelRun(runId: string): Promise<void> {
-  const response = await fetch(`${BASE_URL}/runs/${runId}/cancel`, {
-    method: 'POST',
-    credentials: 'same-origin',
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to cancel run: ${response.status} - ${error}`);
-  }
+  await fetchRun(`/runs/${runId}/cancel`);
 }
 
-/**
- * Get run status
- */
 export async function getRunStatus(runId: string): Promise<RunState> {
-  const response = await fetch(`${BASE_URL}/runs/${runId}/status`, {
-    method: 'GET',
-    credentials: 'same-origin',
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to get run status: ${response.status} - ${error}`);
-  }
-
+  const response = await fetchRun(`/runs/${runId}/status`, 'GET');
   return response.json();
 }

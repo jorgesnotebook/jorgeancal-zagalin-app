@@ -8,7 +8,6 @@ function App(props: AppRootProps) {
   return (
     <div className={getAppStyles()}>
       <Routes>
-        {/* Default page - Zagalin Chat with conversation history */}
         <Route path="*" element={<ChatPanel />} />
       </Routes>
     </div>

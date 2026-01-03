@@ -42,14 +42,22 @@ type AssistantMessage struct {
 }
 
 // LLMStreamRequest represents a request to the LLM API
+//
+// Token Limit Compatibility:
+// - MaxTokens: Used by older OpenAI models (gpt-4-turbo, gpt-3.5-turbo, gpt-4o-2024-08-06)
+// - MaxCompletionTokens: Required by newer models (gpt-4o-2024-11-20+, o1-preview, o1-mini, o3)
+//
+// Both fields are sent with the same value for maximum compatibility.
+// The receiving service (OpenAI API or grafana-llm-app) will use whichever field it supports.
 type LLMStreamRequest struct {
-	Model       string             `json:"model"`
-	Messages    []AssistantMessage `json:"messages"`
-	Temperature float64            `json:"temperature"`
-	MaxTokens   int                `json:"max_tokens"`
-	Tools       []Tool             `json:"tools,omitempty"`
-	ToolChoice  string             `json:"tool_choice,omitempty"`
-	Stream      bool               `json:"stream"` // Enable SSE streaming
+	Model               string             `json:"model"`
+	Messages            []AssistantMessage `json:"messages"`
+	Temperature         float64            `json:"temperature"`
+	MaxTokens           int                `json:"max_tokens,omitempty"`           // For older models
+	MaxCompletionTokens int                `json:"max_completion_tokens,omitempty"` // For newer models (gpt-4o-2024-11-20+, o1, o3)
+	Tools               []Tool             `json:"tools,omitempty"`
+	ToolChoice          string             `json:"tool_choice,omitempty"`
+	Stream              bool               `json:"stream"` // Enable SSE streaming
 }
 
 // LLMStreamChunk represents a chunk from the SSE stream
@@ -123,6 +131,9 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
 
+	// Add Zagalin service header for Traefik middleware authentication
+	httpReq.Header.Set("X-Zagalin-Service", "backend")
+
 	// Get plugin context for authentication
 	pluginCtx := backend.PluginConfigFromContext(ctx)
 
@@ -151,6 +162,11 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 			httpReq.Header.Set("X-Grafana-User", pluginCtx.User.Login)
 		}
 
+		// Forward user email
+		if pluginCtx.User.Email != "" {
+			httpReq.Header.Set("X-Grafana-User-Email", pluginCtx.User.Email)
+		}
+
 		// Forward org ID
 		if pluginCtx.OrgID > 0 {
 			httpReq.Header.Set("X-Grafana-Org-Id", fmt.Sprintf("%d", pluginCtx.OrgID))
@@ -158,6 +174,7 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 
 		c.logger.Debug("Forwarding user context",
 			"user", pluginCtx.User.Login,
+			"email", pluginCtx.User.Email,
 			"orgId", pluginCtx.OrgID,
 		)
 	}
@@ -189,6 +206,7 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 		"url", llmURL,
 		"hasServiceAccountToken", httpReq.Header.Get("Authorization") != "",
 		"hasUserContext", httpReq.Header.Get("X-Grafana-User") != "",
+		"hasUserEmail", httpReq.Header.Get("X-Grafana-User-Email") != "",
 		"hasOrgId", httpReq.Header.Get("X-Grafana-Org-Id") != "",
 	)
 
@@ -266,7 +284,7 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 			}
 
 			lineCount++
-			c.logger.Debug("Read SSE line", "lineNumber", lineCount, "line", line)
+			c.logger.Debug("Read SSE line", "lineNumber", lineCount, "lineLength", len(line))
 
 			// Parse SSE line
 			line = strings.TrimSpace(line)
@@ -290,8 +308,7 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 			// Parse OpenAI format chunk
 			var openaiChunk openAIStreamChunk
 			if err := json.Unmarshal([]byte(data), &openaiChunk); err != nil {
-				c.logger.Warn("Failed to parse OpenAI SSE chunk", "data", data, "error", err)
-				c.logger.Debug("Raw SSE data that failed to parse", "rawData", data)
+				c.logger.Warn("Failed to parse OpenAI SSE chunk", "dataLength", len(data), "error", err)
 				continue
 			}
 
@@ -308,7 +325,7 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 					Chunk: choice.Delta.Content,
 				}
 				chunkChan <- chunk
-				c.logger.Debug("Sent text chunk", "content", choice.Delta.Content)
+				c.logger.Debug("Sent text chunk", "contentLength", len(choice.Delta.Content))
 			}
 
 			// Handle tool calls

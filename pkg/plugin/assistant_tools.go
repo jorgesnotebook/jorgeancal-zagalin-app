@@ -178,9 +178,124 @@ var ZAGALIN_TOOLS = []Tool{
 
 // GetTools returns the tools to send to the LLM
 // If functionCalling is disabled, returns nil
-func GetTools(functionCallingEnabled bool) []Tool {
+// Tools are dynamically built based on settings (e.g., OTel enforcement)
+func GetTools(functionCallingEnabled bool, settings *Settings) []Tool {
 	if !functionCallingEnabled {
 		return nil
 	}
-	return ZAGALIN_TOOLS
+
+	// Build tools dynamically based on settings
+	tools := make([]Tool, 0, len(ZAGALIN_TOOLS))
+
+	for _, tool := range ZAGALIN_TOOLS {
+		// For query generation tools, conditionally add OTel parameters
+		if tool.Function.Name == "create_promql_query" {
+			tools = append(tools, buildPromQLTool(settings))
+		} else if tool.Function.Name == "create_logql_query" {
+			tools = append(tools, buildLogQLTool(settings))
+		} else {
+			// Other tools remain unchanged
+			tools = append(tools, tool)
+		}
+	}
+
+	return tools
+}
+
+// buildPromQLTool builds the PromQL tool with optional OTel parameters
+func buildPromQLTool(settings *Settings) Tool {
+	props := map[string]PropertyDefinition{
+		"metric": {
+			Type:        "string",
+			Description: "The metric name to query (e.g., http_requests_total)",
+		},
+		"filters": {
+			Type:        "object",
+			Description: "Label filters as key-value pairs (e.g., {job: \"api\", status: \"200\"})",
+		},
+		"aggregation": {
+			Type:        "string",
+			Description: "Aggregation function to apply",
+			Enum:        []string{"sum", "avg", "min", "max", "count", "rate"},
+		},
+		"timeRange": {
+			Type:        "string",
+			Description: "Time range for rate calculations (e.g., \"5m\", \"1h\")",
+		},
+	}
+
+	description := "Generate a PromQL query for Prometheus metrics"
+
+	// Add OTel parameters only if enforcement is enabled
+	if settings != nil && settings.OtelEnforcement.Enabled {
+		props["serviceName"] = PropertyDefinition{
+			Type:        "string",
+			Description: "OpenTelemetry service.name for multi-tenant scoping (e.g., \"api-gateway\", \"payment-service\"). Extract from dashboard context if available.",
+		}
+		props["environmentName"] = PropertyDefinition{
+			Type:        "string",
+			Description: "OpenTelemetry deployment.environment.name (e.g., \"production\", \"staging\", \"development\"). Extract from dashboard context if available.",
+		}
+		description += ". IMPORTANT: Include serviceName and environmentName for proper OTel scoping."
+	}
+
+	return Tool{
+		Type: "function",
+		Function: Function{
+			Name:        "create_promql_query",
+			Description: description,
+			Parameters: ToolParameters{
+				Type:       "object",
+				Properties: props,
+				Required:   []string{"metric"},
+			},
+		},
+	}
+}
+
+// buildLogQLTool builds the LogQL tool with optional OTel parameters
+func buildLogQLTool(settings *Settings) Tool {
+	props := map[string]PropertyDefinition{
+		"logStream": {
+			Type:        "string",
+			Description: "Log stream selector (e.g., {job=\"varlogs\"})",
+		},
+		"filter": {
+			Type:        "string",
+			Description: "Log line filter expression",
+		},
+		"parser": {
+			Type:        "string",
+			Description: "Parser to use for log lines",
+			Enum:        []string{"json", "logfmt", "pattern", "regexp"},
+		},
+	}
+
+	description := "Generate a LogQL query for Loki logs"
+
+	// Add OTel parameters only if enforcement is enabled
+	if settings != nil && settings.OtelEnforcement.Enabled {
+		props["serviceName"] = PropertyDefinition{
+			Type:        "string",
+			Description: "OpenTelemetry service.name for multi-tenant scoping (e.g., \"api-gateway\", \"payment-service\"). Extract from dashboard context if available.",
+		}
+		props["environmentName"] = PropertyDefinition{
+			Type:        "string",
+			Description: "OpenTelemetry deployment.environment.name (e.g., \"production\", \"staging\", \"development\"). Extract from dashboard context if available.",
+		}
+		description += ". IMPORTANT: Include serviceName and environmentName for proper OTel scoping."
+	}
+
+	return Tool{
+		Type: "function",
+		Function: Function{
+			Name:        "create_logql_query",
+			Description: description,
+			Parameters: ToolParameters{
+				Type:       "object",
+				Properties: props,
+				Required:   []string{"logStream"},
+			},
+		},
+	}
 }

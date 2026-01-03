@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
@@ -13,14 +14,104 @@ import (
 
 // LLMHealthStatus represents the health status of the LLM service
 type LLMHealthStatus struct {
-	Available bool
+	Available  bool
 	Configured bool
-	Message string
-	ErrorCode string
+	Message    string
+	ErrorCode  string
 }
 
-// CheckLLMHealth checks if grafana-llm-app is available and configured
+// LLM health check cache (module-level)
+var (
+	llmHealthCache struct {
+		sync.RWMutex
+		status     LLMHealthStatus
+		expiry     time.Time
+		inProgress bool
+		waiters    []chan LLMHealthStatus
+	}
+	llmHealthCacheTTL = 30 * time.Second // Cache for 30 seconds
+)
+
+// CheckLLMHealth checks if grafana-llm-app is available and configured (with caching)
 func CheckLLMHealth(ctx context.Context, grafanaURL string, incomingReq *http.Request) LLMHealthStatus {
+	now := time.Now()
+
+	// Check cache first (read lock)
+	llmHealthCache.RLock()
+	if now.Before(llmHealthCache.expiry) {
+		status := llmHealthCache.status
+		llmHealthCache.RUnlock()
+		log.DefaultLogger.Debug("LLM health check: using cached result",
+			"available", status.Available,
+			"configured", status.Configured,
+		)
+		return status
+	}
+
+	// Check if another goroutine is already performing the check
+	if llmHealthCache.inProgress {
+		// Wait for the in-flight check to complete
+		waiter := make(chan LLMHealthStatus, 1)
+		llmHealthCache.waiters = append(llmHealthCache.waiters, waiter)
+		llmHealthCache.RUnlock()
+
+		log.DefaultLogger.Debug("LLM health check: waiting for in-flight check")
+		select {
+		case result := <-waiter:
+			return result
+		case <-ctx.Done():
+			return LLMHealthStatus{
+				Available:  false,
+				Configured: false,
+				Message:    "Health check cancelled",
+				ErrorCode:  "CONTEXT_CANCELLED",
+			}
+		}
+	}
+	llmHealthCache.RUnlock()
+
+	// Acquire write lock to start health check
+	llmHealthCache.Lock()
+	// Double-check cache after acquiring write lock (another goroutine might have updated it)
+	if now.Before(llmHealthCache.expiry) {
+		status := llmHealthCache.status
+		llmHealthCache.Unlock()
+		return status
+	}
+
+	llmHealthCache.inProgress = true
+	llmHealthCache.Unlock()
+
+	log.DefaultLogger.Debug("LLM health check: starting new check")
+
+	// Perform actual health check
+	status := checkLLMHealthUncached(ctx, grafanaURL, incomingReq)
+
+	// Update cache and notify waiters
+	llmHealthCache.Lock()
+	llmHealthCache.status = status
+	llmHealthCache.expiry = time.Now().Add(llmHealthCacheTTL)
+	llmHealthCache.inProgress = false
+
+	// Notify all waiting goroutines
+	for _, waiter := range llmHealthCache.waiters {
+		waiter <- status
+		close(waiter)
+	}
+	llmHealthCache.waiters = nil
+	llmHealthCache.Unlock()
+
+	log.DefaultLogger.Info("LLM health check completed",
+		"available", status.Available,
+		"configured", status.Configured,
+		"message", status.Message,
+	)
+
+	return status
+}
+
+// checkLLMHealthUncached performs the actual health check without caching
+func checkLLMHealthUncached(ctx context.Context, grafanaURL string, incomingReq *http.Request) LLMHealthStatus {
 	// Create a test request to grafana-llm-app
 	testURL := fmt.Sprintf("%s/api/plugins/grafana-llm-app/health", grafanaURL)
 
@@ -128,9 +219,19 @@ func CheckLLMHealth(ctx context.Context, grafanaURL string, incomingReq *http.Re
 
 	// Default to configured if health check passed
 	return LLMHealthStatus{
-		Available: true,
+		Available:  true,
 		Configured: true,
-		Message: "LLM service is ready",
-		ErrorCode: "",
+		Message:    "LLM service is ready",
+		ErrorCode:  "",
 	}
+}
+
+// InvalidateLLMHealthCache forces cache invalidation (useful after config changes)
+func InvalidateLLMHealthCache() {
+	llmHealthCache.Lock()
+	defer llmHealthCache.Unlock()
+	llmHealthCache.status = LLMHealthStatus{}
+	llmHealthCache.expiry = time.Time{}
+	llmHealthCache.inProgress = false
+	log.DefaultLogger.Debug("LLM health check cache invalidated")
 }

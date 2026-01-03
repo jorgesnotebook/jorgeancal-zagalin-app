@@ -25,6 +25,7 @@ type App struct {
 	datasourceCache *datasourceCache
 	queryValidator  *QueryValidator
 	runManager      *RunManager
+	otelRegistry    *OTelLabelRegistry // Registry of discovered OTel label formats
 }
 
 func NewApp(ctx context.Context, appSettings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -32,7 +33,9 @@ func NewApp(ctx context.Context, appSettings backend.AppInstanceSettings) (insta
 
 	app.contextManager = contextmgr.NewManager()
 	app.datasourceCache = newDatasourceCache()
+	app.otelRegistry = NewOTelLabelRegistry()
 	backend.Logger.Debug("Datasource cache initialized")
+	backend.Logger.Debug("OTel label registry initialized")
 
 	app.runManager = NewRunManager(backend.Logger)
 	backend.Logger.Info("Run manager initialized")

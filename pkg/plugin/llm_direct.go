@@ -15,16 +15,17 @@ import (
 
 // DirectLLMClient handles direct communication with LLM providers (OpenAI, Anthropic, etc.)
 type DirectLLMClient struct {
-	httpClient *http.Client
-	provider   string // "openai" | "anthropic" | "azure-openai"
-	model      string
-	endpoint   string
-	apiKey     string
-	logger     log.Logger
+	httpClient   *http.Client
+	provider     string // "openai" | "anthropic" | "azure-openai"
+	model        string
+	endpoint     string
+	apiKey       string
+	organization string // OpenAI Organization ID (optional)
+	logger       log.Logger
 }
 
 // NewDirectLLMClient creates a new direct LLM client
-func NewDirectLLMClient(provider, model, endpoint, apiKey string, httpClient *http.Client, logger log.Logger) *DirectLLMClient {
+func NewDirectLLMClient(provider, model, endpoint, apiKey, organization string, httpClient *http.Client, logger log.Logger) *DirectLLMClient {
 	if httpClient == nil {
 		httpClient = &http.Client{}
 	}
@@ -40,12 +41,13 @@ func NewDirectLLMClient(provider, model, endpoint, apiKey string, httpClient *ht
 	}
 
 	return &DirectLLMClient{
-		httpClient: httpClient,
-		provider:   provider,
-		model:      model,
-		endpoint:   endpoint,
-		apiKey:     apiKey,
-		logger:     logger,
+		httpClient:   httpClient,
+		provider:     provider,
+		model:        model,
+		endpoint:     endpoint,
+		apiKey:       apiKey,
+		organization: organization,
+		logger:       logger,
 	}
 }
 
@@ -95,10 +97,16 @@ func (c *DirectLLMClient) streamOpenAI(ctx context.Context, req LLMStreamRequest
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
+	// Set OpenAI-Organization header if provided
+	if c.organization != "" {
+		httpReq.Header.Set("OpenAI-Organization", c.organization)
+	}
+
 	c.logger.Info("Making direct LLM request",
 		"provider", c.provider,
 		"model", c.model,
 		"endpoint", c.endpoint,
+		"hasOrganization", c.organization != "",
 	)
 
 	// Make request

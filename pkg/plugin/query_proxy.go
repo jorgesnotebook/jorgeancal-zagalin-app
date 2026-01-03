@@ -297,7 +297,8 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 					"datasource", queryReq.Datasource,
 					"datasourceType", dsType,
 					"violationType", result.ViolationType,
-					"originalQuery", result.OriginalQuery,
+					"queryHash", hashQuery(result.OriginalQuery),
+					"queryLength", len(result.OriginalQuery),
 					"error", result.Error,
 				)
 
@@ -316,8 +317,10 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 					"orgId", user.OrgID,
 					"datasource", queryReq.Datasource,
 					"datasourceType", dsType,
-					"originalQuery", result.OriginalQuery,
-					"sanitizedQuery", result.SanitizedQuery,
+					"originalHash", hashQuery(result.OriginalQuery),
+					"sanitizedHash", hashQuery(result.SanitizedQuery),
+					"originalLength", len(result.OriginalQuery),
+					"sanitizedLength", len(result.SanitizedQuery),
 				)
 
 				// Audit log sanitization
@@ -466,7 +469,8 @@ func (a *App) logQueryValidationFailure(user *UserIdentity, datasource string, r
 		"orgId":         user.OrgID,
 		"datasource":    datasource,
 		"violationType": result.ViolationType,
-		"originalQuery": result.OriginalQuery,
+		"queryHash":     hashQuery(result.OriginalQuery),
+		"queryLength":   len(result.OriginalQuery),
 		"error":         result.Error.Error(),
 	}
 	backend.Logger.Info("Query validation failure audit", "audit", auditLog)
@@ -475,14 +479,16 @@ func (a *App) logQueryValidationFailure(user *UserIdentity, datasource string, r
 // logQuerySanitization logs query sanitization attempts for audit
 func (a *App) logQuerySanitization(user *UserIdentity, datasource string, result *QueryValidationResult) {
 	auditLog := map[string]interface{}{
-		"timestamp":      time.Now().UTC().Format(time.RFC3339),
-		"event":          "query_sanitized",
-		"user":           user.UserLogin,
-		"userId":         user.UserID,
-		"orgId":          user.OrgID,
-		"datasource":     datasource,
-		"originalQuery":  result.OriginalQuery,
-		"sanitizedQuery": result.SanitizedQuery,
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
+		"event":           "query_sanitized",
+		"user":            user.UserLogin,
+		"userId":          user.UserID,
+		"orgId":           user.OrgID,
+		"datasource":      datasource,
+		"originalHash":    hashQuery(result.OriginalQuery),
+		"sanitizedHash":   hashQuery(result.SanitizedQuery),
+		"originalLength":  len(result.OriginalQuery),
+		"sanitizedLength": len(result.SanitizedQuery),
 	}
 	backend.Logger.Info("Query sanitization audit", "audit", auditLog)
 }

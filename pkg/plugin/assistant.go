@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ type AssistantRequest struct {
 	History  []AssistantMessage `json:"history"`
 	Context  AssistantContext   `json:"context"`
 	SkillHint string            `json:"skillHint,omitempty"`
+	Mode     string             `json:"mode,omitempty"` // "standard" (fast) or "thinking" (extended reasoning)
 }
 
 // AssistantResponse represents the response metadata
@@ -182,8 +184,41 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		skill = DetectSkill(assistantReq.Message, assistantReq.Context)
 	}
 
+	// Determine chat mode (default to standard)
+	mode := assistantReq.Mode
+	if mode == "" {
+		mode = "standard"
+	}
+
 	// Build prompts
-	systemPrompt := BuildSystemPrompt(skill, assistantReq.Context)
+	systemPrompt := BuildSystemPrompt(skill, assistantReq.Context, a.settings)
+
+	// For thinking mode, enhance system prompt with reasoning instructions
+	if mode == "thinking" {
+		systemPrompt += "\n\n---\n\nIMPORTANT: You are in Deep Thinking mode with explainable reasoning.\n\n" +
+			"Structure your response using this pattern:\n\n" +
+			"## 🔍 Observation\n" +
+			"State what data/metrics/context you have available.\n" +
+			"Rate your confidence in the data quality (0-100%).\n\n" +
+			"## 📊 Analysis\n" +
+			"Analyze the situation:\n" +
+			"- What patterns do you see?\n" +
+			"- What stands out as unusual?\n" +
+			"- What are the key metrics?\n\n" +
+			"## 💡 Hypothesis\n" +
+			"List possible explanations, ranked by likelihood:\n" +
+			"1. Most likely explanation (confidence: XX%)\n" +
+			"2. Alternative explanation (confidence: XX%)\n" +
+			"3. Less likely but possible (confidence: XX%)\n\n" +
+			"## ✅ Conclusion\n" +
+			"State your final answer with overall confidence level.\n" +
+			"Format: **Answer: [Your answer here]**\n" +
+			"**Overall Confidence: XX%**\n\n" +
+			"## 🔬 Verification\n" +
+			"How can this be verified? What additional data would help?\n\n" +
+			"Use these emoji headings exactly as shown. Be thorough and provide clear reasoning at each step."
+	}
+
 	userPrompt := BuildUserPrompt(skill, assistantReq.Message, assistantReq.Context)
 
 	// Construct full message history
@@ -221,16 +256,42 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		}
 	}
 
+	// Adjust parameters based on mode
+	// Model comes from plugin settings (configured by admin)
+	// We only adjust temperature and token limits based on mode
+	maxTokens := 2000
+	temperature := 0.7
+
+	if mode == "thinking" {
+		// Thinking mode: more tokens and lower temperature for deeper reasoning
+		maxTokens = 4000  // More tokens for comprehensive analysis
+		temperature = 0.5 // Lower temperature for more focused, logical reasoning
+	}
+
+	// Get model from settings
+	// If not configured, use empty string and let grafana-llm-app use its default
+	model := ""
+	if a.settings != nil && a.settings.LLMModel != "" {
+		model = a.settings.LLMModel
+		backend.Logger.Debug("Using model from plugin settings", "model", model, "mode", mode)
+	} else {
+		// Empty model = use default from grafana-llm-app configuration
+		// This works with any provider (OpenAI, Anthropic, Azure, Ollama, etc.)
+		backend.Logger.Debug("Using default model from grafana-llm-app (no model configured in Zagalin settings)", "mode", mode)
+	}
+
 	// Prepare LLM request
-	// LLM configuration is handled by grafana-llm-app plugin, so we use sensible defaults here
+	// Model is configured in plugin settings or uses default
+	// Admin should set LLMModel in plugin config to match their grafana-llm-app setup
 	llmReq := LLMStreamRequest{
-		Model:       "gpt-4o-mini", // Default model
-		Messages:    messages,
-		Temperature: 0.7,    // Default temperature
-		MaxTokens:   2000,   // Default max tokens
-		Tools:       GetTools(true), // Function calling enabled by default
-		ToolChoice:  "auto",
-		Stream:      true, // Enable SSE streaming
+		Model:               model,
+		Messages:            messages,
+		Temperature:         temperature,
+		MaxTokens:           maxTokens,           // For older models
+		MaxCompletionTokens: maxTokens,           // For newer models (same value)
+		Tools:               GetTools(true, a.settings), // Function calling enabled, OTel conditional
+		ToolChoice:          "auto",
+		Stream:              true,                // Enable SSE streaming
 	}
 
 	// Always proxy through grafana-llm-app (unified backend routing)
@@ -458,7 +519,7 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 
 	// Validate PromQL
 	if toolCall.Function.Name == "create_promql_query" {
-		query := extractPromQLFromToolArgs(args)
+		query := a.extractPromQLFromToolArgs(args)
 		if query != "" {
 			result := a.queryValidator.ValidateQuery(ctx, query, DatasourcePrometheus)
 
@@ -470,7 +531,8 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 				backend.Logger.Warn("Tool PromQL validation failed",
 					"user", user.UserLogin,
 					"violation", result.ViolationType,
-					"query", query)
+					"queryHash", hashQuery(query),
+					"queryLength", len(query))
 
 				// Convert UserInfo to UserIdentity for logging
 				userIdentity := &UserIdentity{
@@ -488,8 +550,10 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 
 				backend.Logger.Info("Tool PromQL sanitized",
 					"user", user.UserLogin,
-					"original", query,
-					"sanitized", result.SanitizedQuery)
+					"originalHash", hashQuery(query),
+					"sanitizedHash", hashQuery(result.SanitizedQuery),
+					"originalLength", len(query),
+					"sanitizedLength", len(result.SanitizedQuery))
 			}
 
 			// Update arguments with validation results
@@ -500,7 +564,7 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 
 	// Validate LogQL
 	if toolCall.Function.Name == "create_logql_query" {
-		query := extractLogQLFromToolArgs(args)
+		query := a.extractLogQLFromToolArgs(args)
 		if query != "" {
 			result := a.queryValidator.ValidateQuery(ctx, query, DatasourceLoki)
 
@@ -512,7 +576,8 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 				backend.Logger.Warn("Tool LogQL validation failed",
 					"user", user.UserLogin,
 					"violation", result.ViolationType,
-					"query", query)
+					"queryHash", hashQuery(query),
+					"queryLength", len(query))
 
 				// Convert UserInfo to UserIdentity for logging
 			userIdentity := &UserIdentity{
@@ -530,8 +595,10 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 
 				backend.Logger.Info("Tool LogQL sanitized",
 					"user", user.UserLogin,
-					"original", query,
-					"sanitized", result.SanitizedQuery)
+					"originalHash", hashQuery(query),
+					"sanitizedHash", hashQuery(result.SanitizedQuery),
+					"originalLength", len(query),
+					"sanitizedLength", len(result.SanitizedQuery))
 			}
 
 			// Update arguments with validation results
@@ -545,8 +612,55 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 	}
 }
 
+// extractOTelLabelsFromArgs extracts OTel labels from tool arguments (DRY helper)
+func (a *App) extractOTelLabelsFromArgs(args map[string]interface{}, dsType DatasourceType) []string {
+	if a.settings == nil || !a.settings.OtelEnforcement.Enabled {
+		return []string{}
+	}
+
+	serviceName, _ := args["serviceName"].(string)
+	environmentName, _ := args["environmentName"].(string)
+
+	if serviceName == "" && environmentName == "" {
+		return []string{}
+	}
+
+	// Use defaults - actual format will be discovered during query execution
+	serviceLabel, environmentLabel := getDefaultLabelNames(dsType)
+
+	var labels []string
+	if serviceName != "" {
+		labels = append(labels, fmt.Sprintf(`%s="%s"`, serviceLabel, serviceName))
+	}
+	if environmentName != "" {
+		labels = append(labels, fmt.Sprintf(`%s="%s"`, environmentLabel, environmentName))
+	}
+
+	return labels
+}
+
+// injectLabelsIntoLogStream injects labels into a LogQL stream selector
+func injectLabelsIntoLogStream(logStream string, labels []string) string {
+	if len(labels) == 0 {
+		return logStream
+	}
+
+	// Remove trailing } if present
+	logStream = strings.TrimSuffix(logStream, "}")
+
+	// Check if stream already has labels
+	if strings.Contains(logStream, "=") {
+		// Has existing labels: {job="app"} -> {job="app",service_name="api"}
+		return logStream + "," + strings.Join(labels, ",") + "}"
+	}
+
+	// No existing labels: {} -> {service_name="api"}
+	logStream = strings.TrimSuffix(logStream, "{")
+	return "{" + strings.Join(labels, ",") + "}"
+}
+
 // extractPromQLFromToolArgs reconstructs a PromQL query from tool call arguments
-func extractPromQLFromToolArgs(args map[string]interface{}) string {
+func (a *App) extractPromQLFromToolArgs(args map[string]interface{}) string {
 	metric, _ := args["metric"].(string)
 	if metric == "" {
 		return ""
@@ -554,12 +668,21 @@ func extractPromQLFromToolArgs(args map[string]interface{}) string {
 
 	query := metric
 
-	// Add filters: {label="value"}
+	// Collect all label filters
+	var filterParts []string
+
+	// Add OTel labels first (if enabled)
+	filterParts = append(filterParts, a.extractOTelLabelsFromArgs(args, DatasourcePrometheus)...)
+
+	// Add custom filters: {label="value"}
 	if filters, ok := args["filters"].(map[string]interface{}); ok {
-		var filterParts []string
 		for k, v := range filters {
 			filterParts = append(filterParts, fmt.Sprintf("%s=\"%v\"", k, v))
 		}
+	}
+
+	// Build query with labels
+	if len(filterParts) > 0 {
 		query = fmt.Sprintf("%s{%s}", metric, strings.Join(filterParts, ","))
 	}
 
@@ -580,10 +703,16 @@ func extractPromQLFromToolArgs(args map[string]interface{}) string {
 }
 
 // extractLogQLFromToolArgs reconstructs a LogQL query from tool call arguments
-func extractLogQLFromToolArgs(args map[string]interface{}) string {
+func (a *App) extractLogQLFromToolArgs(args map[string]interface{}) string {
 	logStream, _ := args["logStream"].(string)
 	if logStream == "" {
 		return ""
+	}
+
+	// Inject OTel labels into log stream selector (if enabled)
+	otelLabels := a.extractOTelLabelsFromArgs(args, DatasourceLoki)
+	if len(otelLabels) > 0 {
+		logStream = injectLabelsIntoLogStream(logStream, otelLabels)
 	}
 
 	query := logStream
@@ -629,10 +758,54 @@ type UserInfo struct {
 
 // getGrafanaURL returns the Grafana URL for making internal API calls
 func getGrafanaURL() string {
-	// Get Grafana URL from environment or default to localhost
+	// Priority 1: Check explicit GF_URL override (for special deployments)
+	// Use this in Docker, Kubernetes, or when Grafana is behind a reverse proxy
+	if url := os.Getenv("GF_URL"); url != "" {
+		backend.Logger.Debug("Using GF_URL override from environment", "url", url)
+		return url
+	}
+
+	// Priority 2: Check individual component overrides (for flexibility)
+	// These are NOT set by Grafana automatically - they're only for manual override
+	protocol := os.Getenv("GF_SERVER_PROTOCOL")
+	domain := os.Getenv("GF_SERVER_DOMAIN")
+	port := os.Getenv("GF_SERVER_HTTP_PORT")
+
+	// If any component is overridden, construct URL from overrides
+	if protocol != "" || domain != "" || port != "" {
+		if protocol == "" {
+			protocol = "http"
+		}
+		if domain == "" {
+			domain = "localhost"
+		}
+		if port == "" {
+			port = "3000"
+		}
+
+		var url string
+		if port == "80" || port == "443" {
+			url = fmt.Sprintf("%s://%s", protocol, domain)
+		} else {
+			url = fmt.Sprintf("%s://%s:%s", protocol, domain, port)
+		}
+
+		backend.Logger.Debug("Using environment variable overrides",
+			"url", url,
+			"protocol", protocol,
+			"domain", domain,
+			"port", port,
+		)
+		return url
+	}
+
+	// Default: Plugins run inside Grafana, so use localhost
+	// This works because:
+	// - The plugin runs as a subprocess of Grafana
+	// - grafana-llm-app is also a plugin in the same Grafana instance
+	// - HTTP calls to localhost will hit the same Grafana instance
 	url := "http://localhost:3000"
-	// In production, this would be set by Grafana environment
-	// For now, we assume local development
+	backend.Logger.Debug("Using default localhost URL (plugin runs inside Grafana)", "url", url)
 	return url
 }
 
@@ -778,12 +951,13 @@ func (a *App) generateExecutionPlan(ctx context.Context, req AssistantRequest, i
 	}
 
 	llmReq := LLMStreamRequest{
-		Model:       "gpt-4o-mini",
-		Messages:    messages,
-		Temperature: 0.3, // Lower temperature for structured output
-		MaxTokens:   1000,
-		Tools:       nil,       // No tools for planning
-		ToolChoice:  "none",
+		Model:               "gpt-4o-mini",
+		Messages:            messages,
+		Temperature:         0.3,                 // Lower temperature for structured output
+		MaxTokens:           1000,                // For older models
+		MaxCompletionTokens: 1000,                // For newer models
+		Tools:               nil,                 // No tools for planning
+		ToolChoice:          "none",
 	}
 
 	// Create LLM client based on settings
@@ -792,6 +966,11 @@ func (a *App) generateExecutionPlan(ctx context.Context, req AssistantRequest, i
 
 	if a.settings.LLMBackend == "direct" {
 		// Direct mode: call OpenAI/Anthropic directly
+		backend.Logger.Warn("⚠️ Direct LLM mode is experimental and not fully tested. Use with caution.",
+			"provider", a.settings.LLMProvider,
+			"model", a.settings.LLMModel,
+		)
+
 		if a.settings.LLMAPIKey == "" {
 			return nil, fmt.Errorf("direct LLM mode requires an API key to be configured")
 		}
@@ -801,6 +980,7 @@ func (a *App) generateExecutionPlan(ctx context.Context, req AssistantRequest, i
 			a.settings.LLMModel,
 			a.settings.LLMEndpoint,
 			a.settings.LLMAPIKey,
+			a.settings.LLMOrganization,
 			http.DefaultClient,
 			backend.Logger,
 		)
@@ -869,7 +1049,7 @@ func (a *App) executeStep(ctx context.Context, run *RunState, req AssistantReque
 	skill := DetectSkill(step.Description, req.Context)
 
 	// Build step execution prompt
-	systemPrompt := BuildSystemPrompt(skill, req.Context)
+	systemPrompt := BuildSystemPrompt(skill, req.Context, a.settings)
 
 	// Build context-aware step prompt
 	var previousFindings strings.Builder
@@ -917,12 +1097,13 @@ Please execute this step and provide concrete findings. Generate specific querie
 	}
 
 	llmReq := LLMStreamRequest{
-		Model:       "gpt-4o-mini",
-		Messages:    messages,
-		Temperature: 0.7,
-		MaxTokens:   2000,
-		Tools:       GetTools(true), // Enable tools for execution
-		ToolChoice:  "auto",
+		Model:               "gpt-4o-mini",
+		Messages:            messages,
+		Temperature:         0.7,
+		MaxTokens:           2000,                // For older models
+		MaxCompletionTokens: 2000,                // For newer models
+		Tools:               GetTools(true, a.settings), // Enable tools, OTel conditional
+		ToolChoice:          "auto",
 	}
 
 	// Create LLM client based on settings
@@ -930,12 +1111,18 @@ Please execute this step and provide concrete findings. Generate specific querie
 	var err error
 
 	if a.settings.LLMBackend == "direct" {
-		// Direct mode
+		// Direct mode (experimental)
+		backend.Logger.Warn("⚠️ Direct LLM mode is experimental and not fully tested. Use with caution.",
+			"provider", a.settings.LLMProvider,
+			"model", a.settings.LLMModel,
+		)
+
 		directClient := NewDirectLLMClient(
 			a.settings.LLMProvider,
 			a.settings.LLMModel,
 			a.settings.LLMEndpoint,
 			a.settings.LLMAPIKey,
+			a.settings.LLMOrganization,
 			http.DefaultClient,
 			backend.Logger,
 		)

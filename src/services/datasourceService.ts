@@ -1,4 +1,5 @@
 import { getBackendSrv } from '@grafana/runtime';
+import { getPluginApiUrl } from './pluginUrl';
 
 export interface DatasourceInfo {
   uid: string;
@@ -12,21 +13,17 @@ export interface DatasourceListResponse {
   defaultDatasource: string;
 }
 
-export class DatasourceService {
-  static async listDatasources(): Promise<DatasourceListResponse> {
-    try {
-      const response = await getBackendSrv().get<DatasourceListResponse>(
-        '/api/plugins/jorgeancal-zagalin-app/resources/datasources'
-      );
-      return response;
-    } catch (error: any) {
-      console.error('Failed to fetch datasources:', error);
-      // Return empty response instead of throwing
-      return {
-        datasources: [],
-        allowedDatasources: [],
-        defaultDatasource: '',
-      };
-    }
+export async function listDatasources(): Promise<DatasourceListResponse> {
+  try {
+    return await getBackendSrv().get<DatasourceListResponse>(
+      getPluginApiUrl('/datasources')
+    );
+  } catch (error: any) {
+    console.error('Failed to fetch datasources:', error);
+    return {
+      datasources: [],
+      allowedDatasources: [],
+      defaultDatasource: '',
+    };
   }
 }
