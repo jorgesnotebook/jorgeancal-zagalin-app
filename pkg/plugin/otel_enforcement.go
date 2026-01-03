@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -186,27 +187,31 @@ func (a *App) injectOtelScope(queryReq *QueryRequest, scope *OtelScope, dsType D
 
 		var injectedExpr string
 
+		// Get or discover OTel label format for this datasource
+		labelFormat := a.otelRegistry.GetFormat(queryReq.Datasource)
+		if labelFormat == nil {
+			// First time seeing this datasource - discover label format
+			labelFormat = a.DiscoverOTelLabels(context.Background(), queryReq.Datasource, dsType)
+			a.otelRegistry.SetFormat(queryReq.Datasource, labelFormat)
+
+			backend.Logger.Info("Discovered OTel label format",
+				"datasource", queryReq.Datasource,
+				"type", dsType,
+				"serviceLabel", labelFormat.ServiceNameLabel,
+				"environmentLabel", labelFormat.EnvironmentNameLabel,
+				"discovered", labelFormat.Discovered,
+			)
+		}
+
 		switch dsType {
 		case DatasourcePrometheus, DatasourceLoki:
-			// PromQL/LogQL: Inject as metric/stream labels
-			var labels []string
-			if scope.ServiceName != "" {
-				labels = append(labels, fmt.Sprintf(`service_name="%s"`, scope.ServiceName))
-			}
-			if scope.EnvironmentName != "" {
-				labels = append(labels, fmt.Sprintf(`deployment_environment_name="%s"`, scope.EnvironmentName))
-			}
+			// PromQL/LogQL: Inject as metric/stream labels using discovered format
+			labels := BuildOTelLabels(labelFormat, scope.ServiceName, scope.EnvironmentName)
 			injectedExpr = injectLabelsIntoQuery(exprStr, labels)
 
 		case DatasourceTempo:
-			// TraceQL: Inject as span selectors
-			var spanSelectors []string
-			if scope.ServiceName != "" {
-				spanSelectors = append(spanSelectors, fmt.Sprintf(`span.service.name="%s"`, scope.ServiceName))
-			}
-			if scope.EnvironmentName != "" {
-				spanSelectors = append(spanSelectors, fmt.Sprintf(`deployment.environment.name="%s"`, scope.EnvironmentName))
-			}
+			// TraceQL: Inject as span selectors using discovered format
+			spanSelectors := BuildOTelLabels(labelFormat, scope.ServiceName, scope.EnvironmentName)
 			injectedExpr = injectTraceQLSelectors(exprStr, spanSelectors)
 
 		default:

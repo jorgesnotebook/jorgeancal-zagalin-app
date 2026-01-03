@@ -191,7 +191,7 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	// Build prompts
-	systemPrompt := BuildSystemPrompt(skill, assistantReq.Context)
+	systemPrompt := BuildSystemPrompt(skill, assistantReq.Context, a.settings)
 
 	// For thinking mode, enhance system prompt with reasoning instructions
 	if mode == "thinking" {
@@ -289,7 +289,7 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		Temperature:         temperature,
 		MaxTokens:           maxTokens,           // For older models
 		MaxCompletionTokens: maxTokens,           // For newer models (same value)
-		Tools:               GetTools(true),      // Function calling enabled by default
+		Tools:               GetTools(true, a.settings), // Function calling enabled, OTel conditional
 		ToolChoice:          "auto",
 		Stream:              true,                // Enable SSE streaming
 	}
@@ -519,7 +519,7 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 
 	// Validate PromQL
 	if toolCall.Function.Name == "create_promql_query" {
-		query := extractPromQLFromToolArgs(args)
+		query := a.extractPromQLFromToolArgs(args)
 		if query != "" {
 			result := a.queryValidator.ValidateQuery(ctx, query, DatasourcePrometheus)
 
@@ -531,7 +531,8 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 				backend.Logger.Warn("Tool PromQL validation failed",
 					"user", user.UserLogin,
 					"violation", result.ViolationType,
-					"query", query)
+					"queryHash", hashQuery(query),
+					"queryLength", len(query))
 
 				// Convert UserInfo to UserIdentity for logging
 				userIdentity := &UserIdentity{
@@ -549,8 +550,10 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 
 				backend.Logger.Info("Tool PromQL sanitized",
 					"user", user.UserLogin,
-					"original", query,
-					"sanitized", result.SanitizedQuery)
+					"originalHash", hashQuery(query),
+					"sanitizedHash", hashQuery(result.SanitizedQuery),
+					"originalLength", len(query),
+					"sanitizedLength", len(result.SanitizedQuery))
 			}
 
 			// Update arguments with validation results
@@ -561,7 +564,7 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 
 	// Validate LogQL
 	if toolCall.Function.Name == "create_logql_query" {
-		query := extractLogQLFromToolArgs(args)
+		query := a.extractLogQLFromToolArgs(args)
 		if query != "" {
 			result := a.queryValidator.ValidateQuery(ctx, query, DatasourceLoki)
 
@@ -573,7 +576,8 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 				backend.Logger.Warn("Tool LogQL validation failed",
 					"user", user.UserLogin,
 					"violation", result.ViolationType,
-					"query", query)
+					"queryHash", hashQuery(query),
+					"queryLength", len(query))
 
 				// Convert UserInfo to UserIdentity for logging
 			userIdentity := &UserIdentity{
@@ -591,8 +595,10 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 
 				backend.Logger.Info("Tool LogQL sanitized",
 					"user", user.UserLogin,
-					"original", query,
-					"sanitized", result.SanitizedQuery)
+					"originalHash", hashQuery(query),
+					"sanitizedHash", hashQuery(result.SanitizedQuery),
+					"originalLength", len(query),
+					"sanitizedLength", len(result.SanitizedQuery))
 			}
 
 			// Update arguments with validation results
@@ -607,7 +613,8 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 }
 
 // extractPromQLFromToolArgs reconstructs a PromQL query from tool call arguments
-func extractPromQLFromToolArgs(args map[string]interface{}) string {
+// Note: This is a method on App to access settings for OTel check
+func (a *App) extractPromQLFromToolArgs(args map[string]interface{}) string {
 	metric, _ := args["metric"].(string)
 	if metric == "" {
 		return ""
@@ -615,12 +622,36 @@ func extractPromQLFromToolArgs(args map[string]interface{}) string {
 
 	query := metric
 
-	// Add filters: {label="value"}
+	// Collect all label filters
+	var filterParts []string
+
+	// Add OTel labels first (ONLY if OTel enforcement is enabled)
+	if a.settings != nil && a.settings.OtelEnforcement.Enabled {
+		serviceName, _ := args["serviceName"].(string)
+		environmentName, _ := args["environmentName"].(string)
+
+		if serviceName != "" || environmentName != "" {
+			// Use default Prometheus label format (will be replaced by actual format during injection in otel_enforcement.go)
+			// We use the most common format here - the actual format will be discovered/corrected later
+			labelFormat := &OTelLabelFormat{
+				ServiceNameLabel:     "service_name",
+				EnvironmentNameLabel: "deployment_environment_name",
+				DatasourceType:       DatasourcePrometheus,
+			}
+			otelLabels := BuildOTelLabels(labelFormat, serviceName, environmentName)
+			filterParts = append(filterParts, otelLabels...)
+		}
+	}
+
+	// Add custom filters: {label="value"}
 	if filters, ok := args["filters"].(map[string]interface{}); ok {
-		var filterParts []string
 		for k, v := range filters {
 			filterParts = append(filterParts, fmt.Sprintf("%s=\"%v\"", k, v))
 		}
+	}
+
+	// Build query with labels
+	if len(filterParts) > 0 {
 		query = fmt.Sprintf("%s{%s}", metric, strings.Join(filterParts, ","))
 	}
 
@@ -641,10 +672,42 @@ func extractPromQLFromToolArgs(args map[string]interface{}) string {
 }
 
 // extractLogQLFromToolArgs reconstructs a LogQL query from tool call arguments
-func extractLogQLFromToolArgs(args map[string]interface{}) string {
+// Note: This is a method on App to access settings for OTel check
+func (a *App) extractLogQLFromToolArgs(args map[string]interface{}) string {
 	logStream, _ := args["logStream"].(string)
 	if logStream == "" {
 		return ""
+	}
+
+	// Inject OTel labels into log stream selector (ONLY if OTel enforcement is enabled)
+	if a.settings != nil && a.settings.OtelEnforcement.Enabled {
+		serviceName, _ := args["serviceName"].(string)
+		environmentName, _ := args["environmentName"].(string)
+
+		if serviceName != "" || environmentName != "" {
+			// Use default Loki label format (will be replaced by actual format during injection in otel_enforcement.go)
+			labelFormat := &OTelLabelFormat{
+				ServiceNameLabel:     "service_name",
+				EnvironmentNameLabel: "deployment_environment_name",
+				DatasourceType:       DatasourceLoki,
+			}
+			otelLabels := BuildOTelLabels(labelFormat, serviceName, environmentName)
+
+			// If OTel labels present, inject them into the log stream selector
+			if len(otelLabels) > 0 {
+				// Remove trailing } if present
+				logStream = strings.TrimSuffix(logStream, "}")
+				// Check if stream already has labels
+				if strings.Contains(logStream, "=") {
+					// Has existing labels: {job="app"} -> {job="app",service_name="api"}
+					logStream = logStream + "," + strings.Join(otelLabels, ",") + "}"
+				} else {
+					// No existing labels or just {}: {} -> {service_name="api"}
+					logStream = strings.TrimSuffix(logStream, "{")
+					logStream = "{" + strings.Join(otelLabels, ",") + "}"
+				}
+			}
+		}
 	}
 
 	query := logStream
@@ -898,6 +961,11 @@ func (a *App) generateExecutionPlan(ctx context.Context, req AssistantRequest, i
 
 	if a.settings.LLMBackend == "direct" {
 		// Direct mode: call OpenAI/Anthropic directly
+		backend.Logger.Warn("⚠️ Direct LLM mode is experimental and not fully tested. Use with caution.",
+			"provider", a.settings.LLMProvider,
+			"model", a.settings.LLMModel,
+		)
+
 		if a.settings.LLMAPIKey == "" {
 			return nil, fmt.Errorf("direct LLM mode requires an API key to be configured")
 		}
@@ -976,7 +1044,7 @@ func (a *App) executeStep(ctx context.Context, run *RunState, req AssistantReque
 	skill := DetectSkill(step.Description, req.Context)
 
 	// Build step execution prompt
-	systemPrompt := BuildSystemPrompt(skill, req.Context)
+	systemPrompt := BuildSystemPrompt(skill, req.Context, a.settings)
 
 	// Build context-aware step prompt
 	var previousFindings strings.Builder
@@ -1029,7 +1097,7 @@ Please execute this step and provide concrete findings. Generate specific querie
 		Temperature:         0.7,
 		MaxTokens:           2000,                // For older models
 		MaxCompletionTokens: 2000,                // For newer models
-		Tools:               GetTools(true),      // Enable tools for execution
+		Tools:               GetTools(true, a.settings), // Enable tools, OTel conditional
 		ToolChoice:          "auto",
 	}
 
@@ -1038,7 +1106,12 @@ Please execute this step and provide concrete findings. Generate specific querie
 	var err error
 
 	if a.settings.LLMBackend == "direct" {
-		// Direct mode
+		// Direct mode (experimental)
+		backend.Logger.Warn("⚠️ Direct LLM mode is experimental and not fully tested. Use with caution.",
+			"provider", a.settings.LLMProvider,
+			"model", a.settings.LLMModel,
+		)
+
 		directClient := NewDirectLLMClient(
 			a.settings.LLMProvider,
 			a.settings.LLMModel,

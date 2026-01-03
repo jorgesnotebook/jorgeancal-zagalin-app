@@ -506,33 +506,28 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
               </ul>
             </div>
 
-            {/* Option 3: Direct LLM API */}
+            {/* Option 3: Direct LLM API - COMING SOON */}
             <div
-              className={`${s.llmBackendCard} ${llmBackend === 'direct' ? s.llmBackendCardActive : ''}`}
-              onClick={() => {
-                setLlmBackend('direct');
-                setIsDirty(true);
-              }}
+              className={s.llmBackendCard}
+              style={{ opacity: 0.6, cursor: 'not-allowed' }}
             >
               <div className={s.llmBackendCardHeader}>
                 <input
                   type="radio"
-                  checked={llmBackend === 'direct'}
-                  onChange={() => {
-                    setLlmBackend('direct');
-                    setIsDirty(true);
-                  }}
+                  checked={false}
+                  disabled={true}
                   className={s.llmBackendCardRadio}
                 />
                 <Icon name="key-skeleton-alt" size="xl" />
                 <h4>Direct LLM API</h4>
+                <Badge color="orange" text="Coming Soon" style={{ marginLeft: '8px' }} />
               </div>
               <p className={s.llmBackendCardDescription}>
                 Zagalin backend → OpenAI/Anthropic. Full security, no grafana-llm-app needed.
               </p>
               <ul style={{ marginTop: '8px', paddingLeft: '20px', fontSize: '12px' }}>
-                <li>✅ Full security</li>
-                <li>⚙️ More configuration</li>
+                <li>⏳ Under development</li>
+                <li>🚧 Not yet tested</li>
               </ul>
             </div>
           </div>

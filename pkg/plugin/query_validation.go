@@ -152,8 +152,10 @@ func (v *QueryValidator) validatePromQL(query string) *QueryValidationResult {
 		result.Sanitized = true
 		result.SanitizedQuery = sanitized
 		backend.Logger.Info("PromQL sanitized successfully",
-			"original", query,
-			"sanitized", sanitized)
+			"originalHash", hashQuery(query),
+			"sanitizedHash", hashQuery(sanitized),
+			"originalLength", len(query),
+			"sanitizedLength", len(sanitized))
 		return result
 	}
 
@@ -250,8 +252,10 @@ func (v *QueryValidator) validateLogQL(query string) *QueryValidationResult {
 		result.Sanitized = true
 		result.SanitizedQuery = sanitized
 		backend.Logger.Info("LogQL sanitized successfully",
-			"original", query,
-			"sanitized", sanitized)
+			"originalHash", hashQuery(query),
+			"sanitizedHash", hashQuery(sanitized),
+			"originalLength", len(query),
+			"sanitizedLength", len(sanitized))
 		return result
 	}
 
@@ -349,8 +353,10 @@ func (v *QueryValidator) validateTraceQL(query string) *QueryValidationResult {
 		result.Sanitized = true
 		result.SanitizedQuery = sanitized
 		backend.Logger.Info("TraceQL sanitized successfully",
-			"original", query,
-			"sanitized", sanitized)
+			"originalHash", hashQuery(query),
+			"sanitizedHash", hashQuery(sanitized),
+			"originalLength", len(query),
+			"sanitizedLength", len(sanitized))
 		return result
 	}
 
