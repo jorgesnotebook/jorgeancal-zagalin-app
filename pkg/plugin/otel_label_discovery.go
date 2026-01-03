@@ -63,7 +63,8 @@ func (a *App) DiscoverOTelLabels(ctx context.Context, datasourceUID string, dsTy
 			}
 
 		case DatasourceLoki:
-			format.ServiceNameLabel, format.EnvironmentNameLabel = discoverLogQLLabels(obsCtx.Logs.Labels)
+			// Loki uses same label conventions as Prometheus
+			format.ServiceNameLabel, format.EnvironmentNameLabel = discoverPromQLLabels(obsCtx.Logs.Labels)
 			if format.ServiceNameLabel != "" {
 				format.Discovered = true
 			}
@@ -141,12 +142,6 @@ func discoverPromQLLabels(availableLabels []string) (serviceLabel, environmentLa
 	}
 
 	return serviceLabel, environmentLabel
-}
-
-// discoverLogQLLabels finds OTel-compatible labels in Loki
-func discoverLogQLLabels(availableLabels []string) (serviceLabel, environmentLabel string) {
-	// Loki uses same label conventions as Prometheus
-	return discoverPromQLLabels(availableLabels)
 }
 
 // discoverTraceQLLabels finds OTel-compatible attributes in Tempo/TraceQL

@@ -612,8 +612,54 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 	}
 }
 
+// extractOTelLabelsFromArgs extracts OTel labels from tool arguments (DRY helper)
+func (a *App) extractOTelLabelsFromArgs(args map[string]interface{}, dsType DatasourceType) []string {
+	if a.settings == nil || !a.settings.OtelEnforcement.Enabled {
+		return []string{}
+	}
+
+	serviceName, _ := args["serviceName"].(string)
+	environmentName, _ := args["environmentName"].(string)
+
+	if serviceName == "" && environmentName == "" {
+		return []string{}
+	}
+
+	// Use defaults - actual format will be discovered during query execution
+	serviceLabel, environmentLabel := getDefaultLabelNames(dsType)
+
+	var labels []string
+	if serviceName != "" {
+		labels = append(labels, fmt.Sprintf(`%s="%s"`, serviceLabel, serviceName))
+	}
+	if environmentName != "" {
+		labels = append(labels, fmt.Sprintf(`%s="%s"`, environmentLabel, environmentName))
+	}
+
+	return labels
+}
+
+// injectLabelsIntoLogStream injects labels into a LogQL stream selector
+func injectLabelsIntoLogStream(logStream string, labels []string) string {
+	if len(labels) == 0 {
+		return logStream
+	}
+
+	// Remove trailing } if present
+	logStream = strings.TrimSuffix(logStream, "}")
+
+	// Check if stream already has labels
+	if strings.Contains(logStream, "=") {
+		// Has existing labels: {job="app"} -> {job="app",service_name="api"}
+		return logStream + "," + strings.Join(labels, ",") + "}"
+	}
+
+	// No existing labels: {} -> {service_name="api"}
+	logStream = strings.TrimSuffix(logStream, "{")
+	return "{" + strings.Join(labels, ",") + "}"
+}
+
 // extractPromQLFromToolArgs reconstructs a PromQL query from tool call arguments
-// Note: This is a method on App to access settings for OTel check
 func (a *App) extractPromQLFromToolArgs(args map[string]interface{}) string {
 	metric, _ := args["metric"].(string)
 	if metric == "" {
@@ -625,23 +671,8 @@ func (a *App) extractPromQLFromToolArgs(args map[string]interface{}) string {
 	// Collect all label filters
 	var filterParts []string
 
-	// Add OTel labels first (ONLY if OTel enforcement is enabled)
-	if a.settings != nil && a.settings.OtelEnforcement.Enabled {
-		serviceName, _ := args["serviceName"].(string)
-		environmentName, _ := args["environmentName"].(string)
-
-		if serviceName != "" || environmentName != "" {
-			// Use default Prometheus label format (will be replaced by actual format during injection in otel_enforcement.go)
-			// We use the most common format here - the actual format will be discovered/corrected later
-			labelFormat := &OTelLabelFormat{
-				ServiceNameLabel:     "service_name",
-				EnvironmentNameLabel: "deployment_environment_name",
-				DatasourceType:       DatasourcePrometheus,
-			}
-			otelLabels := BuildOTelLabels(labelFormat, serviceName, environmentName)
-			filterParts = append(filterParts, otelLabels...)
-		}
-	}
+	// Add OTel labels first (if enabled)
+	filterParts = append(filterParts, a.extractOTelLabelsFromArgs(args, DatasourcePrometheus)...)
 
 	// Add custom filters: {label="value"}
 	if filters, ok := args["filters"].(map[string]interface{}); ok {
@@ -672,42 +703,16 @@ func (a *App) extractPromQLFromToolArgs(args map[string]interface{}) string {
 }
 
 // extractLogQLFromToolArgs reconstructs a LogQL query from tool call arguments
-// Note: This is a method on App to access settings for OTel check
 func (a *App) extractLogQLFromToolArgs(args map[string]interface{}) string {
 	logStream, _ := args["logStream"].(string)
 	if logStream == "" {
 		return ""
 	}
 
-	// Inject OTel labels into log stream selector (ONLY if OTel enforcement is enabled)
-	if a.settings != nil && a.settings.OtelEnforcement.Enabled {
-		serviceName, _ := args["serviceName"].(string)
-		environmentName, _ := args["environmentName"].(string)
-
-		if serviceName != "" || environmentName != "" {
-			// Use default Loki label format (will be replaced by actual format during injection in otel_enforcement.go)
-			labelFormat := &OTelLabelFormat{
-				ServiceNameLabel:     "service_name",
-				EnvironmentNameLabel: "deployment_environment_name",
-				DatasourceType:       DatasourceLoki,
-			}
-			otelLabels := BuildOTelLabels(labelFormat, serviceName, environmentName)
-
-			// If OTel labels present, inject them into the log stream selector
-			if len(otelLabels) > 0 {
-				// Remove trailing } if present
-				logStream = strings.TrimSuffix(logStream, "}")
-				// Check if stream already has labels
-				if strings.Contains(logStream, "=") {
-					// Has existing labels: {job="app"} -> {job="app",service_name="api"}
-					logStream = logStream + "," + strings.Join(otelLabels, ",") + "}"
-				} else {
-					// No existing labels or just {}: {} -> {service_name="api"}
-					logStream = strings.TrimSuffix(logStream, "{")
-					logStream = "{" + strings.Join(otelLabels, ",") + "}"
-				}
-			}
-		}
+	// Inject OTel labels into log stream selector (if enabled)
+	otelLabels := a.extractOTelLabelsFromArgs(args, DatasourceLoki)
+	if len(otelLabels) > 0 {
+		logStream = injectLabelsIntoLogStream(logStream, otelLabels)
 	}
 
 	query := logStream
