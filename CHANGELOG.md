@@ -13,6 +13,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [0.0.4] - 2026-01-03
+
+### 🎯 Release Theme: "Smart OTel & Code Quality"
+
+**This release introduces automatic OpenTelemetry label discovery and improves code quality with DRY/KISS refactoring.**
+
+### Added
+
+#### OpenTelemetry Enhancements
+- **Automatic Label Discovery System** - Detects which OTel label naming convention is used in each datasource
+  - Supports multiple variations: `service_name`, `service.name`, `app`, `job`, etc.
+  - Works with Prometheus (underscore/dot notation), Loki, and Tempo (`span.service.name`, `resource.service.name`)
+  - Per-datasource caching for performance
+  - Graceful fallback to sensible defaults
+  - Files: `pkg/plugin/otel_label_discovery.go`, `pkg/plugin/otel_enforcement.go`, `pkg/plugin/app.go`
+  - Documentation: `docs/OTEL_LABEL_DISCOVERY.md`
+
+#### Conditional OTel Features
+- OTel parameters in LLM tools only appear when `otelEnforcement.enabled: true`
+- System prompts dynamically include OTel context based on enforcement flag
+- Query injection only active when enforcement enabled
+- Zero overhead when OTel enforcement disabled
+
+### Changed
+
+#### Code Quality Improvements
+- Refactored duplicated OTel extraction logic into DRY helper functions
+- Simplified query building with single-responsibility functions
+- Removed unnecessary `discoverLogQLLabels()` wrapper function (KISS principle)
+- Improved code readability with clearer separation of concerns
+- Files: `pkg/plugin/assistant.go`, `pkg/plugin/assistant_tools.go`, `pkg/plugin/assistant_prompts.go`
+
+### Fixed
+
+#### Security
+- **CVE-2025-15284** - Updated `qs` package from 6.14.0 to 6.14.1 (high severity vulnerability)
+- Added npm override to force secure version across all transitive dependencies
+
 ## [0.0.3] - 2025-12-28
 
 ### 🎯 Release Theme: "Service Account Authentication"
