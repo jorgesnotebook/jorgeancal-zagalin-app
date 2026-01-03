@@ -284,14 +284,16 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 	// Model is configured in plugin settings or uses default
 	// Admin should set LLMModel in plugin config to match their grafana-llm-app setup
 	llmReq := LLMStreamRequest{
-		Model:               model,
-		Messages:            messages,
-		Temperature:         temperature,
-		MaxTokens:           maxTokens,           // For older models
-		MaxCompletionTokens: maxTokens,           // For newer models (same value)
+		Model:       model,
+		Messages:    messages,
+		Temperature: temperature,
+		// Only set one of MaxTokens or MaxCompletionTokens (OpenAI doesn't allow both)
+		// Use MaxCompletionTokens for newer models, MaxTokens for older models
+		MaxTokens:           getMaxTokensForModel(model, maxTokens),
+		MaxCompletionTokens: getMaxCompletionTokensForModel(model, maxTokens),
 		Tools:               GetTools(true, a.settings), // Function calling enabled, OTel conditional
 		ToolChoice:          "auto",
-		Stream:              true,                // Enable SSE streaming
+		Stream:              true, // Enable SSE streaming
 	}
 
 	// Always proxy through grafana-llm-app (unified backend routing)
@@ -953,10 +955,10 @@ func (a *App) generateExecutionPlan(ctx context.Context, req AssistantRequest, i
 	llmReq := LLMStreamRequest{
 		Model:               "gpt-4o-mini",
 		Messages:            messages,
-		Temperature:         0.3,                 // Lower temperature for structured output
-		MaxTokens:           1000,                // For older models
-		MaxCompletionTokens: 1000,                // For newer models
-		Tools:               nil,                 // No tools for planning
+		Temperature:         0.3,  // Lower temperature for structured output
+		MaxTokens:           getMaxTokensForModel("gpt-4o-mini", 1000),
+		MaxCompletionTokens: getMaxCompletionTokensForModel("gpt-4o-mini", 1000),
+		Tools:               nil, // No tools for planning
 		ToolChoice:          "none",
 	}
 
@@ -1100,8 +1102,8 @@ Please execute this step and provide concrete findings. Generate specific querie
 		Model:               "gpt-4o-mini",
 		Messages:            messages,
 		Temperature:         0.7,
-		MaxTokens:           2000,                // For older models
-		MaxCompletionTokens: 2000,                // For newer models
+		MaxTokens:           getMaxTokensForModel("gpt-4o-mini", 2000),
+		MaxCompletionTokens: getMaxCompletionTokensForModel("gpt-4o-mini", 2000),
 		Tools:               GetTools(true, a.settings), // Enable tools, OTel conditional
 		ToolChoice:          "auto",
 	}
@@ -1299,4 +1301,56 @@ func (a *App) buildFinalMessage(plan *ExecutionPlan, artifacts []Artifact) strin
 	message.WriteString("- Ask follow-up questions if needed\n")
 
 	return message.String()
+}
+
+// getMaxTokensForModel returns the max_tokens value for older models, 0 for newer models
+// OpenAI doesn't allow both max_tokens and max_completion_tokens at the same time
+func getMaxTokensForModel(model string, tokenLimit int) int {
+	// Newer models that require max_completion_tokens instead
+	newerModels := []string{
+		"gpt-4o-2024-11-20",
+		"gpt-4o-2024-12-17",
+		"chatgpt-4o-latest",
+		"o1-preview",
+		"o1-mini",
+		"o1",
+		"o3-mini",
+		"o3",
+	}
+
+	modelLower := strings.ToLower(model)
+	for _, newerModel := range newerModels {
+		if strings.Contains(modelLower, newerModel) {
+			return 0 // Don't set max_tokens for newer models
+		}
+	}
+
+	// For older models or unknown models, use max_tokens
+	return tokenLimit
+}
+
+// getMaxCompletionTokensForModel returns the max_completion_tokens value for newer models, 0 for older models
+// OpenAI doesn't allow both max_tokens and max_completion_tokens at the same time
+func getMaxCompletionTokensForModel(model string, tokenLimit int) int {
+	// Newer models that require max_completion_tokens instead
+	newerModels := []string{
+		"gpt-4o-2024-11-20",
+		"gpt-4o-2024-12-17",
+		"chatgpt-4o-latest",
+		"o1-preview",
+		"o1-mini",
+		"o1",
+		"o3-mini",
+		"o3",
+	}
+
+	modelLower := strings.ToLower(model)
+	for _, newerModel := range newerModels {
+		if strings.Contains(modelLower, newerModel) {
+			return tokenLimit // Use max_completion_tokens for newer models
+		}
+	}
+
+	// For older models or unknown models, don't set max_completion_tokens
+	return 0
 }

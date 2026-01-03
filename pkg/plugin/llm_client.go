@@ -47,14 +47,16 @@ type AssistantMessage struct {
 // - MaxTokens: Used by older OpenAI models (gpt-4-turbo, gpt-3.5-turbo, gpt-4o-2024-08-06)
 // - MaxCompletionTokens: Required by newer models (gpt-4o-2024-11-20+, o1-preview, o1-mini, o3)
 //
-// Both fields are sent with the same value for maximum compatibility.
-// The receiving service (OpenAI API or grafana-llm-app) will use whichever field it supports.
+// IMPORTANT: OpenAI does not allow both fields to be set at the same time.
+// Only ONE field should be set based on the model being used:
+// - Set MaxTokens = tokenLimit and MaxCompletionTokens = 0 for older models
+// - Set MaxTokens = 0 and MaxCompletionTokens = tokenLimit for newer models
 type LLMStreamRequest struct {
 	Model               string             `json:"model"`
 	Messages            []AssistantMessage `json:"messages"`
 	Temperature         float64            `json:"temperature"`
-	MaxTokens           int                `json:"max_tokens,omitempty"`           // For older models
-	MaxCompletionTokens int                `json:"max_completion_tokens,omitempty"` // For newer models (gpt-4o-2024-11-20+, o1, o3)
+	MaxTokens           int                `json:"max_tokens,omitempty"`           // For older models (set to 0 for newer models)
+	MaxCompletionTokens int                `json:"max_completion_tokens,omitempty"` // For newer models (set to 0 for older models)
 	Tools               []Tool             `json:"tools,omitempty"`
 	ToolChoice          string             `json:"tool_choice,omitempty"`
 	Stream              bool               `json:"stream"` // Enable SSE streaming

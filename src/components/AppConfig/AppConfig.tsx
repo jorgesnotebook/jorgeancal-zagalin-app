@@ -87,6 +87,9 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
   const [serviceAccountToken, setServiceAccountToken] = useState<string>(
     plugin.meta.secureJsonData?.serviceAccountToken || ''
   );
+  const [hasServiceAccountToken, setHasServiceAccountToken] = useState<boolean>(
+    plugin.meta.secureJsonFields?.serviceAccountToken || false
+  );
 
   // Removed frontendOnlyMode - now handled by llmBackend setting
 
@@ -150,7 +153,12 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
       setQueryValidationEnableLLM(plugin.meta.jsonData.queryValidation?.enableLlmValidation || false);
       setQueryValidationLLMMode(plugin.meta.jsonData.queryValidation?.llmValidationMode || 'advisory');
     }
-  }, [plugin.meta.jsonData]);
+
+    // Sync secure field status (check if service account token is configured)
+    if (plugin.meta.secureJsonFields) {
+      setHasServiceAccountToken(plugin.meta.secureJsonFields.serviceAccountToken || false);
+    }
+  }, [plugin.meta.jsonData, plugin.meta.secureJsonFields]);
 
   // Check health on mount
   useEffect(() => {
@@ -193,8 +201,8 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     try {
       setError(null);
 
-      // Validate: Backend Proxy mode requires service account token
-      if (llmBackend === 'backend-proxy' && !serviceAccountToken) {
+      // Validate: Backend Proxy mode requires service account token (either newly provided or already configured)
+      if (llmBackend === 'backend-proxy' && !serviceAccountToken && !hasServiceAccountToken) {
         setError('Service account token is required when using Backend Proxy mode. Please provide a token or switch to a different LLM backend.');
         return;
       }
@@ -265,6 +273,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     setLlmOrganization('');
     setLlmApiKey('');
     setServiceAccountToken('');
+    setHasServiceAccountToken(false);
     setOtelEnabled(false);
     setOtelRequireService(true);
     setOtelRequireEnvironment(true);
@@ -577,24 +586,33 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
 
               <Field
                 label="Service Account Token (Mandatory)"
-                description="Grafana service account token for backend-to-backend authentication with grafana-llm-app. Required for Backend Proxy mode. Stored securely in Grafana's encrypted storage."
-                invalid={!serviceAccountToken}
-                error={!serviceAccountToken ? 'Service account token is required for Backend Proxy mode' : undefined}
+                description={
+                  hasServiceAccountToken && !serviceAccountToken
+                    ? "A service account token is currently configured (not shown for security). Leave empty to keep existing token, or enter a new token to replace it."
+                    : "Grafana service account token for backend-to-backend authentication with grafana-llm-app. Required for Backend Proxy mode. Stored securely in Grafana's encrypted storage."
+                }
+                invalid={!serviceAccountToken && !hasServiceAccountToken}
+                error={!serviceAccountToken && !hasServiceAccountToken ? 'Service account token is required for Backend Proxy mode' : undefined}
               >
-                <Input
-                  type="password"
-                  value={serviceAccountToken}
-                  onChange={(e) => {
-                    setServiceAccountToken(e.currentTarget.value);
-                    setIsDirty(true);
-                  }}
-                  placeholder="glsa_..."
-                  width={50}
-                  invalid={!serviceAccountToken}
-                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <Input
+                    type="password"
+                    value={serviceAccountToken}
+                    onChange={(e) => {
+                      setServiceAccountToken(e.currentTarget.value);
+                      setIsDirty(true);
+                    }}
+                    placeholder={hasServiceAccountToken ? "●●●●●●●● Configured - enter new token to replace" : "glsa_..."}
+                    width={50}
+                    invalid={!serviceAccountToken && !hasServiceAccountToken}
+                  />
+                  {hasServiceAccountToken && !serviceAccountToken && (
+                    <Badge color="green" text="Configured" icon="check" />
+                  )}
+                </div>
               </Field>
 
-              {!serviceAccountToken && (
+              {!serviceAccountToken && !hasServiceAccountToken && (
                 <Alert title="Service Account Token Required" severity="error">
                   <p>
                     A service account token is <strong>mandatory</strong> for Backend Proxy mode. It ensures secure backend-to-backend authentication with grafana-llm-app.
