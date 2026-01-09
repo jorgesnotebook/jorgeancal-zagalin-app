@@ -16,7 +16,7 @@ export interface PanelData {
   query: string;
   datasourceType?: string;
   error?: string;
-  summary?: string; // Human-readable summary of what this panel shows
+  summary?: string;
 }
 
 /**
@@ -29,9 +29,7 @@ export async function readDashboardPanels(context: AssistantContext): Promise<Pa
     return panels;
   }
 
-  // Extract panel information
   for (const panel of context.dashboard.panels) {
-    // Get the first query from each panel
     if (panel.targets && panel.targets.length > 0) {
       const target = panel.targets[0];
       const query = target.expr || target.query;
@@ -58,7 +56,6 @@ function generatePanelSummary(panel: PanelContext): string {
   const title = panel.title.toLowerCase();
   const type = panel.type;
 
-  // Common patterns
   if (title.includes('error') && title.includes('rate')) {
     return 'Shows the rate of errors over time';
   }
@@ -81,7 +78,6 @@ function generatePanelSummary(panel: PanelContext): string {
     return 'Shows log entries';
   }
 
-  // Fallback based on panel type
   if (type === 'timeseries' || type === 'graph') {
     return 'Time-series metric visualization';
   }

@@ -17,18 +17,15 @@ export function useZagalinConfig() {
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        // Fetch plugin settings from Grafana API (stored in database)
         const pluginSettings = await getBackendSrv().get(`/api/plugins/${PLUGIN_ID}/settings`);
 
         if (pluginSettings?.jsonData) {
           const newConfig = { ...DEFAULT_CONFIG, ...pluginSettings.jsonData };
           setConfig(newConfig);
-          // Update cached config for synchronous access in services
           updateCachedConfig(newConfig);
         }
       } catch (e: any) {
         console.error('Failed to load Zagalin config from plugin settings:', e);
-        // Fall back to defaults if plugin settings not available
       } finally {
         setLoading(false);
       }
@@ -36,8 +33,6 @@ export function useZagalinConfig() {
 
     loadConfig();
 
-    // Poll for config changes every 30 seconds
-    // This ensures users see updates when admins change settings
     const interval = setInterval(loadConfig, 30000);
     return () => clearInterval(interval);
   }, []);

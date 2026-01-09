@@ -190,7 +190,6 @@ export function ConversationListSidebar({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showDeleteAll, setShowDeleteAll] = useState(false);
 
-  // Filter conversations by search term
   const filteredConversations = conversations.filter((conv) =>
     conv.title.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -227,7 +226,36 @@ export function ConversationListSidebar({
 
   const handleExport = async (conversationId: string, format: ExportFormat) => {
     try {
-      await exportConversation(conversationId, format);
+      const storage = window.localStorage;
+      const storageKey = 'zagalin-conversations';
+      const data = storage.getItem(storageKey);
+      if (!data) {
+        console.error('No conversations found in storage');
+        return;
+      }
+
+      const allConversations = JSON.parse(data);
+      const fullConversation = allConversations.find((c: any) => c.id === conversationId);
+      if (!fullConversation) {
+        console.error('Full conversation data not found');
+        return;
+      }
+
+      const conversation = {
+        ...fullConversation,
+        createdAt: new Date(fullConversation.createdAt),
+        updatedAt: new Date(fullConversation.updatedAt),
+        messages: fullConversation.messages.map((m: any) => ({
+          ...m,
+          timestamp: new Date(m.timestamp)
+        })),
+        contexts: fullConversation.contexts?.map((ctx: any) => ({
+          ...ctx,
+          addedAt: new Date(ctx.addedAt)
+        })) || []
+      };
+
+      await exportConversation(conversation, format);
     } catch (error) {
       console.error('Failed to export conversation:', error);
     }

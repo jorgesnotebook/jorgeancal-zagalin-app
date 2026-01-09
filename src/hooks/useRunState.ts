@@ -25,7 +25,6 @@ export interface UseRunStateOptions {
 }
 
 export interface UseRunStateReturn {
-  // State
   runId: string | null;
   status: RunStatus;
   plan: ExecutionPlan | null;
@@ -36,7 +35,6 @@ export interface UseRunStateReturn {
   isPaused: boolean;
   error: string | null;
 
-  // Actions
   start: (message: string, history: AssistantMessage[], context: AssistantContext) => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
@@ -55,7 +53,6 @@ export function useRunState({ conversationId, onComplete, onError }: UseRunState
   const subscriptionRef = useRef<Subscription | null>(null);
   const artifactsRef = useRef<Artifact[]>([]);
 
-  // Keep artifacts ref in sync
   useEffect(() => {
     artifactsRef.current = artifacts;
   }, [artifacts]);
@@ -63,7 +60,6 @@ export function useRunState({ conversationId, onComplete, onError }: UseRunState
   const start = useCallback(
     async (message: string, history: AssistantMessage[], context: AssistantContext) => {
       try {
-        // Reset state
         setError(null);
         setStreamingText('');
         setArtifacts([]);
@@ -71,7 +67,6 @@ export function useRunState({ conversationId, onComplete, onError }: UseRunState
         setCurrentStepIndex(0);
         artifactsRef.current = [];
 
-        // Start run
         const request: RunStartRequest = {
           conversationId,
           message,
@@ -83,7 +78,6 @@ export function useRunState({ conversationId, onComplete, onError }: UseRunState
         setRunId(response.runId);
         setStatus('pending');
 
-        // Subscribe to events
         subscriptionRef.current = streamRunEvents(response.runId).subscribe({
           next: (event) => {
             switch (event.type) {
@@ -98,7 +92,7 @@ export function useRunState({ conversationId, onComplete, onError }: UseRunState
 
               case 'step_started':
                 setCurrentStepIndex(event.data.stepIndex);
-                setStreamingText(''); // Clear streaming text for new step
+                setStreamingText('');
                 break;
 
               case 'artifact':
@@ -112,7 +106,6 @@ export function useRunState({ conversationId, onComplete, onError }: UseRunState
                 break;
 
               case 'step_done':
-                // Keep streaming text for this step
                 break;
 
               case 'assistant_message':
@@ -156,7 +149,6 @@ export function useRunState({ conversationId, onComplete, onError }: UseRunState
             }
           },
           complete: () => {
-            // Stream ended
           },
         });
       } catch (err: any) {
@@ -201,7 +193,6 @@ export function useRunState({ conversationId, onComplete, onError }: UseRunState
     }
   }, [runId]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       subscriptionRef.current?.unsubscribe();

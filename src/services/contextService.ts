@@ -16,8 +16,6 @@ export class ContextService {
     const location = locationService.getLocation();
     const pathname = location.pathname;
 
-    // Extract dashboard UID from URL
-    // Patterns: /d/:uid/:slug or /dashboard/:uid
     const dashboardMatch = pathname.match(/\/d(?:ashboard)?\/([^/]+)/);
     const dashboardUid = dashboardMatch?.[1];
 
@@ -27,7 +25,6 @@ export class ContextService {
       context.timeRange = this.getTimeRange();
     }
 
-    // Try to get panel context from URL
     const panelMatch = location.search.match(/[?&]viewPanel=(\d+)/);
     const panelId = panelMatch ? parseInt(panelMatch[1], 10) : undefined;
 
@@ -35,7 +32,6 @@ export class ContextService {
       context.panel = context.dashboard.panels?.find(p => p.id === panelId);
     }
 
-    // Get user context
     context.user = this.getUserContext();
 
     return context;
@@ -114,7 +110,6 @@ export class ContextService {
     const searchParams = new URLSearchParams(location.search);
     const variables: TemplateVariable[] = [];
 
-    // Template variables are in the format var-varname=value
     for (const [key, value] of searchParams.entries()) {
       if (key.startsWith('var-')) {
         const varName = key.substring(4);

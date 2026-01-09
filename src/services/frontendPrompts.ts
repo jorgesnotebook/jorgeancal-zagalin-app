@@ -7,7 +7,6 @@
 
 import type { AssistantContext } from './assistantService';
 
-// Base system prompt - defines Zagalin's identity and behavior
 export const BASE_SYSTEM_PROMPT = `You are **Zagalin**, an SRE-grade debugging assistant embedded in Grafana.
 
 Purpose:
@@ -50,7 +49,6 @@ Quality gate before you answer:
 - Did I propose at least one verification step?
 - If I suggested something risky, did I include rollback + verify?`;
 
-// Planning system prompt - for generating structured execution plans
 export const PLANNING_SYSTEM_PROMPT = `You are **Zagalin**, an SRE-grade planning assistant for observability workflows.
 
 Approach:
@@ -101,7 +99,6 @@ DO NOT include any text outside the JSON. NO markdown code blocks. Just pure JSO
 export function buildPlanningPrompt(userMessage: string, context: AssistantContext): string {
   let prompt = `User request: ${userMessage}\n\n`;
 
-  // Emphasize dashboard context if available
   if (context.dashboard) {
     prompt += `DASHBOARD CONTEXT AVAILABLE:\n`;
     prompt += `Dashboard: "${context.dashboard.title}"\n`;
@@ -125,7 +122,6 @@ export function buildPlanningPrompt(userMessage: string, context: AssistantConte
     prompt += `Start with high-level queries to gather context.\n\n`;
   }
 
-  // Add panel context if available
   if (context.panel) {
     prompt += `FOCUSED PANEL: "${context.panel.title}" (${context.panel.type})\n`;
     if (context.panel.targets && context.panel.targets.length > 0) {
@@ -140,7 +136,6 @@ export function buildPlanningPrompt(userMessage: string, context: AssistantConte
     prompt += `\n`;
   }
 
-  // Add time range if available
   if (context.timeRange) {
     prompt += `Time range: ${context.timeRange.from} to ${context.timeRange.to}\n\n`;
   }
@@ -168,7 +163,6 @@ export function buildStepPrompt(
   prompt += `**Task**: ${stepDescription}\n\n`;
   prompt += `**Original Request**: ${userMessage}\n\n`;
 
-  // Add context
   if (context.dashboard) {
     prompt += `**Dashboard**: ${context.dashboard.title}\n`;
   }
@@ -176,7 +170,6 @@ export function buildStepPrompt(
     prompt += `**Time Range**: ${context.timeRange.from} to ${context.timeRange.to}\n`;
   }
 
-  // Add previous findings
   if (previousFindings.length > 0) {
     prompt += `\n**Previous Findings**:\n`;
     previousFindings.forEach((finding, idx) => {
@@ -252,10 +245,8 @@ export interface ExecutionPlan {
 
 export function parsePlanFromResponse(text: string): ExecutionPlan | null {
   try {
-    // Try direct JSON parse first
     const plan = JSON.parse(text);
     if (plan.goal && plan.steps && Array.isArray(plan.steps) && plan.steps.length > 0) {
-      // Add index and status to steps if not present
       const stepsWithMetadata = plan.steps.map((step: any, index: number) => ({
         index: step.index !== undefined ? step.index : index,
         title: step.title,
@@ -269,10 +260,8 @@ export function parsePlanFromResponse(text: string): ExecutionPlan | null {
       } as ExecutionPlan;
     }
   } catch (e) {
-    // Not valid JSON, try to extract from markdown
   }
 
-  // Try to extract JSON from markdown code blocks
   const jsonBlockPattern = /```(?:json)?\s*\n?([\s\S]+?)\n?```/;
   const match = text.match(jsonBlockPattern);
 
@@ -293,11 +282,9 @@ export function parsePlanFromResponse(text: string): ExecutionPlan | null {
         } as ExecutionPlan;
       }
     } catch (e) {
-      // Failed to parse
     }
   }
 
-  // Try to find JSON in the text (look for { "goal": pattern)
   const jsonPattern = /\{\s*"goal"[\s\S]*?\}\s*(?:\]|\})/;
   const jsonMatch = text.match(jsonPattern);
 
@@ -318,11 +305,9 @@ export function parsePlanFromResponse(text: string): ExecutionPlan | null {
         } as ExecutionPlan;
       }
     } catch (e) {
-      // Failed to parse
     }
   }
 
-  // Fallback: create a simple 1-step plan
   console.warn('[frontendPrompts] Failed to parse plan, using fallback');
   return {
     goal: 'Address the user\'s request',

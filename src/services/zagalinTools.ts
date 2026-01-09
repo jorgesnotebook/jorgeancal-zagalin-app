@@ -200,7 +200,6 @@ export async function executeToolCall(toolCall: ToolCall): Promise<any> {
     return { error: 'Invalid tool arguments' };
   }
 
-  // Check for backend validation errors
   if (args._validation_error) {
     console.error('[zagalinTools] Validation failed:', {
       tool: toolCall.function.name,
@@ -214,7 +213,6 @@ export async function executeToolCall(toolCall: ToolCall): Promise<any> {
     };
   }
 
-  // Use sanitized query if provided
   if (args._sanitized_query) {
     console.info('[zagalinTools] Using sanitized query:', args._sanitized_query);
   }
@@ -243,18 +241,15 @@ export async function executeToolCall(toolCall: ToolCall): Promise<any> {
   }
 }
 
-// Tool implementation functions
 
 const DASHBOARD_UID_REGEX = /^[a-zA-Z0-9_-]{1,40}$/;
 
 function navigateToDashboard(uid: string, panelId?: number): any {
-  // Validate dashboard UID format
   if (!DASHBOARD_UID_REGEX.test(uid)) {
     console.error('Invalid dashboard UID format:', uid);
     return { success: false, error: 'Invalid dashboard UID format' };
   }
 
-  // Validate panelId is a positive integer if provided
   if (panelId !== undefined) {
     if (!Number.isInteger(panelId) || panelId < 0) {
       console.error('Invalid panel ID:', panelId);
@@ -271,7 +266,6 @@ function navigateToDashboard(uid: string, panelId?: number): any {
 }
 
 function createPromQLQuery(params: any): any {
-  // Use sanitized query if backend provided it
   if (params._sanitized_query) {
     return {
       query: params._sanitized_query,
@@ -284,7 +278,6 @@ function createPromQLQuery(params: any): any {
 
   let query = metric;
 
-  // Add filters
   if (filters && Object.keys(filters).length > 0) {
     const filterStr = Object.entries(filters)
       .map(([k, v]) => `${k}="${v}"`)
@@ -292,7 +285,6 @@ function createPromQLQuery(params: any): any {
     query = `${metric}{${filterStr}}`;
   }
 
-  // Add aggregation
   if (aggregation) {
     if (aggregation === 'rate') {
       query = `rate(${query}[${timeRange || '5m'}])`;
@@ -305,7 +297,6 @@ function createPromQLQuery(params: any): any {
 }
 
 function createLogQLQuery(params: any): any {
-  // Use sanitized query if backend provided it
   if (params._sanitized_query) {
     return {
       query: params._sanitized_query,
@@ -332,19 +323,16 @@ function createLogQLQuery(params: any): any {
 function openExploreView(params: any): any {
   const { datasource, query } = params;
 
-  // Validate datasource is a non-empty string
   if (!datasource || typeof datasource !== 'string' || datasource.length > 100) {
     console.error('Invalid datasource:', datasource);
     return { success: false, error: 'Invalid datasource' };
   }
 
-  // Validate query
   if (!query || typeof query !== 'string' || query.length > 10000) {
     console.error('Invalid query:', query);
     return { success: false, error: 'Invalid query' };
   }
 
-  // Use a safer URL construction
   const exploreState = {
     datasource: datasource,
     queries: [{ expr: query }]

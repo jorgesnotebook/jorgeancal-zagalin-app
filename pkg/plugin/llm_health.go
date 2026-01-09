@@ -12,7 +12,6 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
-// LLMHealthStatus represents the health status of the LLM service
 type LLMHealthStatus struct {
 	Available  bool
 	Configured bool
@@ -20,7 +19,6 @@ type LLMHealthStatus struct {
 	ErrorCode  string
 }
 
-// LLM health check cache (module-level)
 var (
 	llmHealthCache struct {
 		sync.RWMutex
@@ -29,14 +27,12 @@ var (
 		inProgress bool
 		waiters    []chan LLMHealthStatus
 	}
-	llmHealthCacheTTL = 30 * time.Second // Cache for 30 seconds
+	llmHealthCacheTTL = 30 * time.Second 
 )
 
-// CheckLLMHealth checks if grafana-llm-app is available and configured (with caching)
 func CheckLLMHealth(ctx context.Context, grafanaURL string, incomingReq *http.Request) LLMHealthStatus {
 	now := time.Now()
 
-	// Check cache first (read lock)
 	llmHealthCache.RLock()
 	if now.Before(llmHealthCache.expiry) {
 		status := llmHealthCache.status
@@ -48,9 +44,7 @@ func CheckLLMHealth(ctx context.Context, grafanaURL string, incomingReq *http.Re
 		return status
 	}
 
-	// Check if another goroutine is already performing the check
 	if llmHealthCache.inProgress {
-		// Wait for the in-flight check to complete
 		waiter := make(chan LLMHealthStatus, 1)
 		llmHealthCache.waiters = append(llmHealthCache.waiters, waiter)
 		llmHealthCache.RUnlock()
@@ -70,9 +64,7 @@ func CheckLLMHealth(ctx context.Context, grafanaURL string, incomingReq *http.Re
 	}
 	llmHealthCache.RUnlock()
 
-	// Acquire write lock to start health check
 	llmHealthCache.Lock()
-	// Double-check cache after acquiring write lock (another goroutine might have updated it)
 	if now.Before(llmHealthCache.expiry) {
 		status := llmHealthCache.status
 		llmHealthCache.Unlock()
@@ -84,16 +76,13 @@ func CheckLLMHealth(ctx context.Context, grafanaURL string, incomingReq *http.Re
 
 	log.DefaultLogger.Debug("LLM health check: starting new check")
 
-	// Perform actual health check
 	status := checkLLMHealthUncached(ctx, grafanaURL, incomingReq)
 
-	// Update cache and notify waiters
 	llmHealthCache.Lock()
 	llmHealthCache.status = status
 	llmHealthCache.expiry = time.Now().Add(llmHealthCacheTTL)
 	llmHealthCache.inProgress = false
 
-	// Notify all waiting goroutines
 	for _, waiter := range llmHealthCache.waiters {
 		waiter <- status
 		close(waiter)
@@ -110,9 +99,7 @@ func CheckLLMHealth(ctx context.Context, grafanaURL string, incomingReq *http.Re
 	return status
 }
 
-// checkLLMHealthUncached performs the actual health check without caching
 func checkLLMHealthUncached(ctx context.Context, grafanaURL string, incomingReq *http.Request) LLMHealthStatus {
-	// Create a test request to grafana-llm-app
 	testURL := fmt.Sprintf("%s/api/plugins/grafana-llm-app/health", grafanaURL)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
@@ -125,26 +112,21 @@ func checkLLMHealthUncached(ctx context.Context, grafanaURL string, incomingReq 
 		}
 	}
 
-	// Forward authentication headers (same order as llm_client.go)
-	// 1. Try Authorization header first (most reliable)
 	if authHeader := incomingReq.Header.Get("Authorization"); authHeader != "" {
 		httpReq.Header.Set("Authorization", authHeader)
 		log.DefaultLogger.Debug("Health check: forwarding Authorization header")
 	}
 
-	// 2. Forward X-Grafana-Id JWT for user identification
 	if grafanaID := incomingReq.Header.Get("X-Grafana-Id"); grafanaID != "" {
 		httpReq.Header.Set("X-Grafana-Id", grafanaID)
 		log.DefaultLogger.Debug("Health check: forwarding X-Grafana-Id")
 	}
 
-	// 3. Forward cookies for session-based auth
 	if cookies := incomingReq.Header.Get("Cookie"); cookies != "" {
 		httpReq.Header.Set("Cookie", cookies)
 		log.DefaultLogger.Debug("Health check: forwarding cookies")
 	}
 
-	// Make request with timeout
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
@@ -162,7 +144,6 @@ func checkLLMHealthUncached(ctx context.Context, grafanaURL string, incomingReq 
 
 	body, _ := io.ReadAll(resp.Body)
 
-	// Check response status
 	if resp.StatusCode == 404 {
 		return LLMHealthStatus{
 			Available: false,
@@ -173,19 +154,14 @@ func checkLLMHealthUncached(ctx context.Context, grafanaURL string, incomingReq 
 	}
 
 	if resp.StatusCode == 401 {
-		// 401 could mean either:
-		// 1. Authentication issue (our headers aren't being forwarded correctly)
-		// 2. LLM plugin is not configured
-		// Let's be optimistic and assume it's configured but there's an auth issue
 		log.DefaultLogger.Warn("LLM health check returned 401 - assuming auth forwarding issue, will proceed with LLM call",
 			"response", string(body),
 			"hasXGrafanaId", incomingReq.Header.Get("X-Grafana-Id") != "",
 			"hasCookie", incomingReq.Header.Get("Cookie") != "",
 		)
-		// Return as available and configured, let the actual LLM call handle auth
 		return LLMHealthStatus{
 			Available: true,
-			Configured: true, // Assume configured, auth might be the issue
+			Configured: true, 
 			Message: "LLM service detected (auth verification skipped)",
 			ErrorCode: "",
 		}
@@ -201,10 +177,8 @@ func checkLLMHealthUncached(ctx context.Context, grafanaURL string, incomingReq 
 		}
 	}
 
-	// Try to parse the health response
 	var healthResp map[string]interface{}
 	if err := json.Unmarshal(body, &healthResp); err == nil {
-		// Check if it indicates configuration issues
 		if msg, ok := healthResp["message"].(string); ok {
 			if msg == "OK" || msg == "ok" {
 				return LLMHealthStatus{
@@ -217,7 +191,6 @@ func checkLLMHealthUncached(ctx context.Context, grafanaURL string, incomingReq 
 		}
 	}
 
-	// Default to configured if health check passed
 	return LLMHealthStatus{
 		Available:  true,
 		Configured: true,
@@ -226,7 +199,6 @@ func checkLLMHealthUncached(ctx context.Context, grafanaURL string, incomingReq 
 	}
 }
 
-// InvalidateLLMHealthCache forces cache invalidation (useful after config changes)
 func InvalidateLLMHealthCache() {
 	llmHealthCache.Lock()
 	defer llmHealthCache.Unlock()

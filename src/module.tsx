@@ -6,8 +6,6 @@ import { mountGlobalChat } from './globalChatMount';
 const LazyApp = lazy(() => import('./components/App/App'));
 const LazyAppConfig = lazy(() => import('./components/AppConfig/AppConfig').then(m => ({ default: m.AppConfig })));
 
-// Mount the global floating chat when the module loads
-// This runs once and persists across all Grafana pages
 mountGlobalChat();
 
 const App = (props: AppRootProps) => (
@@ -16,7 +14,6 @@ const App = (props: AppRootProps) => (
   </Suspense>
 );
 
-// Error boundary to catch any crashes in AppConfig
 class ConfigErrorBoundary extends Component<
   { children: ReactNode },
   { hasError: boolean; error?: Error }

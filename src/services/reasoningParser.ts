@@ -149,43 +149,6 @@ function extractMainAnswer(markdown: string): string {
   return lines[0] || markdown;
 }
 
-export function buildReasoningPrompt(basePrompt: string, mode: 'standard' | 'thinking'): string {
-  if (mode !== 'thinking') {
-    return basePrompt;
-  }
-
-  return basePrompt + `
-
-## REASONING STRUCTURE
-
-Please structure your response following this clear reasoning pattern:
-
-## 🔍 Observation
-State what data/metrics/context you have available.
-Rate your confidence in the data quality (0-100%).
-
-## 📊 Analysis
-Analyze the situation:
-- What patterns do you see?
-- What stands out as unusual?
-- What are the key metrics?
-
-## 💡 Hypothesis
-List possible explanations, ranked by likelihood:
-1. Most likely explanation (confidence: XX%)
-2. Alternative explanation (confidence: XX%)
-3. Less likely but possible (confidence: XX%)
-
-## ✅ Conclusion
-State your final answer with overall confidence level.
-Format: **Answer: [Your answer here]**
-**Overall Confidence: XX%**
-
-## 🔬 Verification
-How can this be verified? What additional data would help?
-
----
-
-IMPORTANT: Use the emoji headings above exactly as shown to structure your response.
-`;
+export function buildReasoningPrompt(basePrompt: string, mode: 'standard' | 'design'): string {
+  return basePrompt;
 }

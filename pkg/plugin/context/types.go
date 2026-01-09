@@ -2,7 +2,6 @@ package context
 
 import "time"
 
-// ObservabilityContext contains all the context information
 type ObservabilityContext struct {
 	Metrics *MetricsContext `json:"metrics,omitempty"`
 	Logs    *LogsContext    `json:"logs,omitempty"`
@@ -11,15 +10,13 @@ type ObservabilityContext struct {
 	LastUpdated time.Time `json:"lastUpdated"`
 }
 
-// MetricsContext contains Prometheus/metrics information
 type MetricsContext struct {
 	MetricNames []string            `json:"metricNames"`
 	Labels      []string            `json:"labels"`
-	LabelValues map[string][]string `json:"labelValues"` // label -> possible values
+	LabelValues map[string][]string `json:"labelValues"` 
 	SampleCount int                 `json:"sampleCount"`
 }
 
-// LogsContext contains Loki/logs information
 type LogsContext struct {
 	Streams     []string            `json:"streams"`
 	Labels      []string            `json:"labels"`
@@ -27,7 +24,6 @@ type LogsContext struct {
 	SampleCount int                 `json:"sampleCount"`
 }
 
-// TracesContext contains Tempo/traces information
 type TracesContext struct {
 	Services    []string `json:"services"`
 	Operations  []string `json:"operations"`
@@ -35,7 +31,6 @@ type TracesContext struct {
 	SampleCount int      `json:"sampleCount"`
 }
 
-// ContextSummary provides a text summary for LLM injection
 func (oc *ObservabilityContext) BuildPrompt() string {
 	if oc == nil {
 		return ""
@@ -47,7 +42,6 @@ func (oc *ObservabilityContext) BuildPrompt() string {
 		prompt += "=== METRICS ===\n"
 		prompt += "Available metric names (sample):\n"
 
-		// Limit to avoid token overflow
 		maxMetrics := 50
 		for i, metric := range oc.Metrics.MetricNames {
 			if i >= maxMetrics {
@@ -67,7 +61,6 @@ func (oc *ObservabilityContext) BuildPrompt() string {
 				}
 				prompt += "- " + label
 
-				// Add sample values if available
 				if values, ok := oc.Metrics.LabelValues[label]; ok && len(values) > 0 {
 					prompt += " (examples: "
 					maxVals := 3

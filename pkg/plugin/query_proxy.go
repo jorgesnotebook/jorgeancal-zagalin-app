@@ -90,36 +90,15 @@ func extractUserIdentity(req *http.Request) (*UserIdentity, error) {
 	}, nil
 }
 
-// GrafanaQueryRequest represents the query request to Grafana's query API
-type GrafanaQueryRequest struct {
-	Queries []GrafanaQuery `json:"queries"`
-	From    string         `json:"from,omitempty"`
-	To      string         `json:"to,omitempty"`
-}
 
-// GrafanaQuery represents a single query in Grafana's format
-type GrafanaQuery struct {
-	RefID         string                 `json:"refId"`
-	DatasourceUID string                 `json:"datasource,omitempty"`
-	Expr          string                 `json:"expr,omitempty"`
-	Query         string                 `json:"query,omitempty"`
-	QueryType     string                 `json:"queryType,omitempty"`
-	IntervalMs    int64                  `json:"intervalMs,omitempty"`
-	MaxDataPoints int64                  `json:"maxDataPoints,omitempty"`
-	Format        string                 `json:"format,omitempty"`
-	Exemplar      bool                   `json:"exemplar,omitempty"`
-	Additional    map[string]interface{} `json:"-"`
-}
-
-// executeQueries executes queries against Grafana datasources with user's security context
-// The HTTP request context already contains the user's auth, which will be forwarded
 func (a *App) executeQueries(ctx context.Context, incomingReq *http.Request, queryReq QueryRequest) (*QueryResponse, error) {
-	// Build Grafana query request
-	grafanaQueries := make([]GrafanaQuery, len(queryReq.Queries))
+	grafanaQueries := make([]GrafanaDSQuery, len(queryReq.Queries))
 	for i, q := range queryReq.Queries {
-		grafanaQueries[i] = GrafanaQuery{
-			RefID:         q.RefID,
-			DatasourceUID: queryReq.Datasource,
+		grafanaQueries[i] = GrafanaDSQuery{
+			RefID: q.RefID,
+			Datasource: DatasourceRef{
+				UID: queryReq.Datasource,
+			},
 			Expr:          q.Expr,
 			Query:         q.Query,
 			QueryType:     q.QueryType,
@@ -135,13 +114,11 @@ func (a *App) executeQueries(ctx context.Context, incomingReq *http.Request, que
 		To:      queryReq.TimeRange.To,
 	}
 
-	// Marshal request body
 	reqBody, err := json.Marshal(grafanaReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal query request: %w", err)
 	}
 
-	// Get Grafana URL from context
 	cfg := backend.GrafanaConfigFromContext(ctx)
 	grafanaURL, err := cfg.AppURL()
 	if err != nil {
@@ -154,8 +131,6 @@ func (a *App) executeQueries(ctx context.Context, incomingReq *http.Request, que
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
-	// Forward authentication headers from the incoming request
-	// This ensures the query executes with the user's permissions
 	if authHeader := incomingReq.Header.Get("Authorization"); authHeader != "" {
 		httpReq.Header.Set("Authorization", authHeader)
 	}
@@ -170,25 +145,21 @@ func (a *App) executeQueries(ctx context.Context, incomingReq *http.Request, que
 		"queryCount", len(queryReq.Queries),
 	)
 
-	// Use default HTTP client for localhost calls
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
 	}
 
-	// Execute request with user's security context
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// Read response body
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// Check for errors
 	if resp.StatusCode != http.StatusOK {
 		backend.Logger.Error("Query failed",
 			"status", resp.StatusCode,
@@ -197,7 +168,6 @@ func (a *App) executeQueries(ctx context.Context, incomingReq *http.Request, que
 		return nil, fmt.Errorf("query failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	// Parse response
 	var queryResp QueryResponse
 	if err := json.Unmarshal(respBody, &queryResp); err != nil {
 		return nil, fmt.Errorf("failed to parse query response: %w", err)
@@ -216,14 +186,12 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Extract user identity from plugin context
 	user, err := extractUserIdentity(req)
 	if err != nil {
 		sendErrorResponse(w, "Failed to extract user identity", err, http.StatusUnauthorized)
 		return
 	}
 
-	// Apply rate limiting per user
 	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
 		if !a.guardrails.rateLimiter.Allow(user.UserLogin) {
 			sendErrorResponse(w, "Rate limit exceeded",
@@ -239,7 +207,6 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Validate datasource is in allowlist
 	if !a.isDatasourceAllowed(queryReq.Datasource) {
 		backend.Logger.Warn("Query blocked: datasource not in allowlist",
 			"user", user.UserLogin,
@@ -252,9 +219,7 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Query Validation & Injection Prevention
 	if a.queryValidator != nil && a.settings != nil && a.settings.QueryValidation.Enabled {
-		// Detect datasource type (reuse logic from OTel section below)
 		dsTypeStr, err := a.getDatasourceType(req.Context(), req, queryReq.Datasource)
 		if err != nil {
 			backend.Logger.Warn("Failed to detect datasource type for validation",
@@ -276,20 +241,18 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 			dsType = DatasourceOther
 		}
 
-		// Validate and sanitize each query
 		for i := range queryReq.Queries {
 			queryStr := queryReq.Queries[i].Expr
 			if queryStr == "" {
 				queryStr = queryReq.Queries[i].Query
 			}
 			if queryStr == "" {
-				continue // Skip empty queries
+				continue 
 			}
 
 			result := a.queryValidator.ValidateQuery(req.Context(), queryStr, dsType)
 
 			if !result.Valid {
-				// Log validation failure with user context
 				backend.Logger.Warn("Query validation failed",
 					"user", user.UserLogin,
 					"userId", user.UserID,
@@ -302,14 +265,12 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 					"error", result.Error,
 				)
 
-				// Audit log validation failure
 				a.logQueryValidationFailure(user, queryReq.Datasource, result)
 
 				sendErrorResponse(w, "Query validation failed", result.Error, http.StatusBadRequest)
 				return
 			}
 
-			// If query was sanitized, log it and update
 			if result.Sanitized {
 				backend.Logger.Warn("Query sanitized",
 					"user", user.UserLogin,
@@ -323,10 +284,8 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 					"sanitizedLength", len(result.SanitizedQuery),
 				)
 
-				// Audit log sanitization
 				a.logQuerySanitization(user, queryReq.Datasource, result)
 
-				// Update query with sanitized version
 				if queryReq.Queries[i].Expr != "" {
 					queryReq.Queries[i].Expr = result.SanitizedQuery
 				} else {
@@ -334,7 +293,6 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 				}
 			}
 
-			// Log LLM warnings if present (advisory mode)
 			if len(result.LLMWarnings) > 0 {
 				backend.Logger.Info("LLM validation warnings",
 					"user", user.UserLogin,
@@ -352,9 +310,7 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 		)
 	}
 
-	// OTel Scope Enforcement
 	if a.settings != nil && a.settings.OtelEnforcement.Enabled {
-		// Detect datasource type
 		dsTypeStr, err := a.getDatasourceType(req.Context(), req, queryReq.Datasource)
 		if err != nil {
 			backend.Logger.Warn("Failed to detect datasource type, using validation-only mode",
@@ -364,7 +320,6 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 			dsTypeStr = "other"
 		}
 
-		// Map to DatasourceType enum
 		var dsType DatasourceType
 		switch dsTypeStr {
 		case "prometheus":
@@ -382,13 +337,10 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 			"type", dsType,
 		)
 
-		// Extract current scope from query
 		scope := a.extractOtelScopeFromQuery(queryReq, dsType)
 
-		// Apply defaults if needed
 		a.applyOtelScopeDefaults(scope)
 
-		// Validate scope
 		if err := a.validateOtelScope(scope); err != nil {
 			backend.Logger.Warn("Query blocked: OTel scope validation failed",
 				"user", user.UserLogin,
@@ -400,7 +352,6 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		// Inject scope labels into queries (for known datasource types only)
 		if err := a.injectOtelScope(&queryReq, scope, dsType); err != nil {
 			backend.Logger.Error("Failed to inject OTel scope",
 				"error", err,
@@ -411,7 +362,6 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		// Log scope usage for audit
 		a.logOtelScopeUsage(user, scope, queryReq.Datasource)
 	}
 
@@ -425,19 +375,55 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 		"queryCount", len(queryReq.Queries),
 	)
 
-	// Execute queries against datasource with user's security context
-	response, err := a.executeQueries(req.Context(), req, queryReq)
-	if err != nil {
-		backend.Logger.Error("Failed to execute queries",
-			"error", err,
-			"user", user.UserLogin,
-			"datasource", queryReq.Datasource,
-		)
-		sendErrorResponse(w, "Failed to execute queries", err, http.StatusInternalServerError)
+	if a.grafanaQueryClient == nil {
+		backend.Logger.Error("Grafana query client not initialized")
+		sendErrorResponse(w, "Grafana query client not configured",
+			fmt.Errorf("service account token required"), http.StatusInternalServerError)
 		return
 	}
 
-	// Audit log
+	dsTypeStr, err := a.getDatasourceType(req.Context(), req, queryReq.Datasource)
+	if err != nil {
+		backend.Logger.Warn("Failed to detect datasource type", "error", err)
+		dsTypeStr = "other"
+	}
+
+	evidencePacks := make([]*EvidencePack, 0, len(queryReq.Queries))
+
+	for _, query := range queryReq.Queries {
+		grafanaResp, err := a.grafanaQueryClient.ExecuteQuery(
+			req.Context(),
+			user,
+			queryReq.Datasource,
+			dsTypeStr,
+			query,
+			queryReq.TimeRange,
+		)
+
+		if err != nil {
+			backend.Logger.Error("Failed to execute query via Grafana",
+				"error", err,
+				"user", user.UserLogin,
+				"datasource", queryReq.Datasource,
+			)
+			sendErrorResponse(w, "Failed to execute query", err, http.StatusInternalServerError)
+			return
+		}
+
+		evidencePack, err := a.buildEvidencePack(grafanaResp, query, queryReq.Datasource, dsTypeStr, queryReq.TimeRange)
+		if err != nil {
+			backend.Logger.Error("Failed to build evidence pack",
+				"error", err,
+				"user", user.UserLogin,
+				"datasource", queryReq.Datasource,
+			)
+			sendErrorResponse(w, "Failed to build evidence pack", err, http.StatusInternalServerError)
+			return
+		}
+
+		evidencePacks = append(evidencePacks, evidencePack)
+	}
+
 	auditLog := map[string]interface{}{
 		"timestamp":       time.Now().UTC().Format(time.RFC3339),
 		"user":            user.UserLogin,
@@ -445,21 +431,25 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 		"orgId":           user.OrgID,
 		"datasource":      queryReq.Datasource,
 		"queryCount":      len(queryReq.Queries),
+		"evidenceCount":   len(evidencePacks),
 		"executionTimeMs": time.Since(startTime).Milliseconds(),
 		"success":         true,
 	}
 
-	backend.Logger.Info("Query audit log", "audit", auditLog)
+	backend.Logger.Info("Query audit log with evidence", "audit", auditLog)
+
+	responseData := map[string]interface{}{
+		"evidencePacks": evidencePacks,
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	if err := json.NewEncoder(w).Encode(responseData); err != nil {
 		backend.Logger.Error("Failed to encode response", "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 }
 
-// logQueryValidationFailure logs query validation failures for audit
 func (a *App) logQueryValidationFailure(user *UserIdentity, datasource string, result *QueryValidationResult) {
 	auditLog := map[string]interface{}{
 		"timestamp":     time.Now().UTC().Format(time.RFC3339),
@@ -476,7 +466,6 @@ func (a *App) logQueryValidationFailure(user *UserIdentity, datasource string, r
 	backend.Logger.Info("Query validation failure audit", "audit", auditLog)
 }
 
-// logQuerySanitization logs query sanitization attempts for audit
 func (a *App) logQuerySanitization(user *UserIdentity, datasource string, result *QueryValidationResult) {
 	auditLog := map[string]interface{}{
 		"timestamp":       time.Now().UTC().Format(time.RFC3339),
@@ -491,4 +480,31 @@ func (a *App) logQuerySanitization(user *UserIdentity, datasource string, result
 		"sanitizedLength": len(result.SanitizedQuery),
 	}
 	backend.Logger.Info("Query sanitization audit", "audit", auditLog)
+}
+
+func (a *App) buildEvidencePack(
+	grafanaResp *GrafanaQueryResponse,
+	query QueryPayload,
+	datasource string,
+	datasourceType string,
+	timeRange TimeRange,
+) (*EvidencePack, error) {
+	queryStr := query.Expr
+	if queryStr == "" {
+		queryStr = query.Query
+	}
+
+	switch datasourceType {
+	case "prometheus", "mimir":
+		return BuildMetricsEvidencePack(grafanaResp, queryStr, datasource, timeRange)
+
+	case "loki":
+		return BuildLogsEvidencePack(grafanaResp, queryStr, datasource, timeRange)
+
+	case "tempo":
+		return BuildTracesEvidencePack(grafanaResp, queryStr, datasource)
+
+	default:
+		return nil, fmt.Errorf("unsupported datasource type for evidence: %s", datasourceType)
+	}
 }

@@ -15,26 +15,22 @@ import { useConversationStorage } from './useConversationStorage';
 import type { GrafanaContext } from '../services/contextTypes';
 
 export interface UseConversationReturn {
-  // Current conversation
   conversation: Conversation | null;
   messages: ConversationMessage[];
 
-  // Conversation list
   conversations: ConversationMetadata[];
 
-  // Actions
   createNew: (context?: GrafanaContext) => void;
   loadConversation: (id: string) => void;
   addMessage: (message: ConversationMessage, context?: GrafanaContext) => void;
-  addContext: (context: GrafanaContext) => Promise<void>; // NEW
-  removeContext: (dashboardUid: string) => Promise<void>; // NEW
+  addContext: (context: GrafanaContext) => Promise<void>;
+  removeContext: (dashboardUid: string) => Promise<void>;
   deleteConversation: (id: string) => void;
   deleteAll: () => void;
   updateTitle: (id: string, title: string) => void;
   togglePin: (id: string) => void;
   clearCurrent: () => void;
 
-  // State
   isLoading: boolean;
   currentId: string | null;
 }
@@ -65,27 +61,22 @@ export function useConversation(): UseConversationReturn {
   const [isLoading, setIsLoading] = useState(false);
   const conversationRef = useRef<Conversation | null>(null);
 
-  // Keep ref in sync with state
   useEffect(() => {
     conversationRef.current = conversation;
   }, [conversation]);
 
-  // Refresh the conversation list
   const refreshConversationList = useCallback(async () => {
     const list = await ConversationStorage.getConversationList(storage);
     setConversations(list);
   }, [storage]);
 
-  // Load conversation list on mount and auto-load most recent conversation
   useEffect(() => {
     const initConversations = async () => {
       await refreshConversationList();
 
-      // If no active conversation, load the most recent one
       if (!conversationRef.current) {
         const list = await ConversationStorage.getConversationList(storage);
         if (list.length > 0) {
-          // Load the most recent conversation (first in the sorted list)
           const mostRecent = list[0];
           console.log('[useConversation] Auto-loading most recent conversation:', mostRecent.id);
           const conv = await ConversationStorage.getConversation(storage, mostRecent.id);
@@ -108,7 +99,7 @@ export function useConversation(): UseConversationReturn {
 
     const newConv = await ConversationStorage.createConversation(storage, context);
     setConversation(newConv);
-    conversationRef.current = newConv; // Update ref immediately
+    conversationRef.current = newConv;
     await ConversationStorage.saveConversation(storage, newConv);
     await refreshConversationList();
   }, [refreshConversationList, storage]);
@@ -122,7 +113,7 @@ export function useConversation(): UseConversationReturn {
       const conv = await ConversationStorage.getConversation(storage, id);
       if (conv) {
         setConversation(conv);
-        conversationRef.current = conv; // Update ref too
+        conversationRef.current = conv;
       } else {
         console.warn(`Conversation ${id} not found`);
       }
@@ -137,7 +128,6 @@ export function useConversation(): UseConversationReturn {
    * Add a message to the current conversation
    */
   const addMessage = useCallback(async (message: ConversationMessage, grafanaContext?: GrafanaContext) => {
-    // Use ref to get the LATEST conversation state, not the stale closure value
     const currentConv = conversationRef.current;
 
     console.log('[useConversation] addMessage called. Current conversation:', currentConv?.id);
@@ -155,7 +145,7 @@ export function useConversation(): UseConversationReturn {
       };
       console.log('[useConversation] Created new conversation:', updatedConv.id);
       setConversation(updatedConv);
-      conversationRef.current = updatedConv; // Update ref immediately
+      conversationRef.current = updatedConv;
       await ConversationStorage.saveConversation(storage, updatedConv);
       await refreshConversationList();
       console.log('[useConversation] New conversation saved');
@@ -178,7 +168,7 @@ export function useConversation(): UseConversationReturn {
     }
 
     setConversation(updated);
-    conversationRef.current = updated; // Update ref immediately
+    conversationRef.current = updated;
     await ConversationStorage.saveConversation(storage, updated);
     await refreshConversationList();
   }, [refreshConversationList, storage]);
@@ -193,7 +183,7 @@ export function useConversation(): UseConversationReturn {
 
       if (conversation?.id === id) {
         setConversation(null);
-        conversationRef.current = null; // Clear the ref too
+        conversationRef.current = null;
       }
 
       await refreshConversationList();
@@ -212,7 +202,7 @@ export function useConversation(): UseConversationReturn {
     try {
       await ConversationStorage.clearAll(storage);
       setConversation(null);
-      conversationRef.current = null; // Clear the ref too
+      conversationRef.current = null;
       await refreshConversationList();
       console.log('[useConversation] All conversations deleted successfully');
     } catch (error) {
@@ -225,7 +215,6 @@ export function useConversation(): UseConversationReturn {
    * Update conversation title
    */
   const updateTitle = useCallback(async (id: string, title: string) => {
-    // Sanitize and validate title
     const sanitizedTitle = title.trim().slice(0, 200);
 
     if (sanitizedTitle.length === 0) {
@@ -233,7 +222,6 @@ export function useConversation(): UseConversationReturn {
       return;
     }
 
-    // Check for control characters (except newline, carriage return, tab)
     if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(sanitizedTitle)) {
       console.warn('Title contains invalid characters');
       return;
@@ -272,7 +260,7 @@ export function useConversation(): UseConversationReturn {
    */
   const clearCurrent = useCallback(() => {
     setConversation(null);
-    conversationRef.current = null; // Also clear the ref
+    conversationRef.current = null;
   }, []);
 
   /**
@@ -291,7 +279,6 @@ export function useConversation(): UseConversationReturn {
       return;
     }
 
-    // Check if this dashboard is already attached
     const exists = currentConv.contexts.some(
       ctx => ctx.dashboardUid === newContext.dashboardUid && ctx.panelId === newContext.panelId
     );

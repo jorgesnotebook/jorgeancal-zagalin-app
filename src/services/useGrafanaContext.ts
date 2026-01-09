@@ -29,7 +29,6 @@ export function useGrafanaContext() {
   useEffect(() => {
     refreshContext();
 
-    // Listen for location changes to update context
     const unsubscribe = locationService.getHistory().listen(() => {
       refreshContext();
     });

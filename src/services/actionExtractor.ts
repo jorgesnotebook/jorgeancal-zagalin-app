@@ -35,7 +35,6 @@ export function extractQueries(content: string): AssistantAction[] {
 export function createExploreLink(query: string, datasourceUid?: string, timeRange?: TimeRange): string {
   const params = new URLSearchParams();
 
-  // Build explore query object
   const exploreQuery: any = {
     queries: [
       {
@@ -52,7 +51,6 @@ export function createExploreLink(query: string, datasourceUid?: string, timeRan
       : undefined,
   };
 
-  // Encode as JSON
   params.set('left', JSON.stringify(exploreQuery));
 
   return `/explore?${params.toString()}`;

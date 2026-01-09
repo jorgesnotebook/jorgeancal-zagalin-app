@@ -57,7 +57,6 @@ export function optimizeContext(
 ): OptimizedContext {
   const estimated = estimateTokens(fullContext);
 
-  // If it fits, return everything
   if (estimated <= maxTokens) {
     return {
       essential: formatFullContext(fullContext),
@@ -66,7 +65,6 @@ export function optimizeContext(
     };
   }
 
-  // Prioritize essential information
   const essential = {
     dashboard: fullContext.dashboard?.title,
     dashboardUid: fullContext.dashboard?.uid,
@@ -76,7 +74,6 @@ export function optimizeContext(
       : undefined,
   };
 
-  // Supplemental information (can be dropped if needed)
   const supplemental = {
     dashboardTags: fullContext.dashboard?.tags,
     panelDescription: fullContext.panel?.description,
@@ -94,5 +91,5 @@ export function optimizeContext(
  * Generally use 20-30% of total budget for context
  */
 export function calculateContextBudget(maxTokens: number): number {
-  return Math.floor(maxTokens * 0.25); // 25% for context
+  return Math.floor(maxTokens * 0.25);
 }

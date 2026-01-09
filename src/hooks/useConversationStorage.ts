@@ -44,8 +44,5 @@ const localStorageBackend: StorageBackend = {
  * with proper migration between localStorage and backend storage.
  */
 export function useConversationStorage(): StorageBackend {
-  // Always use localStorage for consistency between main app and floating chat
-  // The floating chat is mounted globally (no plugin context), so it must use localStorage
-  // To avoid split-brain, we use localStorage everywhere
   return useMemo(() => localStorageBackend, []);
 }

@@ -63,7 +63,6 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact }) => {
   };
 
   const handleOpenExplore = () => {
-    // Build explore URL based on artifact type
     const datasourceUid = artifact.metadata?.datasourceUid || artifact.metadata?.datasource;
     if (artifact.type === 'query' && datasourceUid) {
       const query = encodeURIComponent(artifact.content);

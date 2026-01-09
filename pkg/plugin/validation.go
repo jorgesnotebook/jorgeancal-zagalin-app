@@ -6,7 +6,6 @@ import (
 )
 
 var (
-	// Match frontend generateId() format: timestamp-base36random (e.g., "1735243234567-abc123def")
 	conversationIDRegex = regexp.MustCompile(`^[0-9]{10,15}-[0-9a-z]{5,15}$`)
 	usernameRegex       = regexp.MustCompile(`^[a-zA-Z0-9_@.-]{1,100}$`)
 )

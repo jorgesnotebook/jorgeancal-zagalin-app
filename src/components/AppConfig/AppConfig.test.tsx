@@ -3,7 +3,6 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { PluginType } from '@grafana/data';
 import AppConfig from './AppConfig';
 
-// Mock the health service to prevent async calls during tests
 jest.mock('../../services/llmHealthService', () => ({
   checkZagalinHealth: jest.fn().mockResolvedValue({
     llm: { enabled: true, provider: 'openai', models: ['gpt-4'] },
@@ -26,28 +25,29 @@ describe('Components/AppConfig', () => {
           enabled: true,
           jsonData: {},
         },
+        addConfigPage: jest.fn(),
+        setChannelSupport: jest.fn(),
       },
       query: {},
     };
   });
 
   test('renders the Zagalin Configuration page with main sections', async () => {
-    const plugin = { meta: { ...props.plugin.meta, enabled: false } };
+    const plugin = {
+      ...props.plugin,
+      meta: { ...props.plugin.meta, enabled: false }
+    };
 
-    // @ts-ignore - We don't need to provide `addConfigPage()` and `setChannelSupport()` for these tests
     render(<AppConfig plugin={plugin} query={props.query} />);
 
-    // Wait for async health check to complete and component to render
     await waitFor(() => {
       expect(screen.getByText('Zagalin Configuration')).toBeInTheDocument();
     });
 
-    // Check for section titles
-    expect(screen.getByText('Personality & Behavior')).toBeInTheDocument();
+    expect(screen.getByText('LLM Configuration')).toBeInTheDocument();
     expect(screen.getByText('Skills & Features')).toBeInTheDocument();
     expect(screen.getByText('UI Preferences')).toBeInTheDocument();
 
-    // Check for save button
     expect(screen.getAllByText('Save Configuration')[0]).toBeInTheDocument();
   });
 });

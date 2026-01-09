@@ -24,7 +24,6 @@ import { listDatasources, type DatasourceInfo } from '../../services/datasourceS
 
 export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
   const s = useStyles2(getStyles);
-  // Load config from plugin settings using lazy initialization
   const [config, setConfig] = useState<ZagalinConfig>(() => {
     if (plugin.meta.jsonData) {
       return { ...DEFAULT_CONFIG, ...plugin.meta.jsonData };
@@ -45,7 +44,6 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     plugin.meta.jsonData?.defaultDatasource || ''
   );
 
-  // OTel enforcement settings
   const [otelEnabled, setOtelEnabled] = useState<boolean>(
     plugin.meta.jsonData?.otelEnforcement?.enabled || false
   );
@@ -65,7 +63,6 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     plugin.meta.jsonData?.otelEnforcement?.rejectIfNoScope !== false
   );
 
-  // LLM Backend settings
   const [llmBackend, setLlmBackend] = useState<string>(
     plugin.meta.jsonData?.llmBackend || 'grafana-llm'
   );
@@ -91,9 +88,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     plugin.meta.secureJsonFields?.serviceAccountToken || false
   );
 
-  // Removed frontendOnlyMode - now handled by llmBackend setting
 
-  // Query Validation state
   const [queryValidationEnabled, setQueryValidationEnabled] = useState<boolean>(
     plugin.meta.jsonData?.queryValidation?.enabled || false
   );
@@ -122,10 +117,36 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     plugin.meta.jsonData?.queryValidation?.llmValidationMode || 'advisory'
   );
 
-  // Sync state with plugin.meta when it changes (handles navigation back to config page)
+  const [referenceDashboards, setReferenceDashboards] = useState<string[]>(
+    plugin.meta.jsonData?.referenceDashboards || []
+  );
+
   useEffect(() => {
     if (plugin.meta.jsonData) {
-      setConfig({ ...DEFAULT_CONFIG, ...plugin.meta.jsonData });
+      let migratedConfig = { ...DEFAULT_CONFIG, ...plugin.meta.jsonData };
+
+      const hasOldFormat = plugin.meta.jsonData.standardModeTemperature !== undefined ||
+                          plugin.meta.jsonData.temperature !== undefined;
+      const hasNewFormat = plugin.meta.jsonData.standardMode !== undefined;
+
+      if (hasOldFormat && !hasNewFormat) {
+        migratedConfig = {
+          ...migratedConfig,
+          standardMode: {
+            temperature: plugin.meta.jsonData.standardModeTemperature ??
+                        plugin.meta.jsonData.temperature ?? 0.5,
+            maxTokens: plugin.meta.jsonData.standardModeMaxTokens ??
+                      plugin.meta.jsonData.maxTokens ?? 2000,
+          },
+          designMode: {
+            temperature: plugin.meta.jsonData.designModeTemperature ?? 0.8,
+            maxTokens: plugin.meta.jsonData.designModeMaxTokens ?? 3000,
+          },
+        };
+        console.log('Migrated old LLM config format to new nested structure');
+      }
+
+      setConfig(migratedConfig);
       setAllowedDatasources(plugin.meta.jsonData.allowedDatasources || []);
       setDefaultDatasource(plugin.meta.jsonData.defaultDatasource || '');
       setLlmBackend(plugin.meta.jsonData.llmBackend || 'grafana-llm');
@@ -134,7 +155,6 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
       setLlmEndpoint(plugin.meta.jsonData.llmEndpoint || '');
       setLlmOrganization(plugin.meta.jsonData.llmOrganization || '');
 
-      // OTel settings
       setOtelEnabled(plugin.meta.jsonData.otelEnforcement?.enabled || false);
       setOtelRequireService(plugin.meta.jsonData.otelEnforcement?.requireServiceName !== false);
       setOtelRequireEnvironment(plugin.meta.jsonData.otelEnforcement?.requireEnvironmentName !== false);
@@ -142,7 +162,6 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
       setOtelDefaultEnvironment(plugin.meta.jsonData.otelEnforcement?.defaultEnvironmentName || '');
       setOtelRejectIfNoScope(plugin.meta.jsonData.otelEnforcement?.rejectIfNoScope !== false);
 
-      // Query Validation settings
       setQueryValidationEnabled(plugin.meta.jsonData.queryValidation?.enabled || false);
       setQueryValidationEnablePromQL(plugin.meta.jsonData.queryValidation?.enablePromqlValidation || false);
       setQueryValidationEnableLogQL(plugin.meta.jsonData.queryValidation?.enableLogqlValidation || false);
@@ -152,15 +171,15 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
       setQueryValidationLogAttempts(plugin.meta.jsonData.queryValidation?.logValidationAttempts !== false);
       setQueryValidationEnableLLM(plugin.meta.jsonData.queryValidation?.enableLlmValidation || false);
       setQueryValidationLLMMode(plugin.meta.jsonData.queryValidation?.llmValidationMode || 'advisory');
+
+      setReferenceDashboards(plugin.meta.jsonData.referenceDashboards || []);
     }
 
-    // Sync secure field status (check if service account token is configured)
     if (plugin.meta.secureJsonFields) {
       setHasServiceAccountToken(plugin.meta.secureJsonFields.serviceAccountToken || false);
     }
   }, [plugin.meta.jsonData, plugin.meta.secureJsonFields]);
 
-  // Check health on mount
   useEffect(() => {
     const loadHealth = async () => {
       setCheckingHealth(true);
@@ -169,7 +188,6 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
         setHealthStatus(status);
       } catch (err) {
         console.error('Failed to check health:', err);
-        // Set a default status if health check fails - never show internal errors
         setHealthStatus({
           llm: { enabled: false, error: 'Unable to check LLM status' },
           vector: { enabled: false, error: 'Unable to check vector status' },
@@ -181,7 +199,6 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     loadHealth();
   }, []);
 
-  // Load datasources on mount
   useEffect(() => {
     const loadDatasources = async () => {
       setLoadingDatasources(true);
@@ -201,13 +218,11 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     try {
       setError(null);
 
-      // Validate: Backend Proxy mode requires service account token (either newly provided or already configured)
       if (llmBackend === 'backend-proxy' && !serviceAccountToken && !hasServiceAccountToken) {
         setError('Service account token is required when using Backend Proxy mode. Please provide a token or switch to a different LLM backend.');
         return;
       }
 
-      // Save to Grafana's plugin settings (stored in database)
       const settings: any = {
         enabled: plugin.meta.enabled,
         pinned: plugin.meta.pinned,
@@ -215,7 +230,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
           ...config,
           allowedDatasources,
           defaultDatasource,
-          llmBackend: llmBackend === 'disabled' ? '' : llmBackend, // Empty string for disabled
+          llmBackend: llmBackend === 'disabled' ? '' : llmBackend,
           llmProvider,
           llmModel,
           llmEndpoint,
@@ -239,10 +254,10 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             enableLlmValidation: queryValidationEnableLLM,
             llmValidationMode: queryValidationLLMMode,
           },
+          referenceDashboards,
         },
       };
 
-      // Add secure fields (API key, service account token) if provided
       settings.secureJsonData = {};
       if (llmApiKey) {
         settings.secureJsonData.llmApiKey = llmApiKey;
@@ -298,7 +313,6 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
       : [...allowedDatasources, uid];
     setAllowedDatasources(newAllowed);
 
-    // If we removed the default datasource, clear it
     if (!newAllowed.includes(defaultDatasource)) {
       setDefaultDatasource('');
     }
@@ -308,7 +322,6 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
 
   const handleDefaultDatasourceChange = (uid: string) => {
     setDefaultDatasource(uid);
-    // Ensure default datasource is in allowed list
     if (!allowedDatasources.includes(uid)) {
       setAllowedDatasources([...allowedDatasources, uid]);
     }
@@ -756,7 +769,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                   label="API Endpoint"
                   description={
                     llmProvider === 'azure-openai'
-                      ? 'Your Azure OpenAI endpoint URL (e.g., https://YOUR-RESOURCE.openai.azure.com)'
+                      ? 'Your Azure OpenAI endpoint URL (e.g., https:
                       : 'Custom API endpoint URL compatible with OpenAI API format'
                   }
                 >
@@ -768,8 +781,8 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                     }}
                     placeholder={
                       llmProvider === 'azure-openai'
-                        ? 'https://YOUR-RESOURCE.openai.azure.com'
-                        : 'https://api.example.com/v1/chat/completions'
+                        ? 'https:
+                        : 'https:
                     }
                     width={50}
                   />
@@ -823,14 +836,14 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
 
               {llmProvider === 'openai' && (
                 <Alert title="OpenAI Configuration" severity="info">
-                  <p>Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI Platform</a>.</p>
+                  <p>Get your API key from <a href="https:
                   <p><strong>Recommended models:</strong> gpt-4o, gpt-4o-mini, gpt-4-turbo</p>
                 </Alert>
               )}
 
               {llmProvider === 'anthropic' && (
                 <Alert title="Anthropic Configuration" severity="info">
-                  <p>Get your API key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">Anthropic Console</a>.</p>
+                  <p>Get your API key from <a href="https:
                   <p><strong>Recommended models:</strong> claude-3-5-sonnet-20241022, claude-3-opus-20240229</p>
                 </Alert>
               )}
@@ -1215,10 +1228,18 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
         </div>
       </div>
 
-      {/* Personality & Behavior */}
+
       <div className={s.section}>
-        <h3 className={s.sectionTitle}>Personality & Behavior</h3>
+        <h3 className={s.sectionTitle}>LLM Configuration</h3>
         <div className={s.sectionContent}>
+          <p className={s.description}>
+            Configure how Zagalin communicates and processes requests. Different modes use different settings for optimal performance.
+          </p>
+
+          <h4 style={{ marginTop: '24px', marginBottom: '16px', fontSize: '15px', fontWeight: 600 }}>
+            Personality & Communication Style
+          </h4>
+
           <Field
             label="Personality Preset"
             description="Choose how Zagalin communicates with you"
@@ -1245,6 +1266,13 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             />
           </Field>
 
+          <h4 style={{ marginTop: '32px', marginBottom: '16px', fontSize: '15px', fontWeight: 600 }}>
+            Standard Mode Settings
+          </h4>
+          <p style={{ fontSize: '13px', color: '#999', marginBottom: '16px' }}>
+            Fast responses for everyday questions and troubleshooting
+          </p>
+
           <Field
             label="Temperature"
             description="Controls creativity vs. consistency (0.0 = factual, 1.0 = creative)"
@@ -1252,14 +1280,16 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             <div>
               <div className={s.sliderContainer}>
                 <Slider
-                  inputId="temperature-slider"
+                  inputId="standard-temperature-slider"
                   min={0}
                   max={1}
                   step={0.1}
-                  value={config.temperature}
-                  onChange={(value) => updateConfig({ temperature: value })}
+                  value={config.standardMode.temperature}
+                  onChange={(value) => updateConfig({
+                    standardMode: { ...config.standardMode, temperature: value }
+                  })}
                 />
-                <span className={s.sliderValue}>{config.temperature.toFixed(1)}</span>
+                <span className={s.sliderValue}>{config.standardMode.temperature.toFixed(1)}</span>
               </div>
               <div className={s.sliderLabels}>
                 <span>Factual</span>
@@ -1270,23 +1300,113 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
           </Field>
 
           <Field
-            label="Max Tokens per Response"
+            label="Max Tokens"
             description="Maximum length of responses (higher = longer, more expensive)"
           >
             <Combobox
               options={[
-                { label: '1000 tokens (~750 words)', value: 1000 },
-                { label: '2000 tokens (~1500 words) - Recommended', value: 2000 },
-                { label: '3000 tokens (~2250 words)', value: 3000 },
-                { label: '4000 tokens (~3000 words)', value: 4000 },
+                { label: '1000 tokens (Short)', value: 1000 },
+                { label: '2000 tokens (Medium)', value: 2000 },
+                { label: '3000 tokens (Long)', value: 3000 },
+                { label: '4000 tokens (Very Long)', value: 4000 },
               ]}
-              value={config.maxTokens}
-              onChange={(option) => updateConfig({ maxTokens: option.value as number })}
+              value={config.standardMode.maxTokens}
+              onChange={(option) => updateConfig({
+                standardMode: { ...config.standardMode, maxTokens: option.value as number }
+              })}
               width={50}
             />
           </Field>
+
+          <h4 style={{ marginTop: '32px', marginBottom: '16px', fontSize: '15px', fontWeight: 600 }}>
+            Design Mode Settings
+          </h4>
+          <p style={{ fontSize: '13px', color: '#999', marginBottom: '16px' }}>
+            Dashboard design with examples, suggestions, and reference patterns
+          </p>
+
+          <Field
+            label="Temperature"
+            description="Higher temperature for creative design suggestions"
+          >
+            <div>
+              <div className={s.sliderContainer}>
+                <Slider
+                  inputId="design-temperature-slider"
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  value={config.designMode.temperature}
+                  onChange={(value) => updateConfig({
+                    designMode: { ...config.designMode, temperature: value }
+                  })}
+                />
+                <span className={s.sliderValue}>{config.designMode.temperature.toFixed(1)}</span>
+              </div>
+              <div className={s.sliderLabels}>
+                <span>Factual</span>
+                <span>Balanced</span>
+                <span>Creative</span>
+              </div>
+            </div>
+          </Field>
+
+          <Field
+            label="Max Tokens"
+            description="Longer responses for detailed design explanations"
+          >
+            <Combobox
+              options={[
+                { label: '2000 tokens (Medium)', value: 2000 },
+                { label: '3000 tokens (Long)', value: 3000 },
+                { label: '4000 tokens (Very Long)', value: 4000 },
+                { label: '5000 tokens (Maximum)', value: 5000 },
+              ]}
+              value={config.designMode.maxTokens}
+              onChange={(option) => updateConfig({
+                designMode: { ...config.designMode, maxTokens: option.value as number }
+              })}
+              width={50}
+            />
+          </Field>
+
+          <Field
+            label="Reference Dashboards"
+            description="Dashboard UIDs to use as design examples (comma-separated)"
+          >
+            <Input
+              value={referenceDashboards.join(', ')}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                const uids = value
+                  .split(',')
+                  .map(uid => uid.trim())
+                  .filter(uid => uid.length > 0);
+                setReferenceDashboards(uids);
+                setIsDirty(true);
+              }}
+              placeholder="dashboard-uid-1, dashboard-uid-2, dashboard-uid-3"
+              width={60}
+            />
+          </Field>
+
+          {referenceDashboards.length > 0 && (
+            <Alert title={`${referenceDashboards.length} Reference Dashboard(s) Configured`} severity="info">
+              <p>These dashboards will be fetched and cached on plugin startup to provide context for:</p>
+              <ul style={{ marginTop: '8px', marginBottom: '8px', paddingLeft: '20px' }}>
+                <li>Dashboard design assistance</li>
+                <li>Panel layout suggestions</li>
+                <li>Visualization best practices</li>
+                <li>Naming conventions and patterns</li>
+              </ul>
+              <p style={{ marginTop: '8px' }}>
+                <strong>Configured dashboards:</strong> {referenceDashboards.join(', ')}
+              </p>
+            </Alert>
+          )}
         </div>
       </div>
+
 
       {/* Skills & Features */}
       <div className={s.section}>

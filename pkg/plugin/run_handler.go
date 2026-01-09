@@ -11,7 +11,6 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
-// RunStartRequest represents a request to start a new run
 type RunStartRequest struct {
 	ConversationID string             `json:"conversationId"`
 	Message        string             `json:"message"`
@@ -20,9 +19,8 @@ type RunStartRequest struct {
 	Attachments    []Attachment       `json:"attachments,omitempty"`
 }
 
-// Attachment represents attached Grafana context
 type Attachment struct {
-	Type         string                 `json:"type"` // "grafana_context"
+	Type         string                 `json:"type"` 
 	Source       string                 `json:"source"`
 	DashboardUID string                 `json:"dashboardUid,omitempty"`
 	PanelID      int                    `json:"panelId,omitempty"`
@@ -31,14 +29,11 @@ type Attachment struct {
 	Links        map[string]string      `json:"links,omitempty"`
 }
 
-// TimeRange is defined in query_proxy.go
 
-// RunStartResponse represents the response from starting a run
 type RunStartResponse struct {
 	RunID string `json:"runId"`
 }
 
-// RunStatusResponse represents the current status of a run
 type RunStatusResponse struct {
 	RunID            string          `json:"runId"`
 	ConversationID   string          `json:"conversationId"`
@@ -50,21 +45,18 @@ type RunStatusResponse struct {
 	UpdatedAt        string          `json:"updatedAt"`
 }
 
-// handleStartRun handles POST /runs/start
 func (a *App) handleStartRun(rw http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		http.Error(rw, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract user
 	user, err := a.extractUserFromRequest(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
 		return
 	}
 
-	// Rate limiting
 	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
 		if !a.guardrails.rateLimiter.Allow(user.UserLogin) {
 			backend.Logger.Warn("Rate limit exceeded for run start", "user", user.UserLogin)
@@ -73,7 +65,6 @@ func (a *App) handleStartRun(rw http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	// Parse request body
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		sendErrorResponse(rw, "Failed to read request body", err, http.StatusBadRequest)
@@ -87,13 +78,11 @@ func (a *App) handleStartRun(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Check if run orchestration is supported for the current backend mode
 	if a.settings != nil && a.settings.LLMBackend == "grafana-llm-app" {
 		sendErrorResponse(rw, "Run orchestration with planning/steps is not supported in grafana-llm-app mode. Please switch to Direct API mode in plugin configuration to use this feature.", fmt.Errorf("grafana-llm-app mode does not support run orchestration"), http.StatusNotImplemented)
 		return
 	}
 
-	// Validate request
 	if runReq.ConversationID == "" {
 		sendErrorResponse(rw, "conversationId is required", fmt.Errorf("empty conversationId"), http.StatusBadRequest)
 		return
@@ -103,34 +92,24 @@ func (a *App) handleStartRun(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Check user run limit (max 3 active runs per user)
 	if a.runManager.GetUserRunCount(user.UserLogin) >= 3 {
 		backend.Logger.Warn("User run limit exceeded", "user", user.UserLogin)
 		sendErrorResponse(rw, "Maximum concurrent runs exceeded", fmt.Errorf("too many active runs"), http.StatusTooManyRequests)
 		return
 	}
 
-	// Create run
-	// Pass req.Context() to preserve plugin metadata (PluginContext, GrafanaConfig)
-	// CreateRun will create an independent cancelable context that preserves this metadata
 	run, err := a.runManager.CreateRun(req.Context(), runReq.ConversationID, user.UserLogin)
 	if err != nil {
 		sendErrorResponse(rw, "Failed to create run", err, http.StatusInternalServerError)
 		return
 	}
 
-	// Start orchestration in goroutine
-	// IMPORTANT: Use run.CancelCtx which contains plugin metadata from req.Context()
-	// but is independent of the HTTP request lifecycle.
-	// The HTTP request context gets canceled when the request completes,
-	// but run.CancelCtx continues and allows proper cancellation via CancelRun().
 	go a.orchestrateRunFull(run.CancelCtx, run, AssistantRequest{
 		Message: runReq.Message,
 		History: runReq.History,
 		Context: runReq.Context,
 	}, req)
 
-	// Return run ID immediately
 	response := RunStartResponse{
 		RunID: run.RunID,
 	}
@@ -141,7 +120,6 @@ func (a *App) handleStartRun(rw http.ResponseWriter, req *http.Request) {
 	backend.Logger.Info("Run started", "runId", run.RunID, "conversationId", runReq.ConversationID, "user", user.UserLogin)
 }
 
-// handleRunEvents handles GET /runs/{runId}/events (SSE)
 func (a *App) handleRunEvents(rw http.ResponseWriter, req *http.Request, runID string) {
 	if req.Method != http.MethodGet {
 		http.Error(rw, "method not allowed", http.StatusMethodNotAllowed)
@@ -150,21 +128,18 @@ func (a *App) handleRunEvents(rw http.ResponseWriter, req *http.Request, runID s
 
 	ctx := req.Context()
 
-	// Extract user
 	user, err := a.extractUserFromRequest(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
 		return
 	}
 
-	// Get run
 	run, err := a.runManager.GetRun(runID)
 	if err != nil {
 		sendErrorResponse(rw, "Run not found", err, http.StatusNotFound)
 		return
 	}
 
-	// Verify user owns this run
 	run.mu.RLock()
 	runOwner := run.UserLogin
 	run.mu.RUnlock()
@@ -174,11 +149,10 @@ func (a *App) handleRunEvents(rw http.ResponseWriter, req *http.Request, runID s
 		return
 	}
 
-	// Set SSE headers
 	rw.Header().Set("Content-Type", "text/event-stream")
 	rw.Header().Set("Cache-Control", "no-cache")
 	rw.Header().Set("Connection", "keep-alive")
-	rw.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
+	rw.Header().Set("X-Accel-Buffering", "no") 
 	rw.WriteHeader(http.StatusOK)
 
 	flusher, ok := rw.(http.Flusher)
@@ -189,7 +163,6 @@ func (a *App) handleRunEvents(rw http.ResponseWriter, req *http.Request, runID s
 
 	backend.Logger.Info("SSE stream started", "runId", runID, "user", user.UserLogin)
 
-	// Stream events from the run's event channel
 	for {
 		select {
 		case <-ctx.Done():
@@ -198,42 +171,36 @@ func (a *App) handleRunEvents(rw http.ResponseWriter, req *http.Request, runID s
 
 		case event, ok := <-run.EventChan:
 			if !ok {
-				// Channel closed, send final marker and exit
 				fmt.Fprintf(rw, "data: [DONE]\n\n")
 				flusher.Flush()
 				backend.Logger.Info("SSE stream completed", "runId", runID)
 				return
 			}
 
-			// Serialize event to JSON
 			eventJSON, err := json.Marshal(event)
 			if err != nil {
 				backend.Logger.Error("Failed to marshal SSE event", "error", err, "runId", runID)
 				continue
 			}
 
-			// Write SSE event
 			fmt.Fprintf(rw, "data: %s\n\n", string(eventJSON))
 			flusher.Flush()
 		}
 	}
 }
 
-// handlePauseRun handles POST /runs/{runId}/pause
 func (a *App) handlePauseRun(rw http.ResponseWriter, req *http.Request, runID string) {
 	if req.Method != http.MethodPost {
 		http.Error(rw, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract user
 	user, err := a.extractUserFromRequest(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
 		return
 	}
 
-	// Get run and verify ownership
 	run, err := a.runManager.GetRun(runID)
 	if err != nil {
 		sendErrorResponse(rw, "Run not found", err, http.StatusNotFound)
@@ -249,13 +216,11 @@ func (a *App) handlePauseRun(rw http.ResponseWriter, req *http.Request, runID st
 		return
 	}
 
-	// Pause run
 	if err := a.runManager.PauseRun(runID); err != nil {
 		sendErrorResponse(rw, "Failed to pause run", err, http.StatusBadRequest)
 		return
 	}
 
-	// Emit paused event
 	EmitPaused(run.EventChan, runID)
 
 	rw.Header().Set("Content-Type", "application/json")
@@ -267,21 +232,18 @@ func (a *App) handlePauseRun(rw http.ResponseWriter, req *http.Request, runID st
 	backend.Logger.Info("Run paused via API", "runId", runID, "user", user.UserLogin)
 }
 
-// handleResumeRun handles POST /runs/{runId}/resume
 func (a *App) handleResumeRun(rw http.ResponseWriter, req *http.Request, runID string) {
 	if req.Method != http.MethodPost {
 		http.Error(rw, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract user
 	user, err := a.extractUserFromRequest(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
 		return
 	}
 
-	// Get run and verify ownership
 	run, err := a.runManager.GetRun(runID)
 	if err != nil {
 		sendErrorResponse(rw, "Run not found", err, http.StatusNotFound)
@@ -297,13 +259,11 @@ func (a *App) handleResumeRun(rw http.ResponseWriter, req *http.Request, runID s
 		return
 	}
 
-	// Resume run
 	if err := a.runManager.ResumeRun(runID); err != nil {
 		sendErrorResponse(rw, "Failed to resume run", err, http.StatusBadRequest)
 		return
 	}
 
-	// Emit resumed event
 	EmitResumed(run.EventChan, runID)
 
 	rw.Header().Set("Content-Type", "application/json")
@@ -315,21 +275,18 @@ func (a *App) handleResumeRun(rw http.ResponseWriter, req *http.Request, runID s
 	backend.Logger.Info("Run resumed via API", "runId", runID, "user", user.UserLogin)
 }
 
-// handleCancelRun handles POST /runs/{runId}/cancel
 func (a *App) handleCancelRun(rw http.ResponseWriter, req *http.Request, runID string) {
 	if req.Method != http.MethodPost {
 		http.Error(rw, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract user
 	user, err := a.extractUserFromRequest(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
 		return
 	}
 
-	// Get run and verify ownership
 	run, err := a.runManager.GetRun(runID)
 	if err != nil {
 		sendErrorResponse(rw, "Run not found", err, http.StatusNotFound)
@@ -345,13 +302,11 @@ func (a *App) handleCancelRun(rw http.ResponseWriter, req *http.Request, runID s
 		return
 	}
 
-	// Cancel run
 	if err := a.runManager.CancelRun(runID); err != nil {
 		sendErrorResponse(rw, "Failed to cancel run", err, http.StatusBadRequest)
 		return
 	}
 
-	// Emit cancelled event
 	EmitCancelled(run.EventChan, runID, "User requested cancellation")
 
 	rw.Header().Set("Content-Type", "application/json")
@@ -363,21 +318,18 @@ func (a *App) handleCancelRun(rw http.ResponseWriter, req *http.Request, runID s
 	backend.Logger.Info("Run cancelled via API", "runId", runID, "user", user.UserLogin)
 }
 
-// handleRunStatus handles GET /runs/{runId}/status
 func (a *App) handleRunStatus(rw http.ResponseWriter, req *http.Request, runID string) {
 	if req.Method != http.MethodGet {
 		http.Error(rw, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract user
 	user, err := a.extractUserFromRequest(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
 		return
 	}
 
-	// Get run and verify ownership
 	run, err := a.runManager.GetRun(runID)
 	if err != nil {
 		sendErrorResponse(rw, "Run not found", err, http.StatusNotFound)
@@ -400,7 +352,6 @@ func (a *App) handleRunStatus(rw http.ResponseWriter, req *http.Request, runID s
 		return
 	}
 
-	// Build response
 	response := RunStatusResponse{
 		RunID:            runID,
 		ConversationID:   conversationID,
@@ -416,9 +367,7 @@ func (a *App) handleRunStatus(rw http.ResponseWriter, req *http.Request, runID s
 	json.NewEncoder(rw).Encode(response)
 }
 
-// handleRunRoutes routes run-specific endpoints based on path
 func (a *App) handleRunRoutes(rw http.ResponseWriter, req *http.Request) {
-	// Parse path: /runs/{runId}/{action}
 	path := strings.TrimPrefix(req.URL.Path, "/runs/")
 	parts := strings.Split(path, "/")
 
@@ -433,9 +382,7 @@ func (a *App) handleRunRoutes(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// No action means default (depends on method)
 	if len(parts) == 1 {
-		// No specific action, not supported for now
 		http.Error(rw, "action required", http.StatusBadRequest)
 		return
 	}
@@ -458,4 +405,3 @@ func (a *App) handleRunRoutes(rw http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// orchestrateRunFull is implemented in assistant.go
