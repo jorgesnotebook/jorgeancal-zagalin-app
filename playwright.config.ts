@@ -23,27 +23,13 @@ export default defineConfig<PluginOptions>({
   retries: process.env.CI ? 2 : 0,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: 'html',
-  /* Global timeout for each test */
-  timeout: 60000, // 60 seconds per test
-  /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
+  /* Shared settings for all the projects below. See https://playwright.dev/docs/test-options. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
     baseURL: process.env.GRAFANA_URL || 'http://localhost:3000',
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
-
-    /* Screenshot on failure */
-    screenshot: 'only-on-failure',
-
-    /* Video on retry */
-    video: 'retain-on-failure',
-
-    /* Navigation timeout */
-    navigationTimeout: 30000, // 30 seconds for page loads
-
-    /* Action timeout */
-    actionTimeout: 10000, // 10 seconds for actions
   },
 
   /* Configure projects for major browsers */
@@ -60,8 +46,6 @@ export default defineConfig<PluginOptions>({
       use: {
         ...devices['Desktop Chrome'],
         storageState: 'playwright/.auth/admin.json',
-        // More lenient settings for cross-version compatibility
-        viewport: { width: 1280, height: 720 },
       },
       dependencies: ['auth'],
     },
