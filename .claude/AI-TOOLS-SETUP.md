@@ -6,20 +6,20 @@ This document explains the AI-assisted development configuration for this reposi
 
 ```
 zagalin/
-├── .claude/
-│   ├── CLAUDE.md              # Claude Code instructions (comprehensive)
-│   ├── AI-TOOLS-SETUP.md      # This file - AI tools summary
-│   └── settings.local.json    # Claude Code permissions
-├── .openai/
-│   └── INSTRUCTIONS.md        # ChatGPT/Codex copy/paste instructions
-├── .github/
-│   └── copilot-instructions.md # GitHub Copilot instructions
-├── .cursorrules               # Cursor AI instructions
-└── docs/                      # Shared documentation (referenced by all AI tools)
-    ├── development/
-    ├── api/
-    ├── testing/
-    └── ...
+ .claude/
+    CLAUDE.md              # Claude Code instructions (comprehensive)
+    AI-TOOLS-SETUP.md      # This file - AI tools summary
+    settings.local.json    # Claude Code permissions
+ .openai/
+    INSTRUCTIONS.md        # ChatGPT/Codex copy/paste instructions
+ .github/
+    copilot-instructions.md # GitHub Copilot instructions
+ .cursorrules               # Cursor AI instructions
+ docs/                      # Shared documentation (referenced by all AI tools)
+     development/
+     api/
+     testing/
+     ...
 ```
 
 ## AI Tools Supported
@@ -107,8 +107,8 @@ When updating documentation:
 
 ## Benefits
 
-✅ **No duplication**: Single source of truth in `docs/`
-✅ **Consistent guidance**: All AI tools follow same principles
-✅ **Security-first**: Built into every AI tool's instructions
-✅ **KISS mindset**: Prevents over-engineering across all tools
-✅ **Better code quality**: AI-generated code follows project standards
+ **No duplication**: Single source of truth in `docs/`
+ **Consistent guidance**: All AI tools follow same principles
+ **Security-first**: Built into every AI tool's instructions
+ **KISS mindset**: Prevents over-engineering across all tools
+ **Better code quality**: AI-generated code follows project standards

@@ -19,7 +19,6 @@ export function getZagalinConfig(): ZagalinConfig {
     return cachedConfig;
   }
 
-  // Fallback: try to read from localStorage
   try {
     const stored = localStorage.getItem('zagalin-config-cache');
     if (stored) {
@@ -30,7 +29,6 @@ export function getZagalinConfig(): ZagalinConfig {
     console.warn('Failed to read cached config:', e);
   }
 
-  // Final fallback: return default config
   return DEFAULT_CONFIG;
 }
 
@@ -41,7 +39,6 @@ export function getZagalinConfig(): ZagalinConfig {
 export function updateCachedConfig(config: ZagalinConfig): void {
   cachedConfig = config;
 
-  // Also store in localStorage for persistence across page reloads
   try {
     localStorage.setItem('zagalin-config-cache', JSON.stringify(config));
   } catch (e) {

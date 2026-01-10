@@ -37,20 +37,117 @@ import type { ExecutionPlan } from '../../services/frontendPrompts';
 import { needsOrchestration } from '../../services/orchestrationDetector';
 import { isDashboardQuestion, readDashboardPanels, buildDashboardSummaryPrompt } from '../../services/dashboardReader';
 
-// Internal Message type for UI (extends ConversationMessage)
 interface Message extends ConversationMessage {
   actions?: AssistantAction[];
   toolCalls?: ToolCall[];
   artifacts?: Artifact[];
 }
 
-// Helper function to safely render markdown content
+function wrapEvidenceSections(content: string): string {
+  const evidenceCheckPattern = /(Evidence Check:|0\.\s*\*\*Evidence Check\*\*[^\n]*\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
+
+  const availableContextPattern = /(---\s*AVAILABLE CONTEXT\s*---)((?:[\s\S]*?)(?=---\s*UNKNOWN CONTEXT|$))/gi;
+
+  const unknownContextPattern = /(---\s*UNKNOWN CONTEXT\s*---)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
+
+  const investigationMemoryPattern = /(Investigation Memory:|2\.\s*\*\*Investigation Memory\*\*[^\n]*\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
+
+  const metadataPattern = /(\*\*Metadata\*\*:?\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
+
+  const technicalDetailsPattern = /(\*\*Technical Details\*\*:?\n|\*\*How the query works\*\*:?\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
+
+  let processed = content;
+
+  processed = processed.replace(evidenceCheckPattern, (match, header, body) => {
+    return `<details class="evidence-section">
+<summary class="evidence-header">📋 ${header.trim()}</summary>
+<div class="evidence-body">
+
+${body.trim()}
+
+</div>
+</details>
+
+`;
+  });
+
+  processed = processed.replace(availableContextPattern, (match, header, body) => {
+    return `<details class="evidence-section">
+<summary class="evidence-header">✅ Available Context</summary>
+<div class="evidence-body">
+
+${body.trim()}
+
+</div>
+</details>
+
+`;
+  });
+
+  processed = processed.replace(unknownContextPattern, (match, header, body) => {
+    return `<details class="evidence-section">
+<summary class="evidence-header">⚠️ Unknown Context</summary>
+<div class="evidence-body">
+
+${body.trim()}
+
+</div>
+</details>
+
+`;
+  });
+
+  processed = processed.replace(investigationMemoryPattern, (match, header, body) => {
+    return `<details class="evidence-section">
+<summary class="evidence-header">🧠 ${header.trim()}</summary>
+<div class="evidence-body">
+
+${body.trim()}
+
+</div>
+</details>
+
+`;
+  });
+
+  processed = processed.replace(metadataPattern, (match, header, body) => {
+    return `<details class="evidence-section">
+<summary class="evidence-header">ℹ️ ${header.trim()}</summary>
+<div class="evidence-body">
+
+${body.trim()}
+
+</div>
+</details>
+
+`;
+  });
+
+  processed = processed.replace(technicalDetailsPattern, (match, header, body) => {
+    return `<details class="evidence-section">
+<summary class="evidence-header">🔧 ${header.trim()}</summary>
+<div class="evidence-body">
+
+${body.trim()}
+
+</div>
+</details>
+
+`;
+  });
+
+  return processed;
+}
+
 function sanitizeMarkdown(content: string): string {
   try {
-    const rawHtml = marked.parse(content) as string;
+    const contentWithCollapsible = wrapEvidenceSections(content);
+
+    const rawHtml = marked.parse(contentWithCollapsible) as string;
+
     return DOMPurify.sanitize(rawHtml, {
-      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'],
-      ALLOWED_ATTR: ['href', 'title', 'target', 'rel'],
+      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'details', 'summary', 'div'],
+      ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'class'],
     });
   } catch (error) {
     console.error('Markdown sanitization error:', error);
@@ -58,7 +155,7 @@ function sanitizeMarkdown(content: string): string {
   }
 }
 
-export type ChatMode = 'standard' | 'thinking';
+export type ChatMode = 'standard' | 'design';
 
 export function ChatPanel() {
   const s = useStyles2(getStyles);
@@ -70,31 +167,26 @@ export function ChatPanel() {
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
   const [mode, setMode] = useState<ChatMode>('standard');
 
-  // Frontend orchestrator state (for complex query orchestration)
   const [frontendPlan, setFrontendPlan] = useState<ExecutionPlan | null>(null);
   const [frontendCurrentStepIndex, setFrontendCurrentStepIndex] = useState(0);
   const [frontendArtifacts, setFrontendArtifacts] = useState<Artifact[]>([]);
   const [frontendStreamingText, setFrontendStreamingText] = useState('');
   const [isFrontendOrchestrating, setIsFrontendOrchestrating] = useState(false);
 
-  // Simple streaming state (for grafana-llm-app mode without orchestration)
   const [isSimpleStreaming, setIsSimpleStreaming] = useState(false);
   const [simpleStreamingContent, setSimpleStreamingContent] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const vectorSearchRef = useRef(new VectorSearchService());
   const frontendOrchestratorRef = useRef<FrontendOrchestrator | null>(null);
-  const simpleStreamingContentRef = useRef<string>(''); // Accumulates simple streaming content
+  const simpleStreamingContentRef = useRef<string>('');
   const animationFrameRef = useRef<number | null>(null);
-  const displayedLengthRef = useRef<number>(0); // Track displayed length for animation
+  const displayedLengthRef = useRef<number>(0);
 
-  // Get Grafana context
   const { context, hasContext, loading: contextLoading } = useGrafanaContext();
 
-  // Get Zagalin configuration
   const { config: zagalinConfig } = useZagalinConfig();
 
-  // Get conversation management hook
   const {
     messages: conversationMessages,
     addMessage,
@@ -113,17 +205,14 @@ export function ChatPanel() {
   } = useConversation();
 
 
-  // Handle new chat
   const handleNewChat = () => {
     clearCurrent();
     setOptimisticMessages([]);
     createNew(context);
   };
 
-  // Convert conversation messages to UI messages, including optimistic messages
   const messages: Message[] = useMemo(() => [...conversationMessages, ...optimisticMessages], [conversationMessages, optimisticMessages]);
 
-  // Check LLM health on mount
   useEffect(() => {
     const checkHealth = async () => {
       const ready = await isLLMReady();
@@ -135,7 +224,6 @@ export function ChatPanel() {
     checkHealth();
   }, []);
 
-  // Debug: Log context changes
   useEffect(() => {
     if (hasContext) {
       console.log('Zagalin: Context detected', {
@@ -150,14 +238,11 @@ export function ChatPanel() {
     }
   }, [hasContext, context]);
 
-  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, displayedContent]);
 
-  // Smooth streaming display: gradually reveal content as it arrives
   useEffect(() => {
-    // Determine streaming content source based on state
     let streamingContent = '';
     if (isFrontendOrchestrating) {
       streamingContent = frontendStreamingText;
@@ -165,14 +250,12 @@ export function ChatPanel() {
       streamingContent = simpleStreamingContent;
     }
 
-    // If streaming stopped or content cleared, reset via animation frame (not directly)
     if (streamingContent.length === 0) {
       displayedLengthRef.current = 0;
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
       }
-      // Call setState in requestAnimationFrame callback (external system) to avoid cascading renders
       animationFrameRef.current = requestAnimationFrame(() => {
         setDisplayedContent('');
         animationFrameRef.current = null;
@@ -180,16 +263,14 @@ export function ChatPanel() {
       return;
     }
 
-    // Smooth character-by-character reveal
     let lastTime = performance.now();
-    const charsPerSecond = 100; // Fast enough to feel real-time, slow enough to be smooth
+    const charsPerSecond = 100;
     const msPerChar = 1000 / charsPerSecond;
 
     const animate = (currentTime: number) => {
       const elapsed = currentTime - lastTime;
 
       if (displayedLengthRef.current < streamingContent.length) {
-        // Calculate how many characters to add based on time elapsed
         const charsToAdd = Math.max(1, Math.floor(elapsed / msPerChar));
         const newLength = Math.min(
           displayedLengthRef.current + charsToAdd,
@@ -200,13 +281,11 @@ export function ChatPanel() {
         lastTime = currentTime;
         animationFrameRef.current = requestAnimationFrame(animate);
       } else if (displayedLengthRef.current > streamingContent.length) {
-        // Content was reset
         displayedLengthRef.current = streamingContent.length;
         setDisplayedContent(streamingContent);
       }
     };
 
-    // Start animation if we're behind
     if (displayedLengthRef.current < streamingContent.length) {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
@@ -214,7 +293,6 @@ export function ChatPanel() {
       animationFrameRef.current = requestAnimationFrame(animate);
     }
 
-    // Cleanup
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
@@ -228,7 +306,6 @@ export function ChatPanel() {
       return;
     }
 
-    // Health check before sending
     if (llmReady === false) {
       setError('LLM service is not available. Please check your configuration.');
       return;
@@ -244,23 +321,18 @@ export function ChatPanel() {
       timestamp: new Date(),
     };
 
-    // Show message immediately (optimistic update)
     setOptimisticMessages([userMessage]);
     setInput('');
     setError(null);
     setDisplayedContent('');
 
     try {
-      // Save user message to conversation (with context if this is the first message)
-      // MUST await this to ensure conversation is created before assistant responds
       await addMessage(userMessage, context);
 
       console.log('[ChatPanel] Message saved, current conversation:', conversation?.id);
 
-      // Clear optimistic messages once saved
       setOptimisticMessages([]);
 
-      // Enhance query with vector search if available
       let enhancedQuery = userMessage.content;
       if (zagalinConfig.enabledSkills.searchContext) {
         const vectorContext = await vectorSearchRef.current.enhanceQueryWithContext(userMessage.content);
@@ -269,25 +341,21 @@ export function ChatPanel() {
         }
       }
 
-      // Check if this is a dashboard question that needs enriched context
         if (isDashboardQuestion(userMessage.content, context)) {
           console.log('[ChatPanel] Dashboard question detected - using enriched context');
 
-          // Extract dashboard panel data
           const panels = await readDashboardPanels(context);
           console.log(`[ChatPanel] Extracted ${panels.length} panels from dashboard`);
 
-          // Build enriched prompt with actual panel queries
           const enrichedPrompt = buildDashboardSummaryPrompt(userMessage.content, context, panels);
 
-          // Use simple streaming with enriched message
           console.log('[ChatPanel] Starting simple streaming with dashboard context');
           setIsSimpleStreaming(true);
           simpleStreamingContentRef.current = '';
 
           streamAssistantChat({
             message: userMessage.content,
-            enrichedMessage: enrichedPrompt, // Pass enriched version with panel details
+            enrichedMessage: enrichedPrompt,
             history: messages.map(m => ({
               role: m.role,
               content: m.content,
@@ -298,7 +366,7 @@ export function ChatPanel() {
               timeRange: context.timeRange,
               templateVars: context.templateVariables,
             },
-            attachedContexts: conversation?.contexts, // NEW: Include all attached contexts
+            attachedContexts: conversation?.contexts,
           }).subscribe({
             next: (chunk) => {
               if (chunk.chunk) {
@@ -342,28 +410,23 @@ export function ChatPanel() {
             },
           });
 
-          return; // Don't continue to orchestration or other streaming
+          return;
         }
 
-        // Detect if this message needs orchestration
         const shouldOrchestrate = needsOrchestration(userMessage.content);
 
         if (shouldOrchestrate) {
-          // Frontend orchestration mode - structured planning with grafana-llm-app
           console.log('[ChatPanel] Using frontend orchestration mode (complex query)');
 
-          // Reset state
           setIsFrontendOrchestrating(true);
           setFrontendPlan(null);
           setFrontendCurrentStepIndex(0);
           setFrontendArtifacts([]);
           setFrontendStreamingText('');
 
-          // Create orchestrator
           const orchestrator = new FrontendOrchestrator();
           frontendOrchestratorRef.current = orchestrator;
 
-          // Start orchestration
           orchestrator.start(
             enhancedQuery || userMessage.content,
             messages.map(m => ({
@@ -391,7 +454,7 @@ export function ChatPanel() {
 
                 case 'step_started':
                   setFrontendCurrentStepIndex(event.data.stepIndex);
-                  setFrontendStreamingText(''); // Reset for new step
+                  setFrontendStreamingText('');
                   break;
 
                 case 'artifact':
@@ -403,7 +466,6 @@ export function ChatPanel() {
                   break;
 
                 case 'assistant_message':
-                  // Save final message
                   const assistantMessage: ConversationMessage = {
                     id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
                     role: 'assistant',
@@ -432,7 +494,6 @@ export function ChatPanel() {
             },
           });
         } else {
-          // Simple streaming mode - for greetings and simple questions
           console.log('[ChatPanel] Using simple streaming mode (greeting/simple query)');
           setIsSimpleStreaming(true);
           setSimpleStreamingContent('');
@@ -450,7 +511,7 @@ export function ChatPanel() {
               timeRange: context.timeRange,
               templateVars: context.templateVariables,
             },
-            attachedContexts: conversation?.contexts, // NEW: Include all attached contexts
+            attachedContexts: conversation?.contexts,
             mode,
           }).subscribe({
             next: (chunk) => {
@@ -747,7 +808,7 @@ export function ChatPanel() {
           <RadioButtonGroup
             options={[
               { label: '⚡ Standard', value: 'standard', description: 'Fast responses' },
-              { label: '🧠 Deep Thinking', value: 'thinking', description: 'Extended reasoning for complex problems' },
+              { label: '🎨 Design', value: 'design', description: 'Dashboard design with examples and suggestions' },
             ]}
             value={mode}
             onChange={(value) => setMode(value as ChatMode)}
@@ -759,7 +820,7 @@ export function ChatPanel() {
             value={input}
             onChange={e => setInput(e.currentTarget.value)}
             onKeyDown={handleKeyPress}
-            placeholder={mode === 'thinking' ? 'Ask a complex question...' : 'Ask anything...'}
+            placeholder={mode === 'design' ? 'Design a dashboard or suggest improvements...' : 'Ask anything...'}
             rows={2}
             className={s.input}
             disabled={isFrontendOrchestrating || isSimpleStreaming}
@@ -920,12 +981,123 @@ const getStyles = (theme: GrafanaTheme2) => ({
     line-height: 1.5;
     font-size: ${theme.typography.body.fontSize};
 
+    /* Evidence section styles */
+    details.evidence-section {
+      margin: ${theme.spacing(1, 0)};
+      border: 1px solid ${theme.colors.border.weak};
+      border-radius: ${theme.shape.radius.default};
+      background: ${theme.colors.background.secondary};
+      overflow: hidden;
+    }
+
+    summary.evidence-header {
+      padding: ${theme.spacing(1, 1.5)};
+      cursor: pointer;
+      user-select: none;
+      font-weight: ${theme.typography.fontWeightMedium};
+      color: ${theme.colors.text.secondary};
+      background: ${theme.colors.background.secondary};
+      transition: background 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: ${theme.spacing(0.5)};
+
+      &:hover {
+        background: ${theme.colors.emphasize(theme.colors.background.secondary, 0.03)};
+      }
+
+      &::marker {
+        content: '▶ ';
+        font-size: 0.8em;
+      }
+    }
+
+    details.evidence-section[open] summary.evidence-header::marker {
+      content: '▼ ';
+    }
+
+    div.evidence-body {
+      padding: ${theme.spacing(1.5)};
+      border-top: 1px solid ${theme.colors.border.weak};
+      background: ${theme.colors.background.primary};
+      font-size: ${theme.typography.bodySmall.fontSize};
+      color: ${theme.colors.text.secondary};
+    }
+
+    /* Headers */
+    h1, h2, h3, h4, h5, h6 {
+      margin: ${theme.spacing(2, 0, 1, 0)};
+      line-height: 1.3;
+      font-weight: ${theme.typography.fontWeightMedium};
+      color: ${theme.colors.text.primary};
+    }
+
+    h1 {
+      font-size: ${theme.typography.h3.fontSize};
+      border-bottom: 2px solid ${theme.colors.border.medium};
+      padding-bottom: ${theme.spacing(0.5)};
+    }
+
+    h2 {
+      font-size: ${theme.typography.h4.fontSize};
+      border-bottom: 1px solid ${theme.colors.border.weak};
+      padding-bottom: ${theme.spacing(0.5)};
+    }
+
+    h3 {
+      font-size: ${theme.typography.h5.fontSize};
+      color: ${theme.colors.text.primary};
+    }
+
+    h4, h5, h6 {
+      font-size: ${theme.typography.body.fontSize};
+      font-weight: ${theme.typography.fontWeightMedium};
+    }
+
+    /* Paragraphs and spacing */
+    p {
+      margin: ${theme.spacing(1, 0)};
+      line-height: 1.6;
+    }
+
+    /* Lists */
+    ul, ol {
+      margin: ${theme.spacing(1, 0)};
+      padding-left: ${theme.spacing(3)};
+      line-height: 1.6;
+    }
+
+    ul {
+      list-style-type: disc;
+    }
+
+    ol {
+      list-style-type: decimal;
+    }
+
+    li {
+      margin: ${theme.spacing(0.5, 0)};
+      padding-left: ${theme.spacing(0.5)};
+    }
+
+    li > ul, li > ol {
+      margin-top: ${theme.spacing(0.5)};
+    }
+
+    /* Task lists */
+    li input[type="checkbox"] {
+      margin-right: ${theme.spacing(1)};
+    }
+
+    /* Code */
     code {
       background: ${theme.colors.background.primary};
       padding: ${theme.spacing(0.25, 0.5)};
       border-radius: 4px;
-      font-family: monospace;
+      font-family: ${theme.typography.fontFamilyMonospace};
       font-size: 0.9em;
+      color: ${theme.colors.text.primary};
+      border: 1px solid ${theme.colors.border.weak};
     }
 
     pre {
@@ -933,20 +1105,88 @@ const getStyles = (theme: GrafanaTheme2) => ({
       padding: ${theme.spacing(1.5)};
       border-radius: 8px;
       overflow-x: auto;
-      margin: ${theme.spacing(1, 0)};
+      margin: ${theme.spacing(1.5, 0)};
+      border: 1px solid ${theme.colors.border.weak};
 
       code {
         background: transparent;
         padding: 0;
+        border: none;
+        font-size: 0.85em;
+        line-height: 1.5;
       }
     }
 
-    strong {
+    /* Blockquotes */
+    blockquote {
+      border-left: 3px solid ${ZagalinColors.orange};
+      margin: ${theme.spacing(1.5, 0)};
+      padding: ${theme.spacing(1, 0, 1, 2)};
+      background: ${theme.colors.background.secondary};
+      border-radius: 0 4px 4px 0;
+      color: ${theme.colors.text.secondary};
+      font-style: italic;
+
+      p {
+        margin: ${theme.spacing(0.5, 0)};
+      }
+    }
+
+    /* Links */
+    a {
+      color: ${theme.colors.text.link};
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+      transition: border-color 0.2s ease;
+
+      &:hover {
+        border-bottom-color: ${theme.colors.text.link};
+      }
+    }
+
+    /* Horizontal rules */
+    hr {
+      border: none;
+      border-top: 1px solid ${theme.colors.border.weak};
+      margin: ${theme.spacing(2, 0)};
+    }
+
+    /* Tables (if ever used) */
+    table {
+      border-collapse: collapse;
+      margin: ${theme.spacing(1.5, 0)};
+      width: 100%;
+    }
+
+    th, td {
+      border: 1px solid ${theme.colors.border.weak};
+      padding: ${theme.spacing(1)};
+      text-align: left;
+    }
+
+    th {
+      background: ${theme.colors.background.secondary};
       font-weight: ${theme.typography.fontWeightMedium};
+    }
+
+    /* Strong and emphasis */
+    strong {
+      font-weight: ${theme.typography.fontWeightBold};
+      color: ${theme.colors.text.primary};
     }
 
     em {
       font-style: italic;
+      color: ${theme.colors.text.secondary};
+    }
+
+    /* Emojis and icons - ensure consistent size */
+    img.emoji {
+      display: inline-block;
+      height: 1em;
+      width: 1em;
+      margin: 0 0.05em 0 0.1em;
+      vertical-align: -0.1em;
     }
   `,
   messageActions: css`

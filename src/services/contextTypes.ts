@@ -26,8 +26,8 @@ export interface PanelQuery {
     type: string;
     uid: string;
   };
-  expr?: string; // PromQL
-  query?: string; // LogQL or other
+  expr?: string;
+  query?: string;
   queryType?: string;
 }
 
@@ -65,7 +65,7 @@ export interface GrafanaContext {
     email: string;
     orgId: number;
   };
-  dataSourceTypes?: string[]; // Available datasource types
+  dataSourceTypes?: string[];
 }
 
 /**
@@ -86,6 +86,6 @@ export interface AssistantAction {
 export interface AssistantSkill {
   name: string;
   description: string;
-  trigger: string; // e.g., "explain panel", "generate query"
+  trigger: string;
   examples: string[];
 }

@@ -9,14 +9,12 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
-// OtelScope represents the required OTel attributes for query scoping
 type OtelScope struct {
 	ServiceName     string
 	EnvironmentName string
-	Source          string // "context", "defaults", or "missing"
+	Source          string 
 }
 
-// DatasourceType represents supported datasource types
 type DatasourceType string
 
 const (
@@ -26,27 +24,20 @@ const (
 	DatasourceOther      DatasourceType = "other"
 )
 
-// extractOtelScopeFromQuery attempts to extract OTel scope from query labels
-// Supports PromQL, LogQL, and TraceQL syntax
 func (a *App) extractOtelScopeFromQuery(queryReq QueryRequest, dsType DatasourceType) *OtelScope {
 	scope := &OtelScope{Source: "missing"}
 
-	// Parse queries to find service.name and deployment.environment.name labels
 	for _, query := range queryReq.Queries {
-		// Expr is already a string in QueryPayload struct
 		exprStr := query.Expr
 		if exprStr == "" {
-			// Try Query field as fallback
 			exprStr = query.Query
 		}
 		if exprStr == "" {
 			continue
 		}
 
-		// Extract based on datasource type
 		switch dsType {
 		case DatasourcePrometheus, DatasourceLoki:
-			// PromQL/LogQL: service_name="..." or service.name="..."
 			if strings.Contains(exprStr, "service_name=") || strings.Contains(exprStr, "service.name=") {
 				scope.ServiceName = extractLabelValue(exprStr, []string{"service_name", "service.name"})
 			}
@@ -55,7 +46,6 @@ func (a *App) extractOtelScopeFromQuery(queryReq QueryRequest, dsType Datasource
 			}
 
 		case DatasourceTempo:
-			// TraceQL: span.service.name or resource.service.name
 			if strings.Contains(exprStr, "service.name=") || strings.Contains(exprStr, "span.service.name=") || strings.Contains(exprStr, "resource.service.name=") {
 				scope.ServiceName = extractLabelValue(exprStr, []string{"span.service.name", "resource.service.name", "service.name"})
 			}
@@ -64,14 +54,10 @@ func (a *App) extractOtelScopeFromQuery(queryReq QueryRequest, dsType Datasource
 			}
 
 		case DatasourceOther:
-			// For other datasources, try to detect service/environment in query text
-			// Look for common patterns but don't inject
 			if strings.Contains(exprStr, "service") && (strings.Contains(exprStr, "name") || strings.Contains(exprStr, "=")) {
-				// Query mentions service - consider it present
 				scope.ServiceName = "detected"
 			}
 			if strings.Contains(exprStr, "environment") || strings.Contains(exprStr, "env") {
-				// Query mentions environment - consider it present
 				scope.EnvironmentName = "detected"
 			}
 		}
@@ -84,11 +70,8 @@ func (a *App) extractOtelScopeFromQuery(queryReq QueryRequest, dsType Datasource
 	return scope
 }
 
-// extractLabelValue extracts the value of a label from a query expression
-// Handles both label_name="value" and label_name=~"regex" formats
 func extractLabelValue(expr string, labelNames []string) string {
 	for _, labelName := range labelNames {
-		// Look for label_name="value" or label_name=~"value"
 		patterns := []string{
 			labelName + `="`,
 			labelName + `=~"`,
@@ -108,13 +91,11 @@ func extractLabelValue(expr string, labelNames []string) string {
 	return ""
 }
 
-// applyOtelScopeDefaults applies default OTel scope if enforcement is enabled
 func (a *App) applyOtelScopeDefaults(scope *OtelScope) {
 	if a.settings == nil || !a.settings.OtelEnforcement.Enabled {
 		return
 	}
 
-	// Apply defaults if values are missing
 	if scope.ServiceName == "" && a.settings.OtelEnforcement.DefaultServiceName != "" {
 		scope.ServiceName = a.settings.OtelEnforcement.DefaultServiceName
 		scope.Source = "defaults"
@@ -128,10 +109,9 @@ func (a *App) applyOtelScopeDefaults(scope *OtelScope) {
 	}
 }
 
-// validateOtelScope validates that required OTel attributes are present
 func (a *App) validateOtelScope(scope *OtelScope) error {
 	if a.settings == nil || !a.settings.OtelEnforcement.Enabled {
-		return nil // Enforcement disabled
+		return nil 
 	}
 
 	var missing []string
@@ -157,28 +137,23 @@ func (a *App) validateOtelScope(scope *OtelScope) error {
 	return nil
 }
 
-// injectOtelScope injects OTel scope labels into queries based on datasource type
-// Handles PromQL, LogQL, and TraceQL. For other datasources, no injection is performed.
 func (a *App) injectOtelScope(queryReq *QueryRequest, scope *OtelScope, dsType DatasourceType) error {
 	if a.settings == nil || !a.settings.OtelEnforcement.Enabled {
 		return nil
 	}
 
 	if scope.ServiceName == "" && scope.EnvironmentName == "" {
-		return nil // Nothing to inject
+		return nil 
 	}
 
-	// For other datasources, don't inject - validation only
 	if dsType == DatasourceOther {
 		backend.Logger.Debug("Skipping injection for non-standard datasource", "datasourceType", dsType)
 		return nil
 	}
 
 	for i := range queryReq.Queries {
-		// Expr is already a string in QueryPayload struct
 		exprStr := queryReq.Queries[i].Expr
 		if exprStr == "" {
-			// Try Query field as fallback
 			exprStr = queryReq.Queries[i].Query
 		}
 		if exprStr == "" {
@@ -187,10 +162,8 @@ func (a *App) injectOtelScope(queryReq *QueryRequest, scope *OtelScope, dsType D
 
 		var injectedExpr string
 
-		// Get or discover OTel label format for this datasource
 		labelFormat := a.otelRegistry.GetFormat(queryReq.Datasource)
 		if labelFormat == nil {
-			// First time seeing this datasource - discover label format
 			labelFormat = a.DiscoverOTelLabels(context.Background(), queryReq.Datasource, dsType)
 			a.otelRegistry.SetFormat(queryReq.Datasource, labelFormat)
 
@@ -205,21 +178,17 @@ func (a *App) injectOtelScope(queryReq *QueryRequest, scope *OtelScope, dsType D
 
 		switch dsType {
 		case DatasourcePrometheus, DatasourceLoki:
-			// PromQL/LogQL: Inject as metric/stream labels using discovered format
 			labels := BuildOTelLabels(labelFormat, scope.ServiceName, scope.EnvironmentName)
 			injectedExpr = injectLabelsIntoQuery(exprStr, labels)
 
 		case DatasourceTempo:
-			// TraceQL: Inject as span selectors using discovered format
 			spanSelectors := BuildOTelLabels(labelFormat, scope.ServiceName, scope.EnvironmentName)
 			injectedExpr = injectTraceQLSelectors(exprStr, spanSelectors)
 
 		default:
-			// Unknown type - skip injection
 			continue
 		}
 
-		// Update the appropriate field
 		if queryReq.Queries[i].Expr != "" {
 			queryReq.Queries[i].Expr = injectedExpr
 		} else {
@@ -237,8 +206,6 @@ func (a *App) injectOtelScope(queryReq *QueryRequest, scope *OtelScope, dsType D
 	return nil
 }
 
-// injectLabelsIntoQuery injects label selectors into a PromQL/LogQL query
-// This is a simplified implementation - in production, use a proper parser
 func injectLabelsIntoQuery(expr string, labels []string) string {
 	if len(labels) == 0 {
 		return expr
@@ -246,14 +213,9 @@ func injectLabelsIntoQuery(expr string, labels []string) string {
 
 	labelsStr := strings.Join(labels, ",")
 
-	// For PromQL: metric_name{existing_labels} -> metric_name{existing_labels,injected_labels}
-	// For LogQL: {existing_labels} -> {existing_labels,injected_labels}
 
-	// Find the first { in the query
 	openBrace := strings.Index(expr, "{")
 	if openBrace == -1 {
-		// No labels in query, add them: metric_name -> metric_name{injected_labels}
-		// Find where the metric name ends (space, [, or end of string)
 		end := len(expr)
 		for i, ch := range expr {
 			if ch == ' ' || ch == '[' || ch == '(' {
@@ -264,26 +226,20 @@ func injectLabelsIntoQuery(expr string, labels []string) string {
 		return expr[:end] + "{" + labelsStr + "}" + expr[end:]
 	}
 
-	// Find the matching closing brace
 	closeBrace := strings.Index(expr[openBrace:], "}")
 	if closeBrace == -1 {
-		return expr // Malformed query, don't modify
+		return expr 
 	}
 	closeBrace += openBrace
 
-	// Check if there are existing labels
 	existingLabels := strings.TrimSpace(expr[openBrace+1 : closeBrace])
 	if existingLabels == "" {
-		// Empty labels: {} -> {injected_labels}
 		return expr[:openBrace+1] + labelsStr + expr[closeBrace:]
 	}
 
-	// Existing labels: {label1="value1"} -> {label1="value1",injected_labels}
 	return expr[:closeBrace] + "," + labelsStr + expr[closeBrace:]
 }
 
-// injectTraceQLSelectors injects span selectors into a TraceQL query
-// TraceQL syntax: {span.service.name="service" && span.http.method="GET"}
 func injectTraceQLSelectors(expr string, selectors []string) string {
 	if len(selectors) == 0 {
 		return expr
@@ -291,32 +247,25 @@ func injectTraceQLSelectors(expr string, selectors []string) string {
 
 	selectorsStr := strings.Join(selectors, " && ")
 
-	// Find the first { in the query
 	openBrace := strings.Index(expr, "{")
 	if openBrace == -1 {
-		// No selectors in query, add them: {} -> {injected_selectors}
 		return "{" + selectorsStr + "}"
 	}
 
-	// Find the matching closing brace
 	closeBrace := strings.Index(expr[openBrace:], "}")
 	if closeBrace == -1 {
-		return expr // Malformed query, don't modify
+		return expr 
 	}
 	closeBrace += openBrace
 
-	// Check if there are existing selectors
 	existingSelectors := strings.TrimSpace(expr[openBrace+1 : closeBrace])
 	if existingSelectors == "" {
-		// Empty selectors: {} -> {injected_selectors}
 		return expr[:openBrace+1] + selectorsStr + expr[closeBrace:]
 	}
 
-	// Existing selectors: {span.foo="bar"} -> {span.foo="bar" && injected_selectors}
 	return expr[:closeBrace] + " && " + selectorsStr + expr[closeBrace:]
 }
 
-// logOtelScopeUsage logs the OTel scope usage for audit purposes
 func (a *App) logOtelScopeUsage(user *UserIdentity, scope *OtelScope, datasource string) {
 	if scope.Source == "defaults" {
 		backend.Logger.Info("OTel scope fallback applied",
@@ -337,7 +286,6 @@ func (a *App) logOtelScopeUsage(user *UserIdentity, scope *OtelScope, datasource
 	}
 }
 
-// MarshalJSON implements json.Marshaler for OtelScope (for logging)
 func (s *OtelScope) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]string{
 		"serviceName":     s.ServiceName,

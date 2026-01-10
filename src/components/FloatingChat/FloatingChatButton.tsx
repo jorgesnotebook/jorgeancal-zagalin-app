@@ -22,30 +22,24 @@ export function FloatingChatButton() {
   const s = useStyles2(getStyles);
   const [isOpen, setIsOpen] = useState(false);
   const [panelPosition, setPanelPosition] = useState<Position>(() => {
-    // Load saved chat panel position from localStorage
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
         return JSON.parse(saved);
       } catch (e) {
-        // Ignore parse errors
       }
     }
-    // Default position for chat panel (bottom-right with some offset)
     return { x: window.innerWidth - 470, y: window.innerHeight - 620 };
   });
 
   const [panelSize, setPanelSize] = useState<Size>(() => {
-    // Load saved chat panel size from localStorage
     const saved = localStorage.getItem(SIZE_STORAGE_KEY);
     if (saved) {
       try {
         return JSON.parse(saved);
       } catch (e) {
-        // Ignore parse errors
       }
     }
-    // Default size for chat panel
     return { width: 450, height: 600 };
   });
 
@@ -59,9 +53,7 @@ export function FloatingChatButton() {
   };
 
   const handlePanelMouseDown = (e: React.MouseEvent) => {
-    // Only start drag from the chat panel header
     const target = e.target as HTMLElement;
-    // Allow dragging only if clicking on the header area, not on buttons
     if (target.closest('button')) {
       return;
     }
@@ -94,7 +86,6 @@ export function FloatingChatButton() {
         const newX = e.clientX - dragOffset.x;
         const newY = e.clientY - dragOffset.y;
 
-        // Keep within screen bounds
         const maxX = window.innerWidth - panelSize.width;
         const maxY = window.innerHeight - panelSize.height;
 
@@ -135,14 +126,12 @@ export function FloatingChatButton() {
     };
   }, [isDragging, dragOffset, isResizing, resizeStart, panelSize.width, panelSize.height]);
 
-  // Save panel position to localStorage when dragging stops
   useEffect(() => {
     if (!isDragging) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(panelPosition));
     }
   }, [isDragging, panelPosition]);
 
-  // Save panel size to localStorage when resizing stops
   useEffect(() => {
     if (!isResizing) {
       localStorage.setItem(SIZE_STORAGE_KEY, JSON.stringify(panelSize));

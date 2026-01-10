@@ -20,7 +20,6 @@ const STORAGE_KEY = 'zagalin-config';
 
 export function ConfigPage() {
   const s = useStyles2(getStyles);
-  // Load config from localStorage on mount using lazy initialization
   const [config, setConfig] = useState<ZagalinConfig>(() => {
     const savedConfig = localStorage.getItem(STORAGE_KEY);
     if (savedConfig) {
@@ -142,10 +141,12 @@ export function ConfigPage() {
                   min={0}
                   max={1}
                   step={0.1}
-                  value={config.temperature}
-                  onChange={(value) => updateConfig({ temperature: value })}
+                  value={config.standardMode.temperature}
+                  onChange={(value) => updateConfig({
+                    standardMode: { ...config.standardMode, temperature: value }
+                  })}
                 />
-                <span className={s.sliderValue}>{config.temperature.toFixed(1)}</span>
+                <span className={s.sliderValue}>{config.standardMode.temperature.toFixed(1)}</span>
               </div>
               <div className={s.sliderLabels}>
                 <span>Factual</span>
@@ -166,8 +167,10 @@ export function ConfigPage() {
                 { label: '3000 tokens (~2250 words)', value: 3000 },
                 { label: '4000 tokens (~3000 words)', value: 4000 },
               ]}
-              value={config.maxTokens}
-              onChange={(option) => updateConfig({ maxTokens: option.value as number })}
+              value={config.standardMode.maxTokens}
+              onChange={(option) => updateConfig({
+                standardMode: { ...config.standardMode, maxTokens: option.value as number }
+              })}
               width={50}
             />
           </Field>

@@ -1,33 +1,28 @@
 package plugin
 
-// Tool represents an LLM function calling tool
 type Tool struct {
 	Type     string   `json:"type"`
 	Function Function `json:"function"`
 }
 
-// Function represents a function definition for LLM tool use
 type Function struct {
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
 	Parameters  interface{} `json:"parameters"`
 }
 
-// ToolParameters represents the JSON schema for function parameters
 type ToolParameters struct {
 	Type       string                        `json:"type"`
 	Properties map[string]PropertyDefinition `json:"properties"`
 	Required   []string                      `json:"required,omitempty"`
 }
 
-// PropertyDefinition represents a parameter property schema
 type PropertyDefinition struct {
 	Type        string   `json:"type"`
 	Description string   `json:"description"`
 	Enum        []string `json:"enum,omitempty"`
 }
 
-// ZAGALIN_TOOLS contains all available function calling tools
 var ZAGALIN_TOOLS = []Tool{
 	{
 		Type: "function",
@@ -54,7 +49,7 @@ var ZAGALIN_TOOLS = []Tool{
 		Type: "function",
 		Function: Function{
 			Name:        "create_promql_query",
-			Description: "Generate a PromQL query for Prometheus metrics",
+			Description: "Generate a PromQL query for Prometheus metrics. CRITICAL: Only use metric names from the datasource metadata provided in the system prompt. If metric is not listed, ask user for clarification.",
 			Parameters: ToolParameters{
 				Type: "object",
 				Properties: map[string]PropertyDefinition{
@@ -84,7 +79,7 @@ var ZAGALIN_TOOLS = []Tool{
 		Type: "function",
 		Function: Function{
 			Name:        "create_logql_query",
-			Description: "Generate a LogQL query for Loki logs",
+			Description: "Generate a LogQL query for Loki logs. CRITICAL: Only use log stream selectors and labels from the datasource metadata. If stream is not listed, ask user for clarification.",
 			Parameters: ToolParameters{
 				Type: "object",
 				Properties: map[string]PropertyDefinition{
@@ -176,25 +171,19 @@ var ZAGALIN_TOOLS = []Tool{
 	},
 }
 
-// GetTools returns the tools to send to the LLM
-// If functionCalling is disabled, returns nil
-// Tools are dynamically built based on settings (e.g., OTel enforcement)
 func GetTools(functionCallingEnabled bool, settings *Settings) []Tool {
 	if !functionCallingEnabled {
 		return nil
 	}
 
-	// Build tools dynamically based on settings
 	tools := make([]Tool, 0, len(ZAGALIN_TOOLS))
 
 	for _, tool := range ZAGALIN_TOOLS {
-		// For query generation tools, conditionally add OTel parameters
 		if tool.Function.Name == "create_promql_query" {
 			tools = append(tools, buildPromQLTool(settings))
 		} else if tool.Function.Name == "create_logql_query" {
 			tools = append(tools, buildLogQLTool(settings))
 		} else {
-			// Other tools remain unchanged
 			tools = append(tools, tool)
 		}
 	}
@@ -202,7 +191,6 @@ func GetTools(functionCallingEnabled bool, settings *Settings) []Tool {
 	return tools
 }
 
-// buildPromQLTool builds the PromQL tool with optional OTel parameters
 func buildPromQLTool(settings *Settings) Tool {
 	props := map[string]PropertyDefinition{
 		"metric": {
@@ -226,7 +214,6 @@ func buildPromQLTool(settings *Settings) Tool {
 
 	description := "Generate a PromQL query for Prometheus metrics"
 
-	// Add OTel parameters only if enforcement is enabled
 	if settings != nil && settings.OtelEnforcement.Enabled {
 		props["serviceName"] = PropertyDefinition{
 			Type:        "string",
@@ -253,7 +240,6 @@ func buildPromQLTool(settings *Settings) Tool {
 	}
 }
 
-// buildLogQLTool builds the LogQL tool with optional OTel parameters
 func buildLogQLTool(settings *Settings) Tool {
 	props := map[string]PropertyDefinition{
 		"logStream": {
@@ -273,7 +259,6 @@ func buildLogQLTool(settings *Settings) Tool {
 
 	description := "Generate a LogQL query for Loki logs"
 
-	// Add OTel parameters only if enforcement is enabled
 	if settings != nil && settings.OtelEnforcement.Enabled {
 		props["serviceName"] = PropertyDefinition{
 			Type:        "string",

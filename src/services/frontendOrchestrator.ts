@@ -16,8 +16,8 @@ import {
   buildSynthesisPrompt,
   parsePlanFromResponse,
 } from './frontendPrompts';
+import { getZagalinConfig } from './configHelper';
 
-// Event types for orchestration
 export type OrchestratorEventType =
   | 'run_started'
   | 'plan'
@@ -70,14 +70,12 @@ export class FrontendOrchestrator {
       this.stepResults = [];
       this.currentStepIndex = 0;
 
-      // Emit run started
       subscriber.next({
         type: 'run_started',
         timestamp: new Date(),
         data: { message: 'Starting investigation' },
       });
 
-      // Phase 1: Planning
       this.executePlanningPhase(message, history, context, subscriber)
         .then(() => {
           if (this.cancelled) {
@@ -85,7 +83,6 @@ export class FrontendOrchestrator {
             return;
           }
 
-          // Phase 2: Execute steps
           return this.executeStepsPhase(message, history, context, subscriber);
         })
         .then(() => {
@@ -94,11 +91,9 @@ export class FrontendOrchestrator {
             return;
           }
 
-          // Phase 3: Synthesize results
           return this.executeSynthesisPhase(message, context, subscriber);
         })
         .then(() => {
-          // Emit final event
           subscriber.next({
             type: 'final',
             timestamp: new Date(),
@@ -146,23 +141,19 @@ export class FrontendOrchestrator {
       data: { message: 'Creating execution plan...' },
     });
 
-    // Build planning messages
     const planningMessages = [
       { role: 'system' as const, content: PLANNING_SYSTEM_PROMPT },
       { role: 'user' as const, content: buildPlanningPrompt(message, context) },
     ];
 
-    // Call grafana-llm-app for planning
     const planResponse = await this.callGrafanaLLM(planningMessages);
 
-    // Parse plan
     this.plan = parsePlanFromResponse(planResponse);
 
     if (!this.plan) {
       throw new Error('Failed to generate execution plan');
     }
 
-    // Convert to PlannedSteps
     this.steps = this.plan.steps.map((step, idx) => ({
       index: idx,
       title: step.title,
@@ -170,7 +161,6 @@ export class FrontendOrchestrator {
       status: 'pending' as const,
     }));
 
-    // Emit plan event
     subscriber.next({
       type: 'plan',
       timestamp: new Date(),
@@ -203,10 +193,8 @@ export class FrontendOrchestrator {
       this.currentStepIndex = i;
       const step = this.steps[i];
 
-      // Update step status
       step.status = 'in_progress';
 
-      // Emit step started
       subscriber.next({
         type: 'step_started',
         timestamp: new Date(),
@@ -218,7 +206,6 @@ export class FrontendOrchestrator {
       });
 
       try {
-        // Build step prompt with previous findings
         const stepPromptContent = buildStepPrompt(
           i,
           step.title,
@@ -230,7 +217,6 @@ export class FrontendOrchestrator {
 
         const stepMessages = [{ role: 'user' as const, content: stepPromptContent }];
 
-        // Execute step - stream response
         let stepContent = '';
         await this.streamGrafanaLLM(stepMessages, (chunk) => {
           if (chunk) {
@@ -243,13 +229,11 @@ export class FrontendOrchestrator {
           }
         });
 
-        // Store step result
         this.stepResults.push({
           title: step.title,
           content: stepContent,
         });
 
-        // Extract artifacts from step content
         const stepArtifacts = this.extractArtifacts(stepContent);
         for (const artifact of stepArtifacts) {
           this.artifacts.push(artifact);
@@ -260,10 +244,8 @@ export class FrontendOrchestrator {
           });
         }
 
-        // Update step status
         step.status = 'completed';
 
-        // Emit step done
         subscriber.next({
           type: 'step_done',
           timestamp: new Date(),
@@ -286,7 +268,6 @@ export class FrontendOrchestrator {
             error: error instanceof Error ? error.message : 'Step failed',
           },
         });
-        // Continue with next step
       }
     }
   }
@@ -311,7 +292,6 @@ export class FrontendOrchestrator {
       throw new Error('No plan available for synthesis');
     }
 
-    // Build synthesis prompt
     const synthesisPromptContent = buildSynthesisPrompt(
       message,
       this.plan.goal,
@@ -321,10 +301,8 @@ export class FrontendOrchestrator {
 
     const synthesisMessages = [{ role: 'user' as const, content: synthesisPromptContent }];
 
-    // Call LLM for final synthesis
     const finalMessage = await this.callGrafanaLLM(synthesisMessages);
 
-    // Emit assistant message
     subscriber.next({
       type: 'assistant_message',
       timestamp: new Date(),
@@ -341,6 +319,9 @@ export class FrontendOrchestrator {
    * Call grafana-llm-app (non-streaming)
    */
   private async callGrafanaLLM(messages: AssistantMessage[]): Promise<string> {
+    const config = getZagalinConfig();
+    const standardConfig = config.standardMode;
+
     const response = await fetch('/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -348,11 +329,11 @@ export class FrontendOrchestrator {
       },
       credentials: 'same-origin',
       body: JSON.stringify({
-        model: 'gpt-4o-mini', // grafana-llm-app will use configured model
+        model: 'gpt-4o-mini',
         messages: messages,
         stream: false,
-        temperature: 0.3, // Lower for structured output
-        max_tokens: 2000,
+        temperature: Math.max(0.3, standardConfig.temperature - 0.2),
+        max_tokens: standardConfig.maxTokens,
       }),
     });
 
@@ -372,6 +353,9 @@ export class FrontendOrchestrator {
     messages: AssistantMessage[],
     onChunk: (chunk: string) => void
   ): Promise<void> {
+    const config = getZagalinConfig();
+    const standardConfig = config.standardMode;
+
     const response = await fetch('/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -383,8 +367,8 @@ export class FrontendOrchestrator {
         model: 'gpt-4o-mini',
         messages: messages,
         stream: true,
-        temperature: 0.7,
-        max_tokens: 2000,
+        temperature: standardConfig.temperature,
+        max_tokens: standardConfig.maxTokens,
       }),
     });
 
@@ -449,7 +433,6 @@ export class FrontendOrchestrator {
   private extractArtifacts(text: string): Artifact[] {
     const artifacts: Artifact[] = [];
 
-    // Extract PromQL queries from markdown code blocks
     const promqlPattern = /```(?:promql|prometheus)\s*\n([\s\S]+?)\n```/gi;
     let match;
 
@@ -469,7 +452,6 @@ export class FrontendOrchestrator {
       }
     }
 
-    // Extract LogQL queries from markdown code blocks
     const logqlPattern = /```(?:logql|loki)\s*\n([\s\S]+?)\n```/gi;
 
     while ((match = logqlPattern.exec(text)) !== null) {
@@ -488,7 +470,6 @@ export class FrontendOrchestrator {
       }
     }
 
-    // Extract TraceQL queries from markdown code blocks
     const traceqlPattern = /```(?:traceql|tempo)\s*\n([\s\S]+?)\n```/gi;
 
     while ((match = traceqlPattern.exec(text)) !== null) {
@@ -507,7 +488,6 @@ export class FrontendOrchestrator {
       }
     }
 
-    // Extract inline PromQL queries (rate(...), sum(...), etc.)
     const inlinePromQLPattern = /\b(rate|sum|avg|count|histogram_quantile|increase)\([^)]+\)(?:\{[^}]+\})?(?:\[[^\]]+\])?/g;
 
     while ((match = inlinePromQLPattern.exec(text)) !== null) {
@@ -526,7 +506,6 @@ export class FrontendOrchestrator {
       }
     }
 
-    // Extract inline LogQL queries ({...})
     const inlineLogQLPattern = /\{[^}]+\}\s*(?:\|[^|\n]+)*/g;
 
     while ((match = inlineLogQLPattern.exec(text)) !== null) {
@@ -545,7 +524,6 @@ export class FrontendOrchestrator {
       }
     }
 
-    // Extract trace IDs (hex strings 16-32 chars)
     const traceIDPattern = /\b[0-9a-f]{16,32}\b/gi;
     const seenTraceIDs = new Set<string>();
 

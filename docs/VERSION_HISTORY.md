@@ -84,29 +84,29 @@ Track when major features were introduced:
 | Feature | v0.0.1 | v0.0.2 | v0.0.3 (planned) |
 |---------|--------|--------|------------------|
 | **Core** |
-| Context-aware chat | ✅ | ✅ | ✅ |
-| Floating chat UI | ✅ | ✅ | ✅ |
-| Query generation | ✅ | ✅ | ✅ |
-| Skills system | ✅ | ✅ | ✅ (enhanced) |
+| Context-aware chat |  |  |  |
+| Floating chat UI |  |  |  |
+| Query generation |  |  |  |
+| Skills system |  |  |  (enhanced) |
 | **Security** |
-| Query validation | ❌ | ✅ | ✅ |
-| OTel enforcement | ❌ | ✅ | ✅ |
-| Datasource governance | ❌ | ✅ | ✅ |
-| Audit logging | ❌ | ✅ | ✅ |
+| Query validation |  |  |  |
+| OTel enforcement |  |  |  |
+| Datasource governance |  |  |  |
+| Audit logging |  |  |  |
 | **Storage** |
-| Conversation history | ❌ | ✅ | ✅ |
-| Export (JSON/Markdown) | ❌ | 🚧 Placeholder | ✅ |
+| Conversation history |  |  |  |
+| Export (JSON/Markdown) |  |  Placeholder |  |
 | **Orchestration** |
-| Simple streaming | ✅ | ✅ | ✅ |
-| Frontend orchestration | ❌ | 🚧 In progress | ✅ |
-| Planning & steps | ❌ | 🚧 In progress | ✅ |
-| Artifact extraction | ❌ | 🚧 In progress | ✅ |
+| Simple streaming |  |  |  |
+| Frontend orchestration |  |  In progress |  |
+| Planning & steps |  |  In progress |  |
+| Artifact extraction |  |  In progress |  |
 | **Dev Experience** |
-| AI dev tools | ❌ | ✅ | ✅ |
-| Local CI pipeline | ❌ | ✅ | ✅ |
-| Pre-commit hooks | ❌ | ✅ | ✅ |
+| AI dev tools |  |  |  |
+| Local CI pipeline |  |  |  |
+| Pre-commit hooks |  |  |  |
 
-Legend: ✅ Stable | 🚧 Beta/Partial | ❌ Not Available
+Legend:  Stable |  Beta/Partial |  Not Available
 
 ---
 
@@ -114,20 +114,20 @@ Legend: ✅ Stable | 🚧 Beta/Partial | ❌ Not Available
 
 ```
 2025-12-24: v0.0.1 "Foundation"
-    └── Core AI assistant capabilities
-        └── Context awareness, query generation, floating UI
+     Core AI assistant capabilities
+         Context awareness, query generation, floating UI
 
 2025-12-27: v0.0.2 "Security & Governance"
-    └── Production-ready security controls
-        └── Query validation, OTel enforcement, governance
+     Production-ready security controls
+         Query validation, OTel enforcement, governance
 
 2026-01 (planned): v0.0.3 "Intelligence & Orchestration"
-    └── Structured investigation workflows
-        └── Planning, step execution, artifacts, smart routing
+     Structured investigation workflows
+         Planning, step execution, artifacts, smart routing
 
 2026-Q1 (planned): v1.0.0 "Production Maturity"
-    └── Feature-complete, battle-tested, documented
-        └── Performance optimizations, advanced features
+     Feature-complete, battle-tested, documented
+         Performance optimizations, advanced features
 ```
 
 ---
@@ -254,8 +254,8 @@ No deprecations yet. All features introduced in v0.0.1 are still active and main
 
 | Zagalin Version | Grafana Versions | grafana-llm-app | Node.js | Go | Status |
 |-----------------|------------------|-----------------|---------|-----|--------|
-| 0.0.2 | 10.4.0 - 12.x | 1.0.0+ | 22+ | 1.21+ | ✅ Current |
-| 0.0.1 | 10.4.0 - 12.x | 1.0.0+ | 22+ | 1.21+ | ✅ Supported |
+| 0.0.2 | 10.4.0 - 12.x | 1.0.0+ | 22+ | 1.21+ |  Current |
+| 0.0.1 | 10.4.0 - 12.x | 1.0.0+ | 22+ | 1.21+ |  Supported |
 
 **Support Policy**:
 - Latest version: Full support (bug fixes, features)

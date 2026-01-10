@@ -12,7 +12,6 @@
 export function needsOrchestration(message: string): boolean {
   const lowerMessage = message.toLowerCase().trim();
 
-  // Simple greetings - no orchestration needed
   const greetings = [
     'hi',
     'hello',
@@ -29,7 +28,6 @@ export function needsOrchestration(message: string): boolean {
     return false;
   }
 
-  // Simple meta questions - no orchestration needed
   const metaQuestions = [
     'what can you do',
     'what are your capabilities',
@@ -45,13 +43,10 @@ export function needsOrchestration(message: string): boolean {
     return false;
   }
 
-  // Very short messages (< 10 chars) usually don't need orchestration
   if (lowerMessage.length < 10) {
     return false;
   }
 
-  // IMPORTANT: Check dashboard view questions FIRST before investigation keywords
-  // Dashboard viewing takes priority over investigation - they're asking about what's VISIBLE
   const dashboardViewQuestions = [
     'what am i seeing',
     'what do i see',
@@ -80,10 +75,9 @@ export function needsOrchestration(message: string): boolean {
   ];
 
   if (dashboardViewQuestions.some((q) => lowerMessage.includes(q))) {
-    return false; // Use simple streaming to directly answer about visible panels
+    return false;
   }
 
-  // Keywords that indicate need for investigation/orchestration
   const orchestrationKeywords = [
     'why',
     'investigate',
@@ -111,14 +105,12 @@ export function needsOrchestration(message: string): boolean {
     'dashboard',
   ];
 
-  // If message contains investigation keywords AND is longer than 20 chars, use orchestration
   const hasInvestigationKeyword = orchestrationKeywords.some((keyword) => lowerMessage.includes(keyword));
 
   if (hasInvestigationKeyword && lowerMessage.length > 20) {
     return true;
   }
 
-  // Query generation requests need orchestration
   const queryKeywords = [
     'query for',
     'promql',
@@ -133,11 +125,9 @@ export function needsOrchestration(message: string): boolean {
     return true;
   }
 
-  // Default: for medium-long messages (> 30 chars), assume they might need orchestration
   if (lowerMessage.length > 30) {
     return true;
   }
 
-  // Short messages without investigation keywords - use simple streaming
   return false;
 }

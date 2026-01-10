@@ -17,7 +17,7 @@ test('should be possible to view app configuration', async ({ appConfigPage, pag
     await expect(configHeading).toBeVisible({ timeout: 10000 });
 
     // If config page loaded successfully, verify all sections
-    await expect(page.locator('text=Personality & Behavior').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=LLM Configuration').first()).toBeVisible({ timeout: 5000 });
     await expect(page.locator('text=Skills & Features').first()).toBeVisible({ timeout: 5000 });
     await expect(page.locator('text=UI Preferences').first()).toBeVisible({ timeout: 5000 });
     await expect(page.locator('button:has-text("Save Configuration")').first()).toBeVisible({ timeout: 5000 });

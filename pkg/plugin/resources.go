@@ -43,7 +43,6 @@ func (a *App) handleGetSettings(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Return plugin settings (jsonData only, no secure fields)
 	settings := map[string]interface{}{
 		"jsonData": map[string]interface{}{},
 	}
@@ -66,28 +65,21 @@ func (a *App) handleGetSettings(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// handleSetupStatus returns the setup status of the plugin
-// This helps users understand what configuration is needed
 func (a *App) handleSetupStatus(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Check if service account token is configured
 	hasServiceAccountToken := false
 	hasLLMConfig := false
 	setupComplete := false
 
 	if a.settings != nil {
 		hasServiceAccountToken = a.settings.ServiceAccountToken != ""
-		// Check if LLM is configured (either through grafana-llm-app or direct)
 		hasLLMConfig = a.settings.LLMBackend != "" || a.settings.LLMProvider != ""
 	}
 
-	// Setup is complete if we have either:
-	// 1. Service account token (recommended for production)
-	// 2. Or if we're using grafana-llm-app backend (may work with session auth in dev)
 	setupComplete = hasServiceAccountToken || (a.settings != nil && a.settings.LLMBackend == "grafana-llm-app")
 
 	status := map[string]interface{}{
@@ -148,7 +140,6 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("/llm/chat", a.handleLLMChat)
 
-	// Run-based orchestration endpoints
 	mux.HandleFunc("/runs/start", a.handleStartRun)
 	mux.HandleFunc("/runs/", a.handleRunRoutes)
 }
@@ -218,14 +209,12 @@ func (a *App) handleContextRefresh(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Extract user identity for authentication and rate limiting
 	user, err := extractUserIdentity(req)
 	if err != nil {
 		sendErrorResponse(w, "Authentication required", err, http.StatusUnauthorized)
 		return
 	}
 
-	// Apply rate limiting per user (reuse existing guardrails)
 	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
 		if !a.guardrails.rateLimiter.Allow(user.UserLogin) {
 			backend.Logger.Warn("Rate limit exceeded for context refresh", "user", user.UserLogin)

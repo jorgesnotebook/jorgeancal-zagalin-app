@@ -44,7 +44,7 @@ export class VectorSearchService {
       });
 
       return results
-        .filter((r) => r.score > 0.7) // Only high relevance
+        .filter((r) => r.score > 0.7)
         .map((r) => r.payload);
     } catch (err) {
       console.error('Zagalin: Dashboard search failed:', err);
@@ -69,7 +69,7 @@ export class VectorSearchService {
       });
 
       return results
-        .filter((r) => r.score > 0.8) // Higher threshold for queries
+        .filter((r) => r.score > 0.8)
         .map((r) => r.payload);
     } catch (err) {
       console.error('Zagalin: Query search failed:', err);

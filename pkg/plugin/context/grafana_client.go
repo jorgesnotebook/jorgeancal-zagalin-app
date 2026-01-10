@@ -11,25 +11,20 @@ import (
 	"time"
 )
 
-// URLProvider is a function that returns the Grafana base URL
-// This allows lazy evaluation when request context is available
 type URLProvider func(ctx context.Context) (string, error)
 
-// GrafanaClient handles API requests to Grafana
 type GrafanaClient struct {
 	httpClient  *http.Client
-	urlProvider URLProvider // Function to get URL from context
+	urlProvider URLProvider 
 }
 
-// NewGrafanaClient creates a new Grafana API client with a URL provider
 func NewGrafanaClient(httpClient *http.Client, urlProvider URLProvider) *GrafanaClient {
 	if httpClient == nil {
 		httpClient = &http.Client{
-			Timeout: 30 * time.Second, // Set reasonable timeout
+			Timeout: 30 * time.Second, 
 		}
 	}
 
-	// Default URL provider uses localhost (for backwards compatibility)
 	if urlProvider == nil {
 		urlProvider = func(ctx context.Context) (string, error) {
 			return "http://localhost:3000", nil
@@ -42,18 +37,15 @@ func NewGrafanaClient(httpClient *http.Client, urlProvider URLProvider) *Grafana
 	}
 }
 
-// getBaseURL resolves the base URL using the provider function
 func (gc *GrafanaClient) getBaseURL(ctx context.Context) (string, error) {
 	baseURL, err := gc.urlProvider(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get Grafana URL: %w", err)
 	}
-	// Remove trailing slash to prevent double slashes in URLs
 	baseURL = strings.TrimRight(baseURL, "/")
 	return baseURL, nil
 }
 
-// DataSource represents a Grafana datasource
 type DataSource struct {
 	UID  string `json:"uid"`
 	Name string `json:"name"`
@@ -61,51 +53,43 @@ type DataSource struct {
 	URL  string `json:"url"`
 }
 
-// QueryRequest represents a datasource query request
 type QueryRequest struct {
 	Queries []Query `json:"queries"`
 	From    string  `json:"from"`
 	To      string  `json:"to"`
 }
 
-// Query represents a single query
 type Query struct {
 	RefID         string `json:"refId"`
-	Expr          string `json:"expr,omitempty"`  // For Prometheus
-	Query         string `json:"query,omitempty"` // For Loki
+	Expr          string `json:"expr,omitempty"`  
+	Query         string `json:"query,omitempty"` 
 	DatasourceUID string `json:"datasource,omitempty"`
 }
 
-// QueryResponse represents the response from a query
 type QueryResponse struct {
 	Results map[string]QueryResult `json:"results"`
 }
 
-// QueryResult represents a single query result
 type QueryResult struct {
 	Frames []Frame `json:"frames"`
 	Error  string  `json:"error,omitempty"`
 }
 
-// Frame represents a data frame
 type Frame struct {
 	Schema Schema          `json:"schema"`
 	Data   json.RawMessage `json:"data,omitempty"`
 }
 
-// Schema represents the frame schema
 type Schema struct {
 	Fields []Field `json:"fields"`
 }
 
-// Field represents a field in the schema
 type Field struct {
 	Name   string            `json:"name"`
 	Type   string            `json:"type"`
 	Labels map[string]string `json:"labels,omitempty"`
 }
 
-// GetDatasource retrieves a datasource by UID
 func (gc *GrafanaClient) GetDatasource(ctx context.Context, uid string) (*DataSource, error) {
 	baseURL, err := gc.getBaseURL(ctx)
 	if err != nil {
@@ -137,7 +121,6 @@ func (gc *GrafanaClient) GetDatasource(ctx context.Context, uid string) (*DataSo
 	return &ds, nil
 }
 
-// QueryDatasource executes a query against a datasource
 func (gc *GrafanaClient) QueryDatasource(ctx context.Context, dsUID string, query string, queryType string) (*QueryResponse, error) {
 	now := time.Now()
 	from := now.Add(-1 * time.Hour).Format(time.RFC3339)
@@ -200,7 +183,6 @@ func (gc *GrafanaClient) QueryDatasource(ctx context.Context, dsUID string, quer
 	return &queryResp, nil
 }
 
-// ListDatasources retrieves all datasources
 func (gc *GrafanaClient) ListDatasources(ctx context.Context) ([]DataSource, error) {
 	baseURL, err := gc.getBaseURL(ctx)
 	if err != nil {
@@ -214,7 +196,6 @@ func (gc *GrafanaClient) ListDatasources(ctx context.Context) ([]DataSource, err
 
 	resp, err := gc.httpClient.Do(req)
 	if err != nil {
-		// Check if it's a context timeout
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("failed to fetch datasources: %w (timeout - this is expected if the plugin doesn't have direct Grafana API access)", err)
 		}
@@ -233,4 +214,53 @@ func (gc *GrafanaClient) ListDatasources(ctx context.Context) ([]DataSource, err
 	}
 
 	return datasources, nil
+}
+
+type DashboardMeta struct {
+	IsStarred bool   `json:"isStarred"`
+	Slug      string `json:"slug"`
+	FolderUID string `json:"folderUid"`
+}
+
+type DashboardJSON struct {
+	UID    string        `json:"uid"`
+	Title  string        `json:"title"`
+	Tags   []string      `json:"tags"`
+	Panels []interface{} `json:"panels"` 
+}
+
+type DashboardResponse struct {
+	Meta      DashboardMeta `json:"meta"`
+	Dashboard DashboardJSON `json:"dashboard"`
+}
+
+func (gc *GrafanaClient) GetDashboard(ctx context.Context, uid string) (*DashboardResponse, error) {
+	baseURL, err := gc.getBaseURL(ctx)
+	if err != nil {
+		return nil, err
+	}
+	url := fmt.Sprintf("%s/api/dashboards/uid/%s", baseURL, uid)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := gc.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get dashboard: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("dashboard request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var dashboardResp DashboardResponse
+	if err := json.NewDecoder(resp.Body).Decode(&dashboardResp); err != nil {
+		return nil, fmt.Errorf("failed to decode dashboard: %w", err)
+	}
+
+	return &dashboardResp, nil
 }

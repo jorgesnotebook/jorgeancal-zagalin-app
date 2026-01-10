@@ -31,7 +31,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Rate limiting, query validation, and guardrails system
 - File-based user storage for conversations
 
-## 📚 Comprehensive Documentation
+##  Comprehensive Documentation
 
 **IMPORTANT**: Before modifying features, read the complete documentation:
 
@@ -197,45 +197,45 @@ Extracts runtime context from Grafana:
 
 ```
 src/
-├── components/          # React components
-│   ├── App/            # Main app component
-│   ├── AppConfig/      # Configuration UI
-│   ├── FloatingChat/   # Floating chat components
-│   └── AskPanel/       # Dashboard panel component
-├── pages/              # Page components
-│   ├── ChatPage.tsx    # Full-screen chat
-│   ├── ConfigPage/     # Configuration page
-│   └── AssistantChatPage.tsx
-├── services/           # Business logic
-│   ├── conversationStorage.ts    # Conversation persistence
-│   ├── contextService.ts         # Grafana context extraction
-│   ├── assistantService.ts       # Backend LLM API client
-│   └── zagalinTools.ts           # Function calling tool handlers
-├── hooks/              # React hooks
-├── types/              # TypeScript types
-└── module.tsx          # Plugin entry point
+ components/          # React components
+    App/            # Main app component
+    AppConfig/      # Configuration UI
+    FloatingChat/   # Floating chat components
+    AskPanel/       # Dashboard panel component
+ pages/              # Page components
+    ChatPage.tsx    # Full-screen chat
+    ConfigPage/     # Configuration page
+    AssistantChatPage.tsx
+ services/           # Business logic
+    conversationStorage.ts    # Conversation persistence
+    contextService.ts         # Grafana context extraction
+    assistantService.ts       # Backend LLM API client
+    zagalinTools.ts           # Function calling tool handlers
+ hooks/              # React hooks
+ types/              # TypeScript types
+ module.tsx          # Plugin entry point
 
 pkg/
-├── main.go             # Plugin binary entry
-└── plugin/
-    ├── app.go          # Main plugin app
-    ├── resources.go    # HTTP route handlers
-    ├── storage.go      # Conversation storage
-    ├── guardrails.go   # Rate limiting
-    ├── assistant.go    # LLM chat endpoint handler (/llm/chat)
-    ├── assistant_prompts.go       # System prompts (SRE persona, skills)
-    ├── assistant_tools.go         # Function calling tool definitions
-    ├── llm_client.go              # grafana-llm-app API client with SSE
-    ├── query_proxy.go  # Query proxy with security pipeline
-    ├── query_validation.go        # Query injection prevention
-    ├── query_validation_test.go   # Validation tests
-    ├── datasource.go   # Datasource type detection
-    ├── otel_enforcement.go        # OTel scope enforcement
-    └── context/        # Context extraction
-        ├── manager.go
-        ├── metrics.go
-        ├── logs.go
-        └── traces.go
+ main.go             # Plugin binary entry
+ plugin/
+     app.go          # Main plugin app
+     resources.go    # HTTP route handlers
+     storage.go      # Conversation storage
+     guardrails.go   # Rate limiting
+     assistant.go    # LLM chat endpoint handler (/llm/chat)
+     assistant_prompts.go       # System prompts (SRE persona, skills)
+     assistant_tools.go         # Function calling tool definitions
+     llm_client.go              # grafana-llm-app API client with SSE
+     query_proxy.go  # Query proxy with security pipeline
+     query_validation.go        # Query injection prevention
+     query_validation_test.go   # Validation tests
+     datasource.go   # Datasource type detection
+     otel_enforcement.go        # OTel scope enforcement
+     context/        # Context extraction
+         manager.go
+         metrics.go
+         logs.go
+         traces.go
 ```
 
 ## Development Philosophy
@@ -252,14 +252,14 @@ This project follows KISS principles to maintain code quality and reduce technic
 5. **Minimal dependencies** - Every dependency is a liability
 
 **When coding:**
-- ❌ **Don't:** Create abstractions for one-time use
-- ✅ **Do:** Wait for 3+ similar uses before abstracting
-- ❌ **Don't:** Add error handling for impossible scenarios
-- ✅ **Do:** Validate at boundaries (user input, external APIs)
-- ❌ **Don't:** Add feature flags or backward-compatibility shims unnecessarily
-- ✅ **Do:** Just change the code when you can
-- ❌ **Don't:** Add configurability for every possible option
-- ✅ **Do:** Start with sensible defaults, add config only when needed
+-  **Don't:** Create abstractions for one-time use
+-  **Do:** Wait for 3+ similar uses before abstracting
+-  **Don't:** Add error handling for impossible scenarios
+-  **Do:** Validate at boundaries (user input, external APIs)
+-  **Don't:** Add feature flags or backward-compatibility shims unnecessarily
+-  **Do:** Just change the code when you can
+-  **Don't:** Add configurability for every possible option
+-  **Do:** Start with sensible defaults, add config only when needed
 
 **Refactoring guide:**
 - If you see duplicate code in 3+ places → refactor
@@ -271,27 +271,27 @@ This project follows KISS principles to maintain code quality and reduce technic
 **Write comments that clarify complex logic, not obvious statements.**
 
 ```go
-// ❌ BAD - States the obvious
+//  BAD - States the obvious
 // Set the user to admin
 user = "admin"
 
-// ❌ BAD - Repeats what the code already says
+//  BAD - Repeats what the code already says
 // Loop through all users
 for _, user := range users {
 
-// ❌ BAD - Unnecessary function description
+//  BAD - Unnecessary function description
 // GetUser returns a user by ID
 func GetUser(id string) User {
 
-// ✅ GOOD - Explains WHY, not WHAT
+//  GOOD - Explains WHY, not WHAT
 // Use cached value if less than 5 minutes old to reduce API calls
 if time.Since(cache.lastRefresh) < 5*time.Minute {
 
-// ✅ GOOD - Clarifies non-obvious behavior
+//  GOOD - Clarifies non-obvious behavior
 // Parser expects closing brace even inside strings, so we track string state
 if !inString && ch == '}' {
 
-// ✅ GOOD - Documents important edge cases
+//  GOOD - Documents important edge cases
 // Empty allowlist means all functions are allowed (backwards compatibility)
 if len(allowedFunctions) == 0 {
     return nil
@@ -541,14 +541,14 @@ Logs include:
 
 ### Security Notes
 
-- ✅ Manual pattern-based validation (no external parser dependencies)
-- ✅ Defense in depth - complements rate limiting, datasource governance, OTel enforcement
-- ✅ Comprehensive audit logging with user context
-- ✅ Zero external dependencies (no AGPL licensing concerns)
-- ✅ Small binary size impact (~0 bytes, no new dependencies)
-- ⚠️ Sanitization mode is risky - default to strict mode in production
-- ⚠️ Pattern matching is less precise than AST parsing but sufficient for security
-- ⚠️ LLM validation is placeholder for future implementation
+-  Manual pattern-based validation (no external parser dependencies)
+-  Defense in depth - complements rate limiting, datasource governance, OTel enforcement
+-  Comprehensive audit logging with user context
+-  Zero external dependencies (no AGPL licensing concerns)
+-  Small binary size impact (~0 bytes, no new dependencies)
+-  Sanitization mode is risky - default to strict mode in production
+-  Pattern matching is less precise than AST parsing but sufficient for security
+-  LLM validation is placeholder for future implementation
 
 ### Testing Coverage
 
@@ -667,14 +667,30 @@ Comprehensive documentation is organized in the `docs/` directory:
 
 The repository has AI-specific configuration for multiple tools:
 - **`.claude/`** - Claude Code configuration
-  - `CLAUDE.md` - This file - Comprehensive development guidance
-  - `AI-TOOLS-SETUP.md` - Summary of all AI tools setup
+  - `CLAUDE.md` - This file - Main project instructions
+  - `README.md` - Overview of Claude configuration and rule system
   - `settings.local.json` - Permissions for WebFetch and Bash commands
+  - `rules/` - Modular, topic-specific development standards
+    - `grafana-plugin-standards.md` - Official Grafana development standards
+    - `grafana-llm-integration.md` - LLM integration with grafana-llm-app
+    - `app-plugin-development.md` - App plugin development guide
+    - `clean-code-principles.md` - KISS methodology and clean code
+    - `code-quality-standards.md` - Formatting, linting, testing
+    - `plugin-maintenance.md` - Updates and backwards compatibility
+    - `e2e-testing.md` - End-to-end testing with Playwright
 - **`.openai/`** - ChatGPT/Codex instructions (copy/paste)
   - `INSTRUCTIONS.md` - Copy this into ChatGPT conversations
 - **`.github/copilot-instructions.md`** - GitHub Copilot configuration
 - **`.cursorrules`** - Cursor AI configuration
 
 All AI tools reference `docs/` for detailed documentation.
+
+### Modular Rules System
+
+The `.claude/rules/` directory contains focused, path-scoped documentation:
+- Rules automatically load based on file paths (using YAML frontmatter)
+- Each rule file covers a specific topic (Grafana standards, LLM integration, testing, etc.)
+- Rules can be organized in subdirectories for better structure
+- See `.claude/README.md` for complete documentation of the rule system
 
 Keep these in version control to help all developers and AI tools work effectively with this codebase.

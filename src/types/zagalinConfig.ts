@@ -50,32 +50,32 @@ Quality gate before you answer:
 - If I suggested something risky, did I include rollback + verify?`;
 
 export interface ZagalinConfig {
-  // Custom instructions (user-editable, appended to base prompt)
   customInstructions: string;
 
-  // LLM parameters
-  temperature: number; // 0.0 - 1.0
-  maxTokens: number;
-
-  // Personality preset
   personality: 'helpful' | 'technical' | 'beginner-friendly' | 'concise' | 'custom';
 
-  // Feature toggles
+  standardMode: {
+    temperature: number;
+    maxTokens: number;
+  };
+
+  designMode: {
+    temperature: number;
+    maxTokens: number;
+  };
+
   enabledSkills: {
     explainPanel: boolean;
     generateQuery: boolean;
     troubleshooting: boolean;
-    searchContext: boolean; // Vector search for semantic context
-    functionCalling: boolean; // Tool/function calling support
+    searchContext: boolean;
+    functionCalling: boolean;
   };
 
-  // UI preferences
   showContextBadge: boolean;
   showCostInfo: boolean;
-  autoOpenOnDashboard: boolean; // Auto-open floating chat when viewing dashboards
+  autoOpenOnDashboard: boolean;
 
-  // LLM backend mode (defined in plugin settings)
-  // This is read-only from frontend perspective, set by admin in plugin config
   llmBackend?: 'backend-proxy' | 'grafana-llm' | 'direct';
 }
 
@@ -89,23 +89,31 @@ export function getFullSystemPrompt(config: ZagalinConfig): string {
 export const DEFAULT_CONFIG: ZagalinConfig = {
   customInstructions: `Balance clarity and detail. Explain dashboards, generate queries, troubleshoot issues. Use technical terms but explain them when needed. Context-aware and actionable.`,
 
-  temperature: 0.7,
-  maxTokens: 2000,
   personality: 'helpful',
+
+  standardMode: {
+    temperature: 0.5,
+    maxTokens: 2000,
+  },
+
+  designMode: {
+    temperature: 0.8,
+    maxTokens: 3000,
+  },
 
   enabledSkills: {
     explainPanel: true,
     generateQuery: true,
     troubleshooting: true,
-    searchContext: false, // Disabled by default, requires vector service
-    functionCalling: true, // Enabled by default for rich interactions
+    searchContext: false,
+    functionCalling: true,
   },
 
   showContextBadge: true,
   showCostInfo: true,
   autoOpenOnDashboard: false,
 
-  llmBackend: 'grafana-llm', // Default to @grafana/llm (works immediately, no service account needed)
+  llmBackend: 'grafana-llm',
 };
 
 export const PERSONALITY_PRESETS: Record<string, string> = {

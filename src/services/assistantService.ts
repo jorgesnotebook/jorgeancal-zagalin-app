@@ -11,6 +11,7 @@ export interface AssistantContext {
   panel?: PanelContext;
   timeRange?: TimeRange;
   templateVars?: TemplateVariable[];
+  evidencePacks?: EvidencePack[];
 }
 
 export interface DashboardContext {
@@ -51,13 +52,69 @@ export interface TemplateVariable {
   };
 }
 
+export interface EvidencePack {
+  type: string;
+  datasource: string;
+  timeRange: TimeRange;
+  query: string;
+  metrics?: MetricsEvidence;
+  logs?: LogsEvidence;
+  traces?: TracesEvidence;
+  quality: string;
+}
+
+export interface MetricsEvidence {
+  unit: string;
+  seriesCount: number;
+  current: number;
+  min: number;
+  max: number;
+  avg: number;
+  trend: string;
+  slopePerHour: number;
+  quality: string;
+  topContributors?: LabelContributor[];
+}
+
+export interface LabelContributor {
+  labels: Record<string, string>;
+  value: number;
+}
+
+export interface LogsEvidence {
+  totalCount: number;
+  rate: number;
+  maxRate: number;
+  trend: string;
+  topLabels: Record<string, string[]>;
+  notableMessages: string[];
+}
+
+export interface TracesEvidence {
+  traceID: string;
+  rootService: string;
+  rootOperation: string;
+  totalDuration: number;
+  spanCount: number;
+  errorSpanCount: number;
+  topSlowestSpans: SlowSpan[];
+  criticalPath: string[];
+  notableAttributes: Record<string, string>;
+}
+
+export interface SlowSpan {
+  service: string;
+  operation: string;
+  duration: number;
+}
+
 export interface AssistantRequest {
   message: string;
   history: AssistantMessage[];
   context: AssistantContext;
   skillHint?: string;
   enrichedMessage?: string;
-  mode?: 'standard' | 'thinking';
+  mode?: 'standard' | 'design';
   attachedContexts?: Array<{
     dashboardUid: string;
     dashboardTitle: string;

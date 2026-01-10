@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
@@ -19,13 +20,14 @@ var (
 
 type App struct {
 	backend.CallResourceHandler
-	settings        *Settings
-	contextManager  *contextmgr.Manager
-	guardrails      *Guardrails
-	datasourceCache *datasourceCache
-	queryValidator  *QueryValidator
-	runManager      *RunManager
-	otelRegistry    *OTelLabelRegistry // Registry of discovered OTel label formats
+	settings           *Settings
+	contextManager     *contextmgr.Manager
+	guardrails         *Guardrails
+	datasourceCache    *datasourceCache
+	queryValidator     *QueryValidator
+	runManager         *RunManager
+	otelRegistry       *OTelLabelRegistry
+	grafanaQueryClient *GrafanaQueryClient
 }
 
 func NewApp(ctx context.Context, appSettings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -42,17 +44,32 @@ func NewApp(ctx context.Context, appSettings backend.AppInstanceSettings) (insta
 
 	settings, err := LoadSettings(appSettings.JSONData, appSettings.DecryptedSecureJSONData)
 
-	maxRequestsPerMinute := 60 // Default
+	maxRequestsPerMinute := 60
 	if settings != nil {
 		maxRequestsPerMinute = settings.MaxRequestsPerMinute
 	}
 	app.guardrails = NewGuardrails(maxRequestsPerMinute)
+
+	grafanaCfg := backend.GrafanaConfigFromContext(ctx)
+	grafanaURL, urlErr := grafanaCfg.AppURL()
+	if urlErr != nil {
+		backend.Logger.Warn("Failed to get Grafana URL, using default", "error", urlErr)
+		grafanaURL = "http://localhost:3000"
+	}
 
 	if err != nil {
 		backend.Logger.Error("Failed to load settings", "error", err)
 		app.settings = nil
 	} else {
 		app.settings = settings
+		app.settings.GrafanaURL = grafanaURL
+
+		if settings.ServiceAccountToken != "" {
+			app.grafanaQueryClient = NewGrafanaQueryClient(grafanaURL, settings.ServiceAccountToken)
+			backend.Logger.Info("Grafana query client initialized", "grafanaURL", grafanaURL)
+		} else {
+			backend.Logger.Warn("No service account token configured, Grafana query client not initialized")
+		}
 		backend.Logger.Info("Settings loaded successfully",
 			"maxRequestsPerMinute", settings.MaxRequestsPerMinute,
 			"monthlyBudgetUSD", settings.MonthlyBudgetUSD,
@@ -61,7 +78,17 @@ func NewApp(ctx context.Context, appSettings backend.AppInstanceSettings) (insta
 		app.contextManager.Start(ctx)
 		backend.Logger.Info("Context manager started")
 
-		// Initialize query validator
+		if len(settings.ReferenceDashboards) > 0 {
+			go func() {
+				fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+
+				if err := app.contextManager.FetchReferenceDashboards(fetchCtx, settings.ReferenceDashboards); err != nil {
+					backend.Logger.Warn("Failed to fetch reference dashboards", "error", err)
+				}
+			}()
+		}
+
 		app.queryValidator = NewQueryValidator(&settings.QueryValidation, &app)
 		backend.Logger.Info("Query validator initialized",
 			"enabled", settings.QueryValidation.Enabled,

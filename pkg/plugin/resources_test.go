@@ -12,22 +12,16 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
-// mockCallResourceResponseSender implements backend.CallResourceResponseSender
-// for use in tests.
 type mockCallResourceResponseSender struct {
 	response *backend.CallResourceResponse
 }
 
-// Send sets the received *backend.CallResourceResponse to s.response
 func (s *mockCallResourceResponseSender) Send(response *backend.CallResourceResponse) error {
 	s.response = response
 	return nil
 }
 
-// TestCallResource tests CallResource calls, using backend.CallResourceRequest and backend.CallResourceResponse.
-// This ensures the httpadapter for CallResource works correctly.
 func TestCallResource(t *testing.T) {
-	// Initialize app
 	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{})
 	if err != nil {
 		t.Fatalf("new app: %s", err)
@@ -40,7 +34,6 @@ func TestCallResource(t *testing.T) {
 		t.Fatal("inst must be of type *App")
 	}
 
-	// Set up and run test cases
 	for _, tc := range []struct {
 		name string
 
@@ -79,7 +72,6 @@ func TestCallResource(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// Request by calling CallResource. This tests the httpadapter.
 			var r mockCallResourceResponseSender
 			err = app.CallResource(context.Background(), &backend.CallResourceRequest{
 				Method: tc.method,
@@ -104,7 +96,6 @@ func TestCallResource(t *testing.T) {
 	}
 }
 
-// TestUserIdentityExtraction tests that user identity is correctly extracted from request context
 func TestUserIdentityExtraction(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -141,7 +132,6 @@ func TestUserIdentityExtraction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create request with plugin context
 			ctx := backend.WithPluginContext(context.Background(), backend.PluginContext{
 				User:  tt.user,
 				OrgID: tt.orgID,
@@ -174,7 +164,6 @@ func TestUserIdentityExtraction(t *testing.T) {
 	}
 }
 
-// TestQueryProxyBasicHandling tests basic request handling for the query proxy
 func TestQueryProxyBasicHandling(t *testing.T) {
 	app, err := NewApp(context.Background(), backend.AppInstanceSettings{})
 	if err != nil {
@@ -216,7 +205,7 @@ func TestQueryProxyBasicHandling(t *testing.T) {
 			},
 			user:           &backend.User{Login: "testuser", Email: "test@example.com"},
 			orgID:          1,
-			expectedStatus: http.StatusOK, // Will be OK even if Grafana isn't running, as we're testing the handler
+			expectedStatus: http.StatusOK, 
 		},
 		{
 			name:           "invalid JSON body",
@@ -230,7 +219,6 @@ func TestQueryProxyBasicHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Marshal body
 			var bodyBytes []byte
 			if tt.body != nil {
 				if str, ok := tt.body.(string); ok {
@@ -240,7 +228,6 @@ func TestQueryProxyBasicHandling(t *testing.T) {
 				}
 			}
 
-			// Create request with plugin context
 			ctx := backend.WithPluginContext(context.Background(), backend.PluginContext{
 				User:  tt.user,
 				OrgID: tt.orgID,
@@ -249,16 +236,12 @@ func TestQueryProxyBasicHandling(t *testing.T) {
 			req := httptest.NewRequest(tt.method, "/query", bytes.NewReader(bodyBytes))
 			req = req.WithContext(ctx)
 
-			// Record response
 			w := httptest.NewRecorder()
 
-			// Call handler directly
 			appInstance := app.(*App)
 			appInstance.handleQuery(w, req)
 
-			// Check status code
 			if w.Code != tt.expectedStatus && w.Code != http.StatusInternalServerError {
-				// Allow InternalServerError as it might happen if Grafana isn't running
 				if tt.expectedStatus != http.StatusOK || w.Code != http.StatusInternalServerError {
 					t.Errorf("expected status %d, got %d: %s", tt.expectedStatus, w.Code, w.Body.String())
 				}
@@ -267,7 +250,6 @@ func TestQueryProxyBasicHandling(t *testing.T) {
 	}
 }
 
-// TestRateLimitingPerUser tests that rate limiting is applied per user
 func TestRateLimitingPerUser(t *testing.T) {
 	app, err := NewApp(context.Background(), backend.AppInstanceSettings{})
 	if err != nil {
@@ -276,8 +258,7 @@ func TestRateLimitingPerUser(t *testing.T) {
 
 	appInstance := app.(*App)
 
-	// Set low rate limit for testing
-	appInstance.guardrails = NewGuardrails(2) // Only 2 requests per minute
+	appInstance.guardrails = NewGuardrails(2) 
 
 	queryReq := QueryRequest{
 		Datasource: "prometheus-uid",
@@ -296,13 +277,11 @@ func TestRateLimitingPerUser(t *testing.T) {
 
 	bodyBytes, _ := json.Marshal(queryReq)
 
-	// Create request with plugin context
 	ctx := backend.WithPluginContext(context.Background(), backend.PluginContext{
 		User:  &backend.User{Login: "testuser"},
 		OrgID: 1,
 	})
 
-	// Make requests until rate limit is hit
 	successCount := 0
 	rateLimited := false
 
@@ -317,8 +296,6 @@ func TestRateLimitingPerUser(t *testing.T) {
 			rateLimited = true
 			break
 		} else if w.Code == http.StatusOK || w.Code == http.StatusInternalServerError {
-			// Both OK and InternalServerError count as not rate-limited
-			// (InternalServerError happens if Grafana isn't running)
 			successCount++
 		}
 	}
@@ -332,9 +309,7 @@ func TestRateLimitingPerUser(t *testing.T) {
 	}
 }
 
-// TestQueryValidationIntegration tests query validation in the full request pipeline
 func TestQueryValidationIntegration(t *testing.T) {
-	// Create app with validation enabled
 	app := &App{
 		settings: &Settings{
 			PluginSettings: PluginSettings{
@@ -394,14 +369,12 @@ func TestQueryValidationIntegration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Pre-populate datasource cache with the datasource type for this test
 			app.datasourceCache.mu.Lock()
 			app.datasourceCache.datasources["test-ds-uid"] = DatasourceInfo{
 				UID:  "test-ds-uid",
 				Name: "Test Datasource",
 				Type: tt.datasourceType,
 			}
-			// Set lastRefresh to now so cache is considered fresh
 			app.datasourceCache.lastRefresh = time.Now()
 			app.datasourceCache.mu.Unlock()
 
@@ -431,13 +404,11 @@ func TestQueryValidationIntegration(t *testing.T) {
 
 			app.handleQuery(w, req)
 
-			// Check status (allow InternalServerError for Grafana connectivity issues in valid query tests)
 			if tt.expectedStatus == http.StatusBadRequest {
 				if w.Code != http.StatusBadRequest {
 					t.Errorf("expected status %d for invalid query, got %d: %s", http.StatusBadRequest, w.Code, w.Body.String())
 				}
 			} else if tt.expectedStatus == http.StatusOK {
-				// For valid queries, accept either OK or InternalServerError (if Grafana is not running)
 				if w.Code != http.StatusOK && w.Code != http.StatusInternalServerError {
 					t.Errorf("expected status %d or %d, got %d: %s", http.StatusOK, http.StatusInternalServerError, w.Code, w.Body.String())
 				}

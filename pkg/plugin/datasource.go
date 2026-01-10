@@ -12,14 +12,12 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
-// DatasourceInfo represents basic datasource information
 type DatasourceInfo struct {
 	UID  string `json:"uid"`
 	Name string `json:"name"`
 	Type string `json:"type"`
 }
 
-// DatasourceListResponse represents the response from Grafana's datasource API
 type DatasourceListResponse []struct {
 	ID   int64  `json:"id"`
 	UID  string `json:"uid"`
@@ -27,15 +25,13 @@ type DatasourceListResponse []struct {
 	Type string `json:"type"`
 }
 
-// datasourceCache caches datasource information to avoid repeated API calls
 type datasourceCache struct {
 	mu          sync.RWMutex
-	datasources map[string]DatasourceInfo // UID -> Info
+	datasources map[string]DatasourceInfo 
 	lastRefresh time.Time
 	ttl         time.Duration
 }
 
-// newDatasourceCache creates a new datasource cache with 5-minute TTL
 func newDatasourceCache() *datasourceCache {
 	return &datasourceCache{
 		datasources: make(map[string]DatasourceInfo),
@@ -43,9 +39,7 @@ func newDatasourceCache() *datasourceCache {
 	}
 }
 
-// fetchDatasources fetches all datasources from Grafana
 func (a *App) fetchDatasources(ctx context.Context, req *http.Request) ([]DatasourceInfo, error) {
-	// Get Grafana URL from context
 	cfg := backend.GrafanaConfigFromContext(ctx)
 	grafanaURL, err := cfg.AppURL()
 	if err != nil {
@@ -58,7 +52,6 @@ func (a *App) fetchDatasources(ctx context.Context, req *http.Request) ([]Dataso
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
-	// Forward authentication headers from the incoming request
 	if authHeader := req.Header.Get("Authorization"); authHeader != "" {
 		httpReq.Header.Set("Authorization", authHeader)
 	}
@@ -89,7 +82,6 @@ func (a *App) fetchDatasources(ctx context.Context, req *http.Request) ([]Dataso
 		return nil, fmt.Errorf("failed to parse datasource list: %w", err)
 	}
 
-	// Convert to simplified format
 	result := make([]DatasourceInfo, 0, len(datasourceList))
 	for _, ds := range datasourceList {
 		result = append(result, DatasourceInfo{
@@ -104,14 +96,11 @@ func (a *App) fetchDatasources(ctx context.Context, req *http.Request) ([]Dataso
 	return result, nil
 }
 
-// isDatasourceAllowed checks if a datasource UID is in the allowlist
 func (a *App) isDatasourceAllowed(datasourceUID string) bool {
-	// If no allowlist configured, allow all datasources
 	if a.settings == nil || len(a.settings.AllowedDatasources) == 0 {
 		return true
 	}
 
-	// Check if datasource is in allowlist
 	for _, allowedUID := range a.settings.AllowedDatasources {
 		if allowedUID == datasourceUID {
 			return true
@@ -121,7 +110,6 @@ func (a *App) isDatasourceAllowed(datasourceUID string) bool {
 	return false
 }
 
-// handleListDatasources returns the list of available datasources
 func (a *App) handleListDatasources(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -133,11 +121,9 @@ func (a *App) handleListDatasources(w http.ResponseWriter, req *http.Request) {
 	datasources, err := a.fetchDatasources(req.Context(), req)
 	if err != nil {
 		backend.Logger.Error("Failed to fetch datasources", "error", err)
-		// Return empty list instead of error to prevent UI breakage
 		datasources = []DatasourceInfo{}
 	}
 
-	// Filter by allowlist if configured
 	var filteredDatasources []DatasourceInfo
 	if a.settings != nil && len(a.settings.AllowedDatasources) > 0 {
 		for _, ds := range datasources {
@@ -149,7 +135,6 @@ func (a *App) handleListDatasources(w http.ResponseWriter, req *http.Request) {
 		filteredDatasources = datasources
 	}
 
-	// Build response, handling nil settings
 	var allowedDatasources []string
 	var defaultDatasource string
 	if a.settings != nil {
@@ -171,14 +156,11 @@ func (a *App) handleListDatasources(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// getDatasourceType returns the type of a datasource by UID (prometheus, loki, tempo, etc.)
-// Uses caching to avoid repeated API calls
 func (a *App) getDatasourceType(ctx context.Context, req *http.Request, uid string) (string, error) {
 	if a.datasourceCache == nil {
 		return "", fmt.Errorf("datasource cache not initialized")
 	}
 
-	// Check cache first
 	a.datasourceCache.mu.RLock()
 	needsRefresh := time.Since(a.datasourceCache.lastRefresh) > a.datasourceCache.ttl
 	if !needsRefresh {
@@ -189,13 +171,11 @@ func (a *App) getDatasourceType(ctx context.Context, req *http.Request, uid stri
 	}
 	a.datasourceCache.mu.RUnlock()
 
-	// Cache miss or expired - fetch datasources
 	datasources, err := a.fetchDatasources(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch datasources: %w", err)
 	}
 
-	// Update cache
 	a.datasourceCache.mu.Lock()
 	a.datasourceCache.datasources = make(map[string]DatasourceInfo)
 	for _, ds := range datasources {
@@ -204,7 +184,6 @@ func (a *App) getDatasourceType(ctx context.Context, req *http.Request, uid stri
 	a.datasourceCache.lastRefresh = time.Now()
 	a.datasourceCache.mu.Unlock()
 
-	// Look up the requested UID
 	a.datasourceCache.mu.RLock()
 	defer a.datasourceCache.mu.RUnlock()
 	if ds, ok := a.datasourceCache.datasources[uid]; ok {

@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-// TestValidatePromQL_ValidQueries tests valid PromQL queries
 func TestValidatePromQL_ValidQueries(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -57,7 +56,6 @@ func TestValidatePromQL_ValidQueries(t *testing.T) {
 	}
 }
 
-// TestValidatePromQL_InvalidSyntax tests invalid PromQL syntax
 func TestValidatePromQL_InvalidSyntax(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -79,7 +77,7 @@ func TestValidatePromQL_InvalidSyntax(t *testing.T) {
 		},
 		{
 			name:       "malformed function call",
-			query:      `rate(http_requests_total)`, // Missing duration
+			query:      `rate(http_requests_total)`, 
 			strictMode: true,
 			expectFail: true,
 		},
@@ -111,7 +109,6 @@ func TestValidatePromQL_InvalidSyntax(t *testing.T) {
 	}
 }
 
-// TestValidatePromQL_Complexity tests complexity limits
 func TestValidatePromQL_Complexity(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -128,7 +125,7 @@ func TestValidatePromQL_Complexity(t *testing.T) {
 		{
 			name:             "complex nested aggregation",
 			query:            `sum(rate(http_requests_total[5m])) by (status) / sum(rate(http_requests_total[5m]))`,
-			maxComplexity:    5, // Very low limit
+			maxComplexity:    5, 
 			expectTooComplex: true,
 		},
 		{
@@ -160,7 +157,6 @@ func TestValidatePromQL_Complexity(t *testing.T) {
 	}
 }
 
-// TestValidatePromQL_FunctionAllowlist tests function restriction
 func TestValidatePromQL_FunctionAllowlist(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -190,7 +186,7 @@ func TestValidatePromQL_FunctionAllowlist(t *testing.T) {
 			name:          "multiple functions one blocked",
 			query:         `sum(increase(http_requests_total[5m]))`,
 			allowedFuncs:  []string{"sum", "rate"},
-			expectBlocked: true, // increase is blocked
+			expectBlocked: true, 
 		},
 	}
 
@@ -216,7 +212,6 @@ func TestValidatePromQL_FunctionAllowlist(t *testing.T) {
 	}
 }
 
-// TestValidateLogQL_ValidQueries tests valid LogQL queries
 func TestValidateLogQL_ValidQueries(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -261,7 +256,6 @@ func TestValidateLogQL_ValidQueries(t *testing.T) {
 	}
 }
 
-// TestValidateLogQL_InvalidSyntax tests invalid LogQL syntax
 func TestValidateLogQL_InvalidSyntax(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -300,7 +294,6 @@ func TestValidateLogQL_InvalidSyntax(t *testing.T) {
 	}
 }
 
-// TestValidateGeneric tests generic validation for unknown datasources
 func TestValidateGeneric(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -319,7 +312,7 @@ func TestValidateGeneric(t *testing.T) {
 		},
 		{
 			name:        "very long query",
-			query:       string(make([]byte, 11000)), // Over 10KB limit
+			query:       string(make([]byte, 11000)), 
 			expectValid: false,
 		},
 		{
@@ -348,20 +341,17 @@ func TestValidateGeneric(t *testing.T) {
 	}
 }
 
-// TestValidationDisabled tests that validation can be disabled
 func TestValidationDisabled(t *testing.T) {
 	validator := NewQueryValidator(&QueryValidationSettings{
 		Enabled: false,
 	}, nil)
 
-	// Even invalid query should pass when validation disabled
 	result := validator.ValidateQuery(context.Background(), "invalid{{{query", DatasourcePrometheus)
 	if !result.Valid {
 		t.Errorf("expected all queries to pass when validation disabled")
 	}
 }
 
-// TestSanitization tests query sanitization behavior
 func TestSanitization(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -372,14 +362,14 @@ func TestSanitization(t *testing.T) {
 		{
 			name:            "whitespace only change",
 			query:           "  up  ",
-			expectSanitized: false, // Trimming whitespace doesn't affect parser
+			expectSanitized: false, 
 			strictMode:      false,
 		},
 		{
 			name:            "invalid query in strict mode",
 			query:           "up{{{",
 			expectSanitized: false,
-			strictMode:      true, // Should fail, not sanitize
+			strictMode:      true, 
 		},
 	}
 
@@ -400,7 +390,6 @@ func TestSanitization(t *testing.T) {
 	}
 }
 
-// TestComplexityCounter tests AST node counting accuracy
 func TestComplexityCounter(t *testing.T) {
 	validator := NewQueryValidator(&QueryValidationSettings{
 		Enabled:                true,
@@ -412,7 +401,7 @@ func TestComplexityCounter(t *testing.T) {
 	tests := []struct {
 		name              string
 		query             string
-		expectMoreComplex bool // Compared to "up"
+		expectMoreComplex bool 
 	}{
 		{
 			name:              "simple metric",
@@ -436,7 +425,6 @@ func TestComplexityCounter(t *testing.T) {
 		},
 	}
 
-	// Get baseline complexity for "up"
 	baseResult := validator.validatePromQL("up")
 	if !baseResult.Valid {
 		t.Fatal("baseline query should be valid")
@@ -449,14 +437,10 @@ func TestComplexityCounter(t *testing.T) {
 				t.Skip("query failed validation, skipping complexity test")
 			}
 
-			// This is a rough test - we can't easily compare complexity directly
-			// but we know more complex queries should have more AST nodes
-			// For now, just verify the query validates successfully
 		})
 	}
 }
 
-// TestDefaultSettings tests default settings are applied correctly
 func TestDefaultSettings(t *testing.T) {
 	validator := NewQueryValidator(nil, nil)
 
@@ -473,7 +457,6 @@ func TestDefaultSettings(t *testing.T) {
 	}
 }
 
-// TestViolationTypes tests that correct violation types are returned
 func TestViolationTypes(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -517,7 +500,6 @@ func TestViolationTypes(t *testing.T) {
 	}
 }
 
-// TestEmptyQuery tests handling of empty queries
 func TestEmptyQuery(t *testing.T) {
 	validator := NewQueryValidator(&QueryValidationSettings{
 		Enabled:                true,
@@ -527,14 +509,11 @@ func TestEmptyQuery(t *testing.T) {
 
 	result := validator.ValidateQuery(context.Background(), "", DatasourcePrometheus)
 
-	// Empty queries should be handled gracefully
-	// The parser will reject it, which is correct behavior
 	if result.Valid {
 		t.Error("expected empty query to fail validation")
 	}
 }
 
-// TestDatasourceTypes tests validation works for different datasource types
 func TestDatasourceTypes(t *testing.T) {
 	validator := NewQueryValidator(&QueryValidationSettings{
 		Enabled:                true,
@@ -549,14 +528,13 @@ func TestDatasourceTypes(t *testing.T) {
 	}{
 		{DatasourcePrometheus, "up"},
 		{DatasourceLoki, `{job="test"}`},
-		{DatasourceTempo, "any query"}, // Falls back to generic validation
+		{DatasourceTempo, "any query"}, 
 		{DatasourceOther, "SELECT * FROM table"},
 	}
 
 	for _, tt := range tests {
 		t.Run(string(tt.dsType), func(t *testing.T) {
 			result := validator.ValidateQuery(context.Background(), tt.query, tt.dsType)
-			// Just verify it doesn't panic and returns a result
 			if result == nil {
 				t.Error("expected non-nil result")
 			}

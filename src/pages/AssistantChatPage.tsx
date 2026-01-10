@@ -28,7 +28,6 @@ interface Message {
   toolCalls?: ToolCall[];
 }
 
-// Helper function to safely render markdown content
 function sanitizeMarkdown(content: string): string {
   try {
     const rawHtml = marked.parse(content) as string;
@@ -70,7 +69,6 @@ function AssistantChatPage() {
     }
   }, []);
 
-  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
@@ -86,7 +84,6 @@ function AssistantChatPage() {
       timestamp: new Date(),
     };
 
-    // Add user message
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsStreaming(true);
@@ -94,7 +91,6 @@ function AssistantChatPage() {
     setStreamingContent('');
 
     try {
-      // Enhance query with vector search if available
       let enhancedQuery = userMessage.content;
       if (zagalinConfig.enabledSkills.searchContext) {
         const vectorContext = await vectorSearchRef.current.enhanceQueryWithContext(userMessage.content);
@@ -103,18 +99,15 @@ function AssistantChatPage() {
         }
       }
 
-      // Prepare request for backend
-      // Backend handles: skill detection, system prompts, context injection
       const assistantRequest: AssistantRequest = {
         message: enhancedQuery || userMessage.content,
         history: messages.map(m => ({
           role: m.role,
           content: m.content,
         })),
-        context: {}, // No specific context in standalone chat page
+        context: {},
       };
 
-      // Stream from backend
       let accumulatedContent = '';
       const stream = streamAssistantChat(assistantRequest).pipe(
         finalize(() => {
@@ -122,7 +115,6 @@ function AssistantChatPage() {
         })
       );
 
-      // Subscribe to the stream
       stream.subscribe({
         next: (chunk: StreamChunk) => {
           if (chunk.chunk) {
@@ -137,7 +129,6 @@ function AssistantChatPage() {
           }
         },
         complete: () => {
-          // Add assistant message when streaming completes
           const assistantMessage: Message = {
             role: 'assistant',
             content: accumulatedContent,
@@ -163,7 +154,6 @@ function AssistantChatPage() {
   };
 
   const handleKeyPress = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Cmd/Ctrl + Enter to send
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
       handleSend();
@@ -175,7 +165,7 @@ function AssistantChatPage() {
   };
 
   const clearChat = () => {
-    setMessages([messages[0]]); // Keep system message
+    setMessages([messages[0]]);
     setStreamingContent('');
     setError(null);
   };
@@ -249,7 +239,6 @@ function AssistantChatPage() {
         {/* Messages area - scrollable middle section */}
         <div className={s.messagesWrapper}>
           {messages.length === 1 ? (
-            // Welcome screen - logo centered
             <div className={s.welcomeScreen}>
               <img src="public/plugins/jorgeancal-zagalin-app/img/logo.png" alt="Zagalin" className={s.logo} />
             </div>

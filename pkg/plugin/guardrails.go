@@ -9,16 +9,12 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
-// Guardrails provides safety mechanisms for LLM requests
 type Guardrails struct {
-	// Rate limiting
 	rateLimiter *RateLimiter
 
-	// Audit logger
 	auditLog *AuditLogger
 }
 
-// NewGuardrails creates a new guardrails instance
 func NewGuardrails(maxRequestsPerMinute int) *Guardrails {
 	return &Guardrails{
 		rateLimiter: NewRateLimiter(maxRequestsPerMinute),
@@ -26,15 +22,12 @@ func NewGuardrails(maxRequestsPerMinute int) *Guardrails {
 	}
 }
 
-// CheckRequest validates a request against guardrails
 func (g *Guardrails) CheckRequest(ctx context.Context, userID string, messages []map[string]interface{}) error {
-	// Check rate limit
 	if !g.rateLimiter.Allow(userID) {
 		backend.Logger.Warn("Rate limit exceeded", "user", userID)
 		return fmt.Errorf("rate limit exceeded: too many requests")
 	}
 
-	// Validate time ranges in messages (look for suspicious patterns)
 	for _, msg := range messages {
 		if content, ok := msg["content"].(string); ok {
 			if err := g.validateContent(content); err != nil {
@@ -43,16 +36,12 @@ func (g *Guardrails) CheckRequest(ctx context.Context, userID string, messages [
 		}
 	}
 
-	// Log the request for audit
 	g.auditLog.LogRequest(userID, len(messages))
 
 	return nil
 }
 
-// validateContent checks message content for unsafe patterns
 func (g *Guardrails) validateContent(content string) error {
-	// Check for excessively long time ranges in queries
-	// This is a simple heuristic - you can expand this
 	if len(content) > 50000 {
 		return fmt.Errorf("message content too large (max 50KB)")
 	}
@@ -60,12 +49,10 @@ func (g *Guardrails) validateContent(content string) error {
 	return nil
 }
 
-// LogResponse logs the response for audit
 func (g *Guardrails) LogResponse(userID string, tokens int, cost float64, latency time.Duration) {
 	g.auditLog.LogResponse(userID, tokens, cost, latency)
 }
 
-// RateLimiter implements a simple token bucket rate limiter per user
 type RateLimiter struct {
 	mu            sync.Mutex
 	buckets       map[string]*tokenBucket
@@ -79,7 +66,6 @@ type tokenBucket struct {
 	lastRefill time.Time
 }
 
-// NewRateLimiter creates a new rate limiter
 func NewRateLimiter(maxPerMinute int) *RateLimiter {
 	rl := &RateLimiter{
 		buckets:      make(map[string]*tokenBucket),
@@ -87,14 +73,12 @@ func NewRateLimiter(maxPerMinute int) *RateLimiter {
 		cleanupDone:  make(chan bool),
 	}
 
-	// Cleanup old buckets every 5 minutes
 	rl.cleanupTicker = time.NewTicker(5 * time.Minute)
 	go rl.cleanup()
 
 	return rl
 }
 
-// Allow checks if a request is allowed for the given user
 func (rl *RateLimiter) Allow(userID string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -103,7 +87,6 @@ func (rl *RateLimiter) Allow(userID string) bool {
 	bucket, exists := rl.buckets[userID]
 
 	if !exists {
-		// Create new bucket
 		bucket = &tokenBucket{
 			tokens:     rl.maxPerMinute - 1,
 			lastRefill: now,
@@ -112,7 +95,6 @@ func (rl *RateLimiter) Allow(userID string) bool {
 		return true
 	}
 
-	// Refill tokens based on time passed
 	timePassed := now.Sub(bucket.lastRefill)
 	tokensToAdd := int(timePassed.Minutes() * float64(rl.maxPerMinute))
 
@@ -124,7 +106,6 @@ func (rl *RateLimiter) Allow(userID string) bool {
 		bucket.lastRefill = now
 	}
 
-	// Check if we have tokens available
 	if bucket.tokens <= 0 {
 		return false
 	}
@@ -133,7 +114,6 @@ func (rl *RateLimiter) Allow(userID string) bool {
 	return true
 }
 
-// cleanup removes old buckets
 func (rl *RateLimiter) cleanup() {
 	for {
 		select {
@@ -152,23 +132,19 @@ func (rl *RateLimiter) cleanup() {
 	}
 }
 
-// Stop stops the rate limiter cleanup
 func (rl *RateLimiter) Stop() {
 	rl.cleanupTicker.Stop()
 	rl.cleanupDone <- true
 }
 
-// AuditLogger logs all LLM requests and responses for audit purposes
 type AuditLogger struct {
 	mu sync.Mutex
 }
 
-// NewAuditLogger creates a new audit logger
 func NewAuditLogger() *AuditLogger {
 	return &AuditLogger{}
 }
 
-// LogRequest logs an incoming request
 func (al *AuditLogger) LogRequest(userID string, messageCount int) {
 	al.mu.Lock()
 	defer al.mu.Unlock()
@@ -180,7 +156,6 @@ func (al *AuditLogger) LogRequest(userID string, messageCount int) {
 	)
 }
 
-// LogResponse logs a response
 func (al *AuditLogger) LogResponse(userID string, tokens int, cost float64, latency time.Duration) {
 	al.mu.Lock()
 	defer al.mu.Unlock()
@@ -194,20 +169,8 @@ func (al *AuditLogger) LogResponse(userID string, tokens int, cost float64, late
 	)
 }
 
-// ClampTimeRange clamps a time range to safe limits
 func ClampTimeRange(from, to string, maxHours int) (string, string, bool) {
-	// Parse time range
-	// This is a simplified version - you'd want to use Grafana's time parsing
-	// For now, we'll just return the original values
-	// In production, you'd parse and validate the time range
 
-	// TODO: Implement actual time range parsing and clamping
-	// For example:
-	// - Parse relative times (e.g., "now-6h")
-	// - Parse absolute times
-	// - Calculate duration
-	// - If duration > maxHours, clamp it
-	// - Return clamped values and whether clamping occurred
 
 	return from, to, false
 }
