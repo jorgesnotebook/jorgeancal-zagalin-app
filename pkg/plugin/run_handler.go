@@ -51,7 +51,7 @@ func (a *App) handleStartRun(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	user, err := a.extractUserFromRequest(req)
+	user, err := extractUserIdentity(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
 		return
@@ -128,7 +128,7 @@ func (a *App) handleRunEvents(rw http.ResponseWriter, req *http.Request, runID s
 
 	ctx := req.Context()
 
-	user, err := a.extractUserFromRequest(req)
+	user, err := extractUserIdentity(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
 		return
@@ -195,7 +195,7 @@ func (a *App) handlePauseRun(rw http.ResponseWriter, req *http.Request, runID st
 		return
 	}
 
-	user, err := a.extractUserFromRequest(req)
+	user, err := extractUserIdentity(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
 		return
@@ -238,7 +238,7 @@ func (a *App) handleResumeRun(rw http.ResponseWriter, req *http.Request, runID s
 		return
 	}
 
-	user, err := a.extractUserFromRequest(req)
+	user, err := extractUserIdentity(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
 		return
@@ -281,7 +281,7 @@ func (a *App) handleCancelRun(rw http.ResponseWriter, req *http.Request, runID s
 		return
 	}
 
-	user, err := a.extractUserFromRequest(req)
+	user, err := extractUserIdentity(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
 		return
@@ -324,7 +324,7 @@ func (a *App) handleRunStatus(rw http.ResponseWriter, req *http.Request, runID s
 		return
 	}
 
-	user, err := a.extractUserFromRequest(req)
+	user, err := extractUserIdentity(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
 		return
