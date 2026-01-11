@@ -216,6 +216,11 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
         pinned: plugin.meta.pinned,
         jsonData: {
           ...config,
+          // Flatten mode settings for backend compatibility
+          standardModeTemperature: config.standardMode.temperature,
+          standardModeMaxTokens: config.standardMode.maxTokens,
+          designModeTemperature: config.designMode.temperature,
+          designModeMaxTokens: config.designMode.maxTokens,
           allowedDatasources,
           defaultDatasource,
           maxQueryTimeRangeHours,

@@ -8,8 +8,8 @@
  * - Label distributions
  */
 
-import { getBackendSrv } from '@grafana/runtime';
 import type { PanelContext, TimeRange } from './contextTypes';
+import { queryLoki } from './queryService';
 
 export interface LogAnalysisResult {
   success: boolean;
@@ -124,7 +124,7 @@ export async function analyzeLogs(
 }
 
 /**
- * Execute Loki query via Grafana backend
+ * Execute Loki query via plugin backend (with security pipeline)
  */
 async function executeLogQuery(
   query: string,
@@ -132,22 +132,8 @@ async function executeLogQuery(
   timeRange: TimeRange,
   maxLogLines: number
 ): Promise<LogQueryResult> {
-  const response = await getBackendSrv().post('/api/ds/query', {
-    queries: [
-      {
-        refId: 'A',
-        expr: query,
-        queryType: 'range',
-        datasource: {
-          type: 'loki',
-          uid: datasourceUid,
-        },
-        maxLines: maxLogLines,
-      },
-    ],
-    from: timeRange.from,
-    to: timeRange.to,
-  });
+  // Use plugin's /query endpoint for security pipeline (rate limiting, validation, etc.)
+  const response = await queryLoki(datasourceUid, query, timeRange.from, timeRange.to);
 
   return {
     frames: response.results?.A?.frames || [],

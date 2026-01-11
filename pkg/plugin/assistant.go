@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,7 +60,8 @@ func detectSignalType(message string, context AssistantContext) string {
 		if strings.Contains(messageLower, "dashboard") ||
 			strings.Contains(messageLower, "panel") ||
 			strings.Contains(messageLower, "what am i seeing") ||
-			strings.Contains(messageLower, "what do i see") {
+			strings.Contains(messageLower, "what do i see") ||
+			strings.Contains(messageLower, "what am i looking at") {
 			return "dashboard"
 		}
 
@@ -286,6 +288,22 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 	messages := a.buildMessages(skill, assistantReq)
 	llmReq := a.buildLLMRequest(messages, mode)
 	llmClient := a.createLLMClient()
+
+	// DEBUG: Log tools being sent
+	backend.Logger.Info("LLM request prepared",
+		"skill", skill,
+		"mode", mode,
+		"model", llmReq.Model,
+		"toolCount", len(llmReq.Tools),
+		"temperature", llmReq.Temperature,
+	)
+	if len(llmReq.Tools) > 0 {
+		toolNames := make([]string, 0, len(llmReq.Tools))
+		for _, tool := range llmReq.Tools {
+			toolNames = append(toolNames, tool.Function.Name)
+		}
+		backend.Logger.Info("Tools included in LLM request", "tools", toolNames)
+	}
 
 	chunkChan, err := llmClient.StreamChat(ctx, llmReq, req)
 	if err != nil {
@@ -625,8 +643,15 @@ func (a *App) extractPromQLFromToolArgs(args map[string]interface{}) string {
 	filterParts = append(filterParts, a.extractOTelLabelsFromArgs(args, DatasourcePrometheus)...)
 
 	if filters, ok := args["filters"].(map[string]interface{}); ok {
-		for k, v := range filters {
-			filterParts = append(filterParts, fmt.Sprintf("%s=\"%v\"", k, v))
+		// Sort keys to ensure deterministic output
+		keys := make([]string, 0, len(filters))
+		for k := range filters {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			filterParts = append(filterParts, fmt.Sprintf("%s=\"%v\"", k, filters[k]))
 		}
 	}
 

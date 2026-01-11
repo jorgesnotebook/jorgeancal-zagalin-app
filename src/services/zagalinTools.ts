@@ -100,6 +100,54 @@ export const ZAGALIN_TOOLS: Tool[] = [
   {
     type: 'function',
     function: {
+      name: 'create_traceql_query',
+      description:
+        'Generate a TraceQL query for Tempo traces. Use this to search traces by attributes, duration, or status.',
+      parameters: {
+        type: 'object',
+        properties: {
+          traceSelector: {
+            type: 'string',
+            description: 'Trace selector expression (e.g., {service.name="api-gateway"})',
+          },
+          filters: {
+            type: 'object',
+            description: 'Additional attribute filters (e.g., {status: "error", "http.status_code": "500"})',
+          },
+          duration: {
+            type: 'string',
+            description: 'Duration filter (e.g., "> 1s", "< 100ms")',
+          },
+        },
+        required: ['traceSelector'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_trace_by_id',
+      description:
+        'Fetch and analyze a specific trace by its trace ID. Use this when the user provides a trace ID. Returns trace structure with spans, services, durations, and errors.',
+      parameters: {
+        type: 'object',
+        properties: {
+          traceId: {
+            type: 'string',
+            description: 'The trace ID to fetch (e.g., "abc123def456")',
+          },
+          datasource: {
+            type: 'string',
+            description: 'Tempo datasource UID or name',
+          },
+        },
+        required: ['traceId', 'datasource'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'get_panel_data',
       description: 'Retrieve current data from a dashboard panel',
       parameters: {
@@ -115,6 +163,36 @@ export const ZAGALIN_TOOLS: Tool[] = [
           },
         },
         required: ['dashboardUid', 'panelId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_logs',
+      description:
+        'Fetch and analyze logs from a Loki datasource. Use this when the user asks about logs they are viewing or when you need to investigate log patterns, errors, or volume. Returns log analysis with trends, error rates, and notable messages.',
+      parameters: {
+        type: 'object',
+        properties: {
+          panelId: {
+            type: 'number',
+            description: 'Panel ID to analyze (if user is viewing a specific log panel)',
+          },
+          query: {
+            type: 'string',
+            description: 'LogQL query to execute (e.g., "{namespace=\\"production\\"} |= \\"error\\"")',
+          },
+          datasource: {
+            type: 'string',
+            description: 'Loki datasource UID or name',
+          },
+          maxLines: {
+            type: 'number',
+            description: 'Maximum number of log lines to fetch (default: 1000, max: 5000)',
+          },
+        },
+        required: [],
       },
     },
   },
