@@ -92,10 +92,7 @@ export function ConfigPage() {
       {/* Personality & Behavior */}
       <FieldSet label="Personality & Behavior">
         <div>
-          <Field
-            label="Personality Preset"
-            description="Choose how Zagalin communicates with you"
-          >
+          <Field label="Personality Preset" description="Choose how Zagalin communicates with you">
             <Combobox
               options={personalityOptions}
               value={config.personality}
@@ -108,12 +105,7 @@ export function ConfigPage() {
             label="Base System Prompt (Read-Only)"
             description="Core identity and rules that cannot be changed - ensures consistent behavior"
           >
-            <TextArea
-              value={BASE_SYSTEM_PROMPT}
-              rows={6}
-              disabled={true}
-              className={s.readOnlyPrompt}
-            />
+            <TextArea value={BASE_SYSTEM_PROMPT} rows={6} disabled={true} className={s.readOnlyPrompt} />
           </Field>
 
           <Field
@@ -130,10 +122,7 @@ export function ConfigPage() {
             />
           </Field>
 
-          <Field
-            label="Temperature"
-            description="Controls creativity vs. consistency (0.0 = factual, 1.0 = creative)"
-          >
+          <Field label="Temperature" description="Controls creativity vs. consistency (0.0 = factual, 1.0 = creative)">
             <div>
               <div className={s.sliderContainer}>
                 <Slider
@@ -142,9 +131,11 @@ export function ConfigPage() {
                   max={1}
                   step={0.1}
                   value={config.standardMode.temperature}
-                  onChange={(value) => updateConfig({
-                    standardMode: { ...config.standardMode, temperature: value }
-                  })}
+                  onChange={(value) =>
+                    updateConfig({
+                      standardMode: { ...config.standardMode, temperature: value },
+                    })
+                  }
                 />
                 <span className={s.sliderValue}>{config.standardMode.temperature.toFixed(1)}</span>
               </div>
@@ -168,9 +159,11 @@ export function ConfigPage() {
                 { label: '4000 tokens (~3000 words)', value: 4000 },
               ]}
               value={config.standardMode.maxTokens}
-              onChange={(option) => updateConfig({
-                standardMode: { ...config.standardMode, maxTokens: option.value as number }
-              })}
+              onChange={(option) =>
+                updateConfig({
+                  standardMode: { ...config.standardMode, maxTokens: option.value as number },
+                })
+              }
               width={50}
             />
           </Field>
@@ -180,9 +173,7 @@ export function ConfigPage() {
       {/* Skills & Features */}
       <FieldSet label="Skills & Features" className={s.marginTop}>
         <div>
-          <p className={s.description}>
-            Enable or disable specific assistant capabilities
-          </p>
+          <p className={s.description}>Enable or disable specific assistant capabilities</p>
 
           <InlineFieldRow>
             <InlineField label="Explain Panel" labelWidth={24}>

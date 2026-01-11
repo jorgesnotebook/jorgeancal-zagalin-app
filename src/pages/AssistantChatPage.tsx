@@ -1,16 +1,9 @@
 import React, { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
-import {
-  Button,
-  TextArea,
-  useStyles2,
-  IconButton,
-  Spinner,
-  Alert,
-} from '@grafana/ui';
+import { Button, TextArea, useStyles2, IconButton, Spinner, Alert } from '@grafana/ui';
 import { useAsync } from 'react-use';
-import { finalize } from 'rxjs';
+import { finalize, Subscription } from 'rxjs';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { ZagalinColors } from '../theme/colors';
@@ -32,7 +25,25 @@ function sanitizeMarkdown(content: string): string {
   try {
     const rawHtml = marked.parse(content) as string;
     return DOMPurify.sanitize(rawHtml, {
-      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'],
+      ALLOWED_TAGS: [
+        'p',
+        'br',
+        'strong',
+        'em',
+        'code',
+        'pre',
+        'ul',
+        'ol',
+        'li',
+        'a',
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'h5',
+        'h6',
+        'blockquote',
+      ],
       ALLOWED_ATTR: ['href', 'title', 'target', 'rel'],
     });
   } catch (error) {
@@ -46,23 +57,27 @@ function AssistantChatPage() {
   const { config: zagalinConfig } = useZagalinConfig();
   const vectorSearchRef = useRef(new VectorSearchService());
 
-  const [messages, setMessages] = useState<Message[]>([{
-    role: 'system',
-    content: 'You are Zagalin, a helpful assistant that helps engineers learn how to use Grafana. You explain dashboards, help write queries, and provide troubleshooting guidance. IMPORTANT: Never ask for screenshots or additional information - provide direct answers based on the context available.',
-    timestamp: new Date(),
-  }]);
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      role: 'system',
+      content:
+        'You are Zagalin, a helpful assistant that helps engineers learn how to use Grafana. You explain dashboards, help write queries, and provide troubleshooting guidance. IMPORTANT: Never ask for screenshots or additional information - provide direct answers based on the context available.',
+      timestamp: new Date(),
+    },
+  ]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
   const [llmHealth, setLlmHealth] = useState<{ ok: boolean; error?: string; configured?: boolean } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const streamSubscriptionRef = useRef<Subscription | null>(null);
 
   const { loading: checkingLlm } = useAsync(async () => {
     try {
       const ready = await isLLMReady();
-      setLlmHealth({ok: ready, error: ready ? undefined : 'LLM plugin not configured'});
-      return {ok: ready};
+      setLlmHealth({ ok: ready, error: ready ? undefined : 'LLM plugin not configured' });
+      return { ok: ready };
     } catch (err: any) {
       setLlmHealth({ ok: false, error: 'Plugin not installed' });
       return { ok: false, error: err.message };
@@ -72,6 +87,15 @@ function AssistantChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
+
+  // Cleanup subscription on unmount
+  useEffect(() => {
+    return () => {
+      if (streamSubscriptionRef.current) {
+        streamSubscriptionRef.current.unsubscribe();
+      }
+    };
+  }, []);
 
   const handleSend = async () => {
     if (!input.trim() || isStreaming || !llmHealth?.ok) {
@@ -84,7 +108,7 @@ function AssistantChatPage() {
       timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setIsStreaming(true);
     setError(null);
@@ -101,7 +125,7 @@ function AssistantChatPage() {
 
       const assistantRequest: AssistantRequest = {
         message: enhancedQuery || userMessage.content,
-        history: messages.map(m => ({
+        history: messages.map((m) => ({
           role: m.role,
           content: m.content,
         })),
@@ -115,7 +139,7 @@ function AssistantChatPage() {
         })
       );
 
-      stream.subscribe({
+      const subscription = stream.subscribe({
         next: (chunk: StreamChunk) => {
           if (chunk.chunk) {
             accumulatedContent += chunk.chunk;
@@ -134,23 +158,50 @@ function AssistantChatPage() {
             content: accumulatedContent,
             timestamp: new Date(),
           };
-          setMessages(prev => [...prev, assistantMessage]);
+          setMessages((prev) => [...prev, assistantMessage]);
           setStreamingContent('');
           setIsStreaming(false);
+          streamSubscriptionRef.current = null;
         },
         error: (err: Error) => {
           console.error('Zagalin: Stream error', err);
           setError(err.message || 'Failed to get response from LLM');
           setIsStreaming(false);
           setStreamingContent('');
-        }
+          streamSubscriptionRef.current = null;
+        },
       });
+
+      // Store subscription for cancellation
+      streamSubscriptionRef.current = subscription;
     } catch (err: any) {
       console.error('Zagalin: Send error', err);
       setError(err.message || 'An unexpected error occurred');
       setIsStreaming(false);
       setStreamingContent('');
     }
+  };
+
+  const handleStop = () => {
+    // Unsubscribe from the stream (this will call the cleanup function in the Observable)
+    if (streamSubscriptionRef.current) {
+      streamSubscriptionRef.current.unsubscribe();
+      streamSubscriptionRef.current = null;
+    }
+
+    // If there's partial streaming content, save it as a message
+    if (streamingContent.trim()) {
+      const assistantMessage: Message = {
+        role: 'assistant',
+        content: streamingContent + '\n\n*(Response stopped by user)*',
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+    }
+
+    // Reset streaming state
+    setIsStreaming(false);
+    setStreamingContent('');
   };
 
   const handleKeyPress = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -172,179 +223,197 @@ function AssistantChatPage() {
 
   if (checkingLlm) {
     return (
-        <div className={s.container}>
-          <Spinner /> Checking LLM availability...
-        </div>
+      <div className={s.container}>
+        <Spinner /> Checking LLM availability...
+      </div>
     );
   }
 
   if (!llmHealth?.ok) {
-    const isNotInstalled = llmHealth?.error?.includes('not installed') ||
-                           llmHealth?.error?.includes('not found') ||
-                           !llmHealth;
+    const isNotInstalled =
+      llmHealth?.error?.includes('not installed') || llmHealth?.error?.includes('not found') || !llmHealth;
 
     return (
-        <div className={s.container}>
-          {isNotInstalled ? (
-            <Alert title="LLM Plugin Not Installed" severity="error">
-              <p>The Grafana LLM App plugin is not installed.</p>
-              <p>To use Zagalin, you need to:</p>
-              <ol>
-                <li>Install the <code>grafana-llm-app</code> plugin</li>
-                <li>Configure it with an OpenAI API key</li>
-              </ol>
-              <p>The plugin should auto-install when you restart the server with <code>GF_INSTALL_PLUGINS=grafana-llm-app</code></p>
-            </Alert>
-          ) : (
-            <Alert title="LLM Plugin Not Configured" severity="warning">
-              <p>The Grafana LLM App plugin is installed but not configured.</p>
-              <p>To use Zagalin:</p>
-              <ol>
-                <li>Go to <a href="/plugins/grafana-llm-app" target="_blank">LLM App Settings</a></li>
-                <li>{"Enable the plugin if it's disabled"}</li>
-                <li>Add your OpenAI API key in the configuration</li>
-                <li>Save and refresh this page</li>
-              </ol>
-              {llmHealth?.error && (
-                <p><strong>Error details:</strong> {llmHealth.error}</p>
-              )}
-            </Alert>
-          )}
-        </div>
+      <div className={s.container}>
+        {isNotInstalled ? (
+          <Alert title="LLM Plugin Not Installed" severity="error">
+            <p>The Grafana LLM App plugin is not installed.</p>
+            <p>To use Zagalin, you need to:</p>
+            <ol>
+              <li>
+                Install the <code>grafana-llm-app</code> plugin
+              </li>
+              <li>Configure it with an OpenAI API key</li>
+            </ol>
+            <p>
+              The plugin should auto-install when you restart the server with{' '}
+              <code>GF_INSTALL_PLUGINS=grafana-llm-app</code>
+            </p>
+          </Alert>
+        ) : (
+          <Alert title="LLM Plugin Not Configured" severity="warning">
+            <p>The Grafana LLM App plugin is installed but not configured.</p>
+            <p>To use Zagalin:</p>
+            <ol>
+              <li>
+                Go to{' '}
+                <a href="/plugins/grafana-llm-app" target="_blank">
+                  LLM App Settings
+                </a>
+              </li>
+              <li>{"Enable the plugin if it's disabled"}</li>
+              <li>Add your OpenAI API key in the configuration</li>
+              <li>Save and refresh this page</li>
+            </ol>
+            {llmHealth?.error && (
+              <p>
+                <strong>Error details:</strong> {llmHealth.error}
+              </p>
+            )}
+          </Alert>
+        )}
+      </div>
     );
   }
 
   return (
-      <div className={s.container}>
-        {/* Header - only show when conversation started */}
-        {messages.length > 1 && (
-          <div className={s.header}>
-            <div className={s.headerContent}>
-              <h2 className={s.title}>Zagalin</h2>
-              <Button icon="trash-alt" variant="secondary" size="sm" onClick={clearChat}>
-                Clear Chat
-              </Button>
-            </div>
+    <div className={s.container}>
+      {/* Header - only show when conversation started */}
+      {messages.length > 1 && (
+        <div className={s.header}>
+          <div className={s.headerContent}>
+            <h2 className={s.title}>Zagalin</h2>
+            <Button icon="trash-alt" variant="secondary" size="sm" onClick={clearChat}>
+              Clear Chat
+            </Button>
           </div>
-        )}
+        </div>
+      )}
 
-        {error && (
-          <div className={s.errorContainer}>
-            <Alert title="Error" severity="error" onRemove={() => setError(null)}>
-              {error}
-            </Alert>
+      {error && (
+        <div className={s.errorContainer}>
+          <Alert title="Error" severity="error" onRemove={() => setError(null)}>
+            {error}
+          </Alert>
+        </div>
+      )}
+
+      {/* Messages area - scrollable middle section */}
+      <div className={s.messagesWrapper}>
+        {messages.length === 1 ? (
+          <div className={s.welcomeScreen}>
+            <img src="public/plugins/jorgeancal-zagalin-app/img/logo.png" alt="Zagalin" className={s.logo} />
           </div>
-        )}
-
-        {/* Messages area - scrollable middle section */}
-        <div className={s.messagesWrapper}>
-          {messages.length === 1 ? (
-            <div className={s.welcomeScreen}>
-              <img src="public/plugins/jorgeancal-zagalin-app/img/logo.png" alt="Zagalin" className={s.logo} />
-            </div>
-          ) : (
-            <div className={s.messagesContainer}>
-              {/* Messages when chat started */}
-              {messages.slice(1).map((message, idx) => (
+        ) : (
+          <div className={s.messagesContainer}>
+            {/* Messages when chat started */}
+            {messages.slice(1).map((message, idx) => (
+              <div
+                key={idx}
+                className={`${s.messageRow} ${message.role === 'user' ? s.userMessageRow : s.assistantMessageRow}`}
+              >
                 <div
-                  key={idx}
-                  className={`${s.messageRow} ${
-                    message.role === 'user' ? s.userMessageRow : s.assistantMessageRow
-                  }`}
+                  className={`${s.message} ${message.role === 'user' ? s.userMessage : s.assistantMessage}`}
+                  onMouseEnter={(e) => {
+                    const actions = e.currentTarget.querySelector('[data-actions]');
+                    if (actions) {
+                      (actions as HTMLElement).style.opacity = '0.6';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    const actions = e.currentTarget.querySelector('[data-actions]');
+                    if (actions) {
+                      (actions as HTMLElement).style.opacity = '0';
+                    }
+                  }}
                 >
                   <div
-                    className={`${s.message} ${
-                      message.role === 'user' ? s.userMessage : s.assistantMessage
-                    }`}
-                    onMouseEnter={(e) => {
-                      const actions = e.currentTarget.querySelector('[data-actions]');
-                      if (actions) {
-                        (actions as HTMLElement).style.opacity = '0.6';
-                      }
+                    className={s.messageContent}
+                    dangerouslySetInnerHTML={{
+                      __html: sanitizeMarkdown(message.content),
                     }}
-                    onMouseLeave={(e) => {
-                      const actions = e.currentTarget.querySelector('[data-actions]');
-                      if (actions) {
-                        (actions as HTMLElement).style.opacity = '0';
-                      }
-                    }}
-                  >
-                    <div
-                      className={s.messageContent}
+                  />
+                  {message.role === 'assistant' && (
+                    <div className={s.messageActions} data-actions>
+                      <IconButton
+                        name="copy"
+                        size="sm"
+                        tooltip="Copy to clipboard"
+                        onClick={() => copyToClipboard(message.content)}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {streamingContent && (
+              <div className={`${s.messageRow} ${s.assistantMessageRow}`}>
+                <div className={`${s.message} ${s.assistantMessage} ${s.streamingMessage}`}>
+                  <div className={s.messageContent}>
+                    <span
                       dangerouslySetInnerHTML={{
-                        __html: sanitizeMarkdown(message.content)
+                        __html: sanitizeMarkdown(streamingContent),
                       }}
                     />
-                    {message.role === 'assistant' && (
-                      <div className={s.messageActions} data-actions>
-                        <IconButton
-                          name="copy"
-                          size="sm"
-                          tooltip="Copy to clipboard"
-                          onClick={() => copyToClipboard(message.content)}
-                        />
-                      </div>
-                    )}
+                    <Spinner inline className={s.streamingSpinner} />
                   </div>
                 </div>
-              ))}
+              </div>
+            )}
 
-              {streamingContent && (
-                <div className={`${s.messageRow} ${s.assistantMessageRow}`}>
-                  <div className={`${s.message} ${s.assistantMessage} ${s.streamingMessage}`}>
-                    <div className={s.messageContent}>
-                      <span
-                        dangerouslySetInnerHTML={{
-                          __html: sanitizeMarkdown(streamingContent)
-                        }}
-                      />
-                      <Spinner inline className={s.streamingSpinner} />
-                    </div>
-                  </div>
-                </div>
-              )}
+            <div ref={messagesEndRef} />
+          </div>
+        )}
+      </div>
 
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-
-        {/* Input area - fixed at bottom like ChatGPT */}
-        <div className={s.inputArea}>
-          <div className={s.inputContainer}>
-            <div className={s.inputWrapper}>
-              <TextArea
-                value={input}
-                onChange={e => setInput(e.currentTarget.value)}
-                onKeyDown={handleKeyPress}
-                placeholder="Ask anything..."
-                rows={2}
-                className={s.input}
-                disabled={isStreaming}
-                style={{
-                  height: 'auto',
-                  minHeight: '48px',
-                }}
-                onInput={(e) => {
-                  const target = e.target as HTMLTextAreaElement;
-                  target.style.height = 'auto';
-                  target.style.height = Math.min(target.scrollHeight, 400) + 'px';
-                }}
-              />
-              <div className={s.sendButtonWrapper}>
+      {/* Input area - fixed at bottom like ChatGPT */}
+      <div className={s.inputArea}>
+        <div className={s.inputContainer}>
+          <div className={s.inputWrapper}>
+            <TextArea
+              value={input}
+              onChange={(e) => setInput(e.currentTarget.value)}
+              onKeyDown={handleKeyPress}
+              placeholder="Ask anything..."
+              rows={2}
+              className={s.input}
+              disabled={isStreaming}
+              style={{
+                height: 'auto',
+                minHeight: '48px',
+              }}
+              onInput={(e) => {
+                const target = e.target as HTMLTextAreaElement;
+                target.style.height = 'auto';
+                target.style.height = Math.min(target.scrollHeight, 400) + 'px';
+              }}
+            />
+            <div className={s.sendButtonWrapper}>
+              {isStreaming ? (
+                <IconButton
+                  name="times"
+                  size="lg"
+                  onClick={handleStop}
+                  className={s.stopIconButton}
+                  tooltip="Stop generation"
+                  variant="destructive"
+                />
+              ) : (
                 <IconButton
                   name="comment-alt"
                   size="lg"
                   onClick={handleSend}
-                  disabled={!input.trim() || isStreaming}
+                  disabled={!input.trim()}
                   className={s.sendIconButton}
                   tooltip="Send"
                 />
-              </div>
+              )}
             </div>
           </div>
         </div>
       </div>
+    </div>
   );
 }
 
@@ -442,8 +511,13 @@ const getStyles = (theme: GrafanaTheme2) => ({
   streamingMessage: css`
     animation: pulse 1.5s ease-in-out infinite;
     @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.8; }
+      0%,
+      100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.8;
+      }
     }
   `,
   streamingSpinner: css`
@@ -584,6 +658,33 @@ const getStyles = (theme: GrafanaTheme2) => ({
     svg {
       width: 20px !important;
       height: 20px !important;
+    }
+  `,
+  stopIconButton: css`
+    background: ${theme.colors.error.main} !important;
+    border: none !important;
+    color: white !important;
+    border-radius: 50% !important;
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px !important;
+    min-height: 40px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
+    transition: all 0.2s !important;
+    margin-bottom: ${theme.spacing(0.5)};
+
+    &:hover {
+      background: ${theme.colors.error.shade} !important;
+      transform: scale(1.08);
+      box-shadow: 0 2px 8px rgba(204, 54, 54, 0.4);
+    }
+
+    svg {
+      width: 16px !important;
+      height: 16px !important;
     }
   `,
 });

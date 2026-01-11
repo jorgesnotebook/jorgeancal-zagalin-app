@@ -60,12 +60,10 @@ function generateId(): string {
 }
 
 function generateTitle(messages: StoredMessage[]): string {
-  const firstUserMessage = messages.find(m => m.role === 'user');
+  const firstUserMessage = messages.find((m) => m.role === 'user');
   if (firstUserMessage) {
     const truncated = firstUserMessage.content.slice(0, 50);
-    return truncated.length < firstUserMessage.content.length
-      ? `${truncated}...`
-      : truncated;
+    return truncated.length < firstUserMessage.content.length ? `${truncated}...` : truncated;
   }
 
   const timestamp = new Date().toLocaleString();
@@ -84,15 +82,17 @@ async function loadAllConversations(storage: StorageBackend): Promise<Conversati
     return parsed.map((conv: any) => {
       let contexts: ConversationContext[] = [];
       if (conv.context?.dashboardUid) {
-        contexts = [{
-          dashboardUid: conv.context.dashboardUid,
-          dashboardTitle: conv.context.dashboardTitle || 'Unknown Dashboard',
-          panelId: conv.context.panelId,
-          panelTitle: conv.context.panelTitle,
-          timeFrom: conv.context.timeFrom,
-          timeTo: conv.context.timeTo,
-          addedAt: new Date(conv.createdAt),
-        }];
+        contexts = [
+          {
+            dashboardUid: conv.context.dashboardUid,
+            dashboardTitle: conv.context.dashboardTitle || 'Unknown Dashboard',
+            panelId: conv.context.panelId,
+            panelTitle: conv.context.panelTitle,
+            timeFrom: conv.context.timeFrom,
+            timeTo: conv.context.timeTo,
+            addedAt: new Date(conv.createdAt),
+          },
+        ];
       } else if (conv.contexts) {
         contexts = conv.contexts.map((ctx: any) => ({
           ...ctx,
@@ -126,8 +126,8 @@ function pruneOldConversations(conversations: Conversation[]): Conversation[] {
     return conversations;
   }
 
-  const pinned = conversations.filter(c => c.isPinned);
-  const unpinned = conversations.filter(c => !c.isPinned);
+  const pinned = conversations.filter((c) => c.isPinned);
+  const unpinned = conversations.filter((c) => !c.isPinned);
 
   unpinned.sort((a, b) => a.updatedAt.getTime() - b.updatedAt.getTime());
 
@@ -142,8 +142,8 @@ function trimMessages(messages: StoredMessage[]): StoredMessage[] {
     return messages || [];
   }
 
-  const systemMessages = messages.filter(m => m.role === 'system');
-  const otherMessages = messages.filter(m => m.role !== 'system');
+  const systemMessages = messages.filter((m) => m.role === 'system');
+  const otherMessages = messages.filter((m) => m.role !== 'system');
 
   const recentMessages = otherMessages.slice(-MAX_MESSAGES_PER_CONVERSATION + systemMessages.length);
 
@@ -165,7 +165,7 @@ export class ConversationStorage {
         return b.updatedAt.getTime() - a.updatedAt.getTime();
       });
 
-      return conversations.map(conv => ({
+      return conversations.map((conv) => ({
         id: conv.id,
         title: conv.title,
         messageCount: conv.messages.length,
@@ -182,7 +182,7 @@ export class ConversationStorage {
   static async getConversation(storage: StorageBackend, id: string): Promise<Conversation | null> {
     try {
       const conversations = await loadAllConversations(storage);
-      return conversations.find(c => c.id === id) || null;
+      return conversations.find((c) => c.id === id) || null;
     } catch (error) {
       console.error('Failed to get conversation:', error);
       return null;
@@ -224,7 +224,7 @@ export class ConversationStorage {
     conversation.updatedAt = new Date();
 
     const conversations = await loadAllConversations(storage);
-    const index = conversations.findIndex(c => c.id === conversation.id);
+    const index = conversations.findIndex((c) => c.id === conversation.id);
 
     if (index >= 0) {
       conversations[index] = conversation;
@@ -239,7 +239,7 @@ export class ConversationStorage {
   static async deleteConversation(storage: StorageBackend, id: string): Promise<void> {
     try {
       const conversations = await loadAllConversations(storage);
-      const filtered = conversations.filter(c => c.id !== id);
+      const filtered = conversations.filter((c) => c.id !== id);
       await saveAllConversations(storage, filtered);
     } catch (error) {
       console.error('Failed to delete conversation:', error);
@@ -251,7 +251,7 @@ export class ConversationStorage {
     try {
       const sanitized = title.trim().slice(0, 50) || 'Untitled Chat';
       const conversations = await loadAllConversations(storage);
-      const conversation = conversations.find(c => c.id === id);
+      const conversation = conversations.find((c) => c.id === id);
 
       if (conversation) {
         conversation.title = sanitized;
@@ -267,7 +267,7 @@ export class ConversationStorage {
   static async togglePin(storage: StorageBackend, id: string): Promise<void> {
     try {
       const conversations = await loadAllConversations(storage);
-      const conversation = conversations.find(c => c.id === id);
+      const conversation = conversations.find((c) => c.id === id);
 
       if (conversation) {
         conversation.isPinned = !conversation.isPinned;
@@ -280,7 +280,11 @@ export class ConversationStorage {
     }
   }
 
-  static async addMessage(storage: StorageBackend, conversationId: string, message: Omit<StoredMessage, 'id'>): Promise<void> {
+  static async addMessage(
+    storage: StorageBackend,
+    conversationId: string,
+    message: Omit<StoredMessage, 'id'>
+  ): Promise<void> {
     const conversation = await this.getConversation(storage, conversationId);
 
     if (conversation) {

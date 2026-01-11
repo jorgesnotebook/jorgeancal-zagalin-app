@@ -1,13 +1,3 @@
-/**
- * Dashboard Reader - Actually reads and executes dashboard queries to get REAL data
- *
- * When user asks about a dashboard, we should:
- * 1. Execute the actual queries from panels
- * 2. Get real current values
- * 3. Analyze actual data
- * 4. Provide insights based on reality, not plans
- */
-
 import type { AssistantContext, PanelContext } from './assistantService';
 
 export interface PanelData {
@@ -160,14 +150,14 @@ export function isDashboardQuestion(message: string, context: AssistantContext):
     'what am i looking at',
     'what does this dashboard',
     'analyze this dashboard',
-    'what\'s on this dashboard',
+    "what's on this dashboard",
     'tell me about this dashboard',
     'what is this panel',
     'what is the panel',
     'what data',
     'what metrics',
     'what metric',
-    'what\'s this showing',
+    "what's this showing",
     'what is displayed',
     'what are the trends',
     'what trends',

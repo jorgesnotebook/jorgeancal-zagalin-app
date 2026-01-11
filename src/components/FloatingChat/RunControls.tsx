@@ -94,12 +94,7 @@ export const RunControls: React.FC<RunControlsProps> = ({ status, onPause, onRes
         />
       </div>
 
-      <Modal
-        title="Cancel Run"
-        isOpen={showCancelModal}
-        onDismiss={handleCancelDismiss}
-        className={styles.modal}
-      >
+      <Modal title="Cancel Run" isOpen={showCancelModal} onDismiss={handleCancelDismiss} className={styles.modal}>
         <div className={styles.modalContent}>
           <p>Are you sure you want to cancel this run?</p>
           <p className={styles.modalWarning}>This action cannot be undone. All progress will be lost.</p>

@@ -37,10 +37,7 @@ export interface QueryResult {
 
 export async function executeQuery(request: QueryRequest): Promise<QueryResponse> {
   try {
-    return await getBackendSrv().post<QueryResponse>(
-      `${getPluginResourcePath()}/query`,
-      request
-    );
+    return await getBackendSrv().post<QueryResponse>(`${getPluginResourcePath()}/query`, request);
   } catch (error: any) {
     console.error('Query service error:', error);
     if (error.status === 503 || error.status === 404) {

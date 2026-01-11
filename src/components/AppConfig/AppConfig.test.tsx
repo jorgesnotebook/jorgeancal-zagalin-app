@@ -35,7 +35,7 @@ describe('Components/AppConfig', () => {
   test('renders the Zagalin Configuration page with main sections', async () => {
     const plugin = {
       ...props.plugin,
-      meta: { ...props.plugin.meta, enabled: false }
+      meta: { ...props.plugin.meta, enabled: false },
     };
 
     render(<AppConfig plugin={plugin} query={props.query} />);

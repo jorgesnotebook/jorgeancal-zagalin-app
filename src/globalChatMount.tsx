@@ -61,12 +61,12 @@ export function mountGlobalChat() {
   const originalPushState = history.pushState;
   const originalReplaceState = history.replaceState;
 
-  history.pushState = function(...args) {
+  history.pushState = function (...args) {
     originalPushState.apply(this, args);
     updateVisibility();
   };
 
-  history.replaceState = function(...args) {
+  history.replaceState = function (...args) {
     originalReplaceState.apply(this, args);
     updateVisibility();
   };

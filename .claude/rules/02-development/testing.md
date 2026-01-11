@@ -1,5 +1,5 @@
 ---
-paths: "tests/**/*.spec.ts"
+paths: 'tests/**/*.spec.ts'
 ---
 
 # End-to-End Testing for Grafana Plugins
@@ -9,26 +9,30 @@ This document covers E2E testing for Grafana plugins using `@grafana/plugin-e2e`
 ## Overview
 
 **@grafana/plugin-e2e** is Grafana's official E2E testing framework for plugins:
+
 - Built on top of Playwright
 - Provides Grafana-specific fixtures and assertions
 - Supports testing across multiple Grafana versions
 - Guaranteed to work with Grafana 8.5.0+
 
 **Key advantages**:
--  Cross-version compatibility (Grafana 8.5.0+)
--  Pre-built fixtures for common scenarios
--  Custom models (page objects) for Grafana UI
--  Grafana-specific expect matchers
--  Playwright's powerful automation
+
+- Cross-version compatibility (Grafana 8.5.0+)
+- Pre-built fixtures for common scenarios
+- Custom models (page objects) for Grafana UI
+- Grafana-specific expect matchers
+- Playwright's powerful automation
 
 ## Requirements
 
 **Minimum versions**:
+
 - `@playwright/test`: >=1.41.2
 - `@grafana/plugin-e2e`: Latest version
 - Node.js: >=22 (LTS)
 
 **Installation**:
+
 ```bash
 npm install --save-dev @playwright/test @grafana/plugin-e2e
 ```
@@ -36,6 +40,7 @@ npm install --save-dev @playwright/test @grafana/plugin-e2e
 ## Configuration
 
 **Playwright Config** (`playwright.config.ts`):
+
 ```typescript
 import type { PluginOptions } from '@grafana/plugin-e2e';
 import { defineConfig, devices } from '@playwright/test';
@@ -76,6 +81,7 @@ export default defineConfig<PluginOptions>({
 ```
 
 **Key configuration points**:
+
 - **baseURL**: Grafana instance URL (default: http://localhost:3000)
 - **Auth project**: Logs in to Grafana and saves session cookie
 - **Authenticated state**: Stored in `playwright/.auth/admin.json`
@@ -118,7 +124,7 @@ import { test, expect } from '@grafana/plugin-e2e';
 
 test('data source configuration', async ({ page, createDataSourceConfigPage }) => {
   const configPage = await createDataSourceConfigPage({
-    type: 'your-datasource-id'
+    type: 'your-datasource-id',
   });
 
   // Fill configuration
@@ -152,16 +158,19 @@ test('panel renders data', async ({ page, gotoDashboardPage, readProvisionedDash
 ### Navigation Fixtures
 
 **gotoAppPage** - Navigate to app plugin page:
+
 ```typescript
 const appPage = await gotoAppPage('your-plugin-id', { queryParams: { tab: 'settings' } });
 ```
 
 **gotoDashboardPage** - Navigate to dashboard:
+
 ```typescript
 const dashboardPage = await gotoDashboardPage({ uid: 'dashboard-uid' });
 ```
 
 **gotoPanel** - Navigate to panel edit mode:
+
 ```typescript
 await gotoPanel('panel-id');
 ```
@@ -169,34 +178,38 @@ await gotoPanel('panel-id');
 ### Configuration Fixtures
 
 **createDataSourceConfigPage** - Create data source:
+
 ```typescript
 const configPage = await createDataSourceConfigPage({
   type: 'prometheus',
-  name: 'Test Prometheus'
+  name: 'Test Prometheus',
 });
 ```
 
 **createDashboard** - Create dashboard:
+
 ```typescript
 const dashboard = await createDashboard({
   title: 'Test Dashboard',
-  uid: 'test-dash'
+  uid: 'test-dash',
 });
 ```
 
 ### Provisioning Fixtures
 
 **readProvisionedDashboard** - Load provisioned dashboard:
+
 ```typescript
 const dashboard = await readProvisionedDashboard({
-  fileName: 'dashboard.json'
+  fileName: 'dashboard.json',
 });
 ```
 
 **readProvisionedDataSource** - Load provisioned data source:
+
 ```typescript
 const datasource = await readProvisionedDataSource({
-  fileName: 'datasource.yaml'
+  fileName: 'datasource.yaml',
 });
 ```
 
@@ -308,6 +321,7 @@ expect(page.getByText('Success')).toBeVisible();
 **DO**: Use provisioning for complex pre-configured resources.
 
 **Provisioning file** (`provisioning/dashboards/test-dashboard.json`):
+
 ```json
 {
   "dashboard": {
@@ -325,6 +339,7 @@ expect(page.getByText('Success')).toBeVisible();
 ```
 
 **Test using provisioned resource**:
+
 ```typescript
 test('panel renders correctly', async ({ readProvisionedDashboard, gotoDashboardPage }) => {
   const dashboard = await readProvisionedDashboard({ fileName: 'test-dashboard.json' });
@@ -340,11 +355,7 @@ test('panel renders correctly', async ({ readProvisionedDashboard, gotoDashboard
 ```typescript
 import { test, expect } from '@grafana/plugin-e2e';
 
-test('feature works when toggle enabled', async ({
-  page,
-  gotoAppPage,
-  featureToggles
-}) => {
+test('feature works when toggle enabled', async ({ page, gotoAppPage, featureToggles }) => {
   // Enable feature toggle
   await featureToggles.enable('myFeature');
 
@@ -352,11 +363,7 @@ test('feature works when toggle enabled', async ({
   await expect(page.getByText('New Feature')).toBeVisible();
 });
 
-test('fallback works when toggle disabled', async ({
-  page,
-  gotoAppPage,
-  featureToggles
-}) => {
+test('fallback works when toggle disabled', async ({ page, gotoAppPage, featureToggles }) => {
   await featureToggles.disable('myFeature');
 
   await gotoAppPage('your-plugin-id');
@@ -367,11 +374,7 @@ test('fallback works when toggle disabled', async ({
 ### Pattern 5: Testing Authentication Flows
 
 ```typescript
-test('user without permission sees error', async ({
-  page,
-  gotoAppPage,
-  createUser
-}) => {
+test('user without permission sees error', async ({ page, gotoAppPage, createUser }) => {
   // Create viewer user
   const user = await createUser({ role: 'Viewer' });
 
@@ -394,6 +397,7 @@ test('user without permission sees error', async ({
 ### CI Matrix Configuration
 
 **GitHub Actions** (`.github/workflows/e2e.yml`):
+
 ```yaml
 name: E2E Tests
 
@@ -498,11 +502,13 @@ npx playwright show-report
 ### Visual Debugging
 
 **Playwright Inspector**:
+
 ```bash
 npm run e2e -- --debug
 ```
 
 **Step through test**:
+
 - Pause execution
 - Inspect elements
 - View console logs
@@ -511,6 +517,7 @@ npm run e2e -- --debug
 ### Trace Viewer
 
 **Enable traces**:
+
 ```typescript
 // In playwright.config.ts
 use: {
@@ -519,6 +526,7 @@ use: {
 ```
 
 **View traces**:
+
 ```bash
 npx playwright show-trace trace.zip
 ```
@@ -526,6 +534,7 @@ npx playwright show-trace trace.zip
 ### Screenshots on Failure
 
 **Automatic screenshots**:
+
 ```typescript
 test('feature works', async ({ page, screenshot }) => {
   await page.goto('/app');
@@ -542,56 +551,60 @@ test('feature works', async ({ page, screenshot }) => {
 ### Console Logging
 
 **Capture console messages**:
+
 ```typescript
 test('logs are correct', async ({ page }) => {
   const logs: string[] = [];
 
-  page.on('console', msg => logs.push(msg.text()));
+  page.on('console', (msg) => logs.push(msg.text()));
 
   await page.goto('/app');
 
   // Verify no errors logged
-  expect(logs.filter(log => log.includes('Error'))).toHaveLength(0);
+  expect(logs.filter((log) => log.includes('Error'))).toHaveLength(0);
 });
 ```
 
 ## Best Practices
 
 ### DO:
- **Use test isolation** - Each test creates its own resources
- **Use provisioning** - For complex pre-configured setups
- **Test across versions** - CI matrix with multiple Grafana versions
- **Use semantic locators** - `getByRole`, `getByLabel`, not `querySelector`
- **Wait automatically** - Trust Playwright's auto-waiting
- **Test critical paths** - Focus on user workflows
- **Use page objects** - Grafana's built-in models
- **Run on CI** - Catch issues before merge
+
+**Use test isolation** - Each test creates its own resources
+**Use provisioning** - For complex pre-configured setups
+**Test across versions** - CI matrix with multiple Grafana versions
+**Use semantic locators** - `getByRole`, `getByLabel`, not `querySelector`
+**Wait automatically** - Trust Playwright's auto-waiting
+**Test critical paths** - Focus on user workflows
+**Use page objects** - Grafana's built-in models
+**Run on CI** - Catch issues before merge
 
 ### DON'T:
- **Share state between tests** - Breaks test isolation
- **Use arbitrary waits** - Flaky and slow
- **Test implementation details** - Test user-visible behavior
- **Skip version testing** - Compatibility bugs are common
- **Hardcode selectors** - Use semantic locators
- **Ignore flaky tests** - Fix or delete them
- **Test third-party code** - Test your plugin only
+
+**Share state between tests** - Breaks test isolation
+**Use arbitrary waits** - Flaky and slow
+**Test implementation details** - Test user-visible behavior
+**Skip version testing** - Compatibility bugs are common
+**Hardcode selectors** - Use semantic locators
+**Ignore flaky tests** - Fix or delete them
+**Test third-party code** - Test your plugin only
 
 ## Migration from @grafana/e2e (Cypress)
 
 ### Key Differences
 
-| Feature | @grafana/e2e (Cypress) | @grafana/plugin-e2e (Playwright) |
-|---------|------------------------|----------------------------------|
-| Framework | Cypress | Playwright |
-| Browser | Chrome only | Chrome, Firefox, Safari |
-| Speed | Slower | Faster |
-| Parallelization | Limited | Excellent |
-| API | Cypress commands | Playwright API |
-| Selectors | `e2e-selectors` | Semantic locators |
+| Feature         | @grafana/e2e (Cypress) | @grafana/plugin-e2e (Playwright) |
+| --------------- | ---------------------- | -------------------------------- |
+| Framework       | Cypress                | Playwright                       |
+| Browser         | Chrome only            | Chrome, Firefox, Safari          |
+| Speed           | Slower                 | Faster                           |
+| Parallelization | Limited                | Excellent                        |
+| API             | Cypress commands       | Playwright API                   |
+| Selectors       | `e2e-selectors`        | Semantic locators                |
 
 ### Migration Steps
 
 1. **Install Playwright**:
+
 ```bash
 npm install --save-dev @playwright/test @grafana/plugin-e2e
 ```
@@ -601,6 +614,7 @@ npm install --save-dev @playwright/test @grafana/plugin-e2e
 3. **Rewrite tests** (no automatic conversion):
 
 **Before** (Cypress):
+
 ```javascript
 describe('Plugin', () => {
   beforeEach(() => {
@@ -614,6 +628,7 @@ describe('Plugin', () => {
 ```
 
 **After** (Playwright):
+
 ```typescript
 import { test, expect } from '@grafana/plugin-e2e';
 
@@ -624,12 +639,14 @@ test('plugin loads successfully', async ({ page, gotoAppPage }) => {
 ```
 
 4. **Remove Cypress**:
+
 ```bash
 rm -rf cypress cypress.config.ts
 npm uninstall --save-dev @grafana/e2e @grafana/e2e-selectors cypress
 ```
 
 5. **Update package.json**:
+
 ```json
 {
   "scripts": {
@@ -643,10 +660,13 @@ npm uninstall --save-dev @grafana/e2e @grafana/e2e-selectors cypress
 ### Common Issues
 
 **Issue**: Tests fail with "Grafana not ready"
+
 ```
 Error: page.goto: net::ERR_CONNECTION_REFUSED
 ```
+
 **Solution**: Ensure Grafana is running and accessible
+
 ```bash
 # Check Grafana is running
 curl http://localhost:3000/api/health
@@ -656,10 +676,13 @@ npx wait-on http://localhost:3000
 ```
 
 **Issue**: Authentication fails
+
 ```
 Error: storageState file not found
 ```
+
 **Solution**: Ensure auth project runs first
+
 ```typescript
 // In playwright.config.ts
 projects: [
@@ -672,10 +695,13 @@ projects: [
 ```
 
 **Issue**: Tests are flaky
+
 ```
 Error: Timeout waiting for element
 ```
+
 **Solution**: Use proper waits and increase timeout if needed
+
 ```typescript
 // Increase timeout for slow operations
 await expect(page.getByText('Success')).toBeVisible({ timeout: 10000 });
@@ -685,10 +711,13 @@ await page.waitForLoadState('networkidle');
 ```
 
 **Issue**: Plugin not loading
+
 ```
 Error: Plugin not found
 ```
+
 **Solution**: Check plugin is mounted in Docker
+
 ```bash
 docker run -v $PWD:/var/lib/grafana/plugins/your-plugin-id ...
 ```
@@ -696,16 +725,19 @@ docker run -v $PWD:/var/lib/grafana/plugins/your-plugin-id ...
 ## Resources
 
 ### Official Documentation
+
 - **@grafana/plugin-e2e**: https://grafana.com/developers/plugin-tools/e2e-test-a-plugin/
 - **Migration Guide**: https://grafana.com/developers/plugin-tools/e2e-test-a-plugin/migrate-from-grafana-e2e
 - **Playwright Docs**: https://playwright.dev/
 
 ### Examples
+
 - **Plugin Examples**: https://github.com/grafana/grafana-plugin-examples
 - **Data Source Example**: https://github.com/grafana/grafana-plugin-examples/tree/main/examples/datasource-http-backend
 - **Panel Plugin Example**: https://github.com/grafana/grafana-plugin-examples/tree/main/examples/panel-basic
 
 ### Community
+
 - **Forum**: https://community.grafana.com/c/plugin-development
 - **GitHub Issues**: https://github.com/grafana/plugin-tools/issues
 - **Slack**: #plugin-development channel
@@ -713,11 +745,13 @@ docker run -v $PWD:/var/lib/grafana/plugins/your-plugin-id ...
 ## This Plugin's E2E Tests
 
 ### Current Setup
+
 - **Config**: `playwright.config.ts`
 - **Tests**: `tests/*.spec.ts`
 - **Coverage**: App navigation, configuration
 
 ### Running Tests
+
 ```bash
 # Start Grafana with plugin
 npm run server
@@ -730,5 +764,6 @@ npx playwright show-report
 ```
 
 ### Test Files
+
 - `tests/appNavigation.spec.ts` - App page navigation tests
 - `tests/appConfig.spec.ts` - Plugin configuration tests

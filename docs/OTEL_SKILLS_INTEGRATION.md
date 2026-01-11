@@ -32,6 +32,7 @@ Enable OTel enforcement in the plugin settings:
 ```
 
 **Settings Explained:**
+
 - `enabled` - Master switch for OTel enforcement
 - `requireServiceName` - Mandate `service.name` label on all queries
 - `requireEnvironmentName` - Mandate `deployment.environment.name` label
@@ -48,25 +49,27 @@ Enable OTel enforcement in the plugin settings:
 **When OTel enforcement is DISABLED**, these parameters are NOT present, and tools work as before.
 
 **`create_promql_query` Tool:**
+
 ```json
 {
   "metric": "http_requests_total",
   "filters": { "status": "200" },
   "aggregation": "rate",
   "timeRange": "5m",
-  "serviceName": "api-gateway",          //  NEW
-  "environmentName": "production"         //  NEW
+  "serviceName": "api-gateway", //  NEW
+  "environmentName": "production" //  NEW
 }
 ```
 
 **`create_logql_query` Tool:**
+
 ```json
 {
   "logStream": "{job=\"app\"}",
   "filter": "error",
   "parser": "json",
-  "serviceName": "payment-service",       //  NEW
-  "environmentName": "staging"            //  NEW
+  "serviceName": "payment-service", //  NEW
+  "environmentName": "staging" //  NEW
 }
 ```
 
@@ -86,6 +89,7 @@ When the LLM calls a tool to generate a query, Zagalin:
 **User:** "Show me error rate for the payment service"
 
 **LLM Tool Call:**
+
 ```json
 {
   "function": "create_promql_query",
@@ -101,6 +105,7 @@ When the LLM calls a tool to generate a query, Zagalin:
 ```
 
 **Generated Query:**
+
 ```promql
 rate(http_requests_total{service_name="payment-service",deployment_environment_name="production",status="500"}[5m])
 ```
@@ -139,21 +144,26 @@ When OTel enforcement is enabled, the LLM receives these instructions:
 The LLM is trained to extract OTel values from:
 
 **Dashboard Context:**
+
 - Dashboard title: "Production API Gateway - Errors"
   - → Extracts: `serviceName="api-gateway"`, `environmentName="production"`
 
 **Panel Queries:**
+
 ```promql
 http_requests_total{service_name="payment-service",deployment_environment_name="staging"}
 ```
+
 - → Extracts: `serviceName="payment-service"`, `environmentName="staging"`
 
 **User Message:**
+
 - "Show me logs for the payment service in production"
   - → Extracts: `serviceName="payment-service"`, `environmentName="production"`
 
 **When Unclear:**
 If the LLM cannot determine the service/environment from context, it will:
+
 1. **Ask the user**: "Which service would you like to query? (e.g., api-gateway, payment-service)"
 2. **Use defaults** if configured (fallback mode)
 3. **Reject** if strict mode enabled and no defaults
@@ -169,12 +179,14 @@ OTel enforcement integrates with these skills:
 #### 1. `generate_query` Skill
 
 **Before OTel Integration:**
+
 ```
 User: "Create a query for CPU usage"
 LLM: rate(cpu_usage_seconds_total[5m])
 ```
 
 **After OTel Integration:**
+
 ```
 User: "Create a query for CPU usage"
 LLM: [Extracts service from context or asks user]
@@ -272,6 +284,7 @@ func buildPromQLTool(settings *Settings) Tool {
 ```
 
 **Result:**
+
 - OTel enabled → Tools have `serviceName` and `environmentName` parameters
 - OTel disabled → Tools have NO OTel parameters (original behavior)
 
@@ -385,6 +398,7 @@ OTel enforcement integrates with Zagalin's security pipeline:
 8. **Audit Logging** → User, query hash, OTel scope logged
 
 **Files:**
+
 - `pkg/plugin/query_proxy.go` (lines 386-416) - OTel validation in query proxy
 - `pkg/plugin/otel_enforcement.go` - Full OTel enforcement implementation
 
@@ -402,17 +416,18 @@ OTel enforcement integrates with Zagalin's security pipeline:
     "enabled": true,
     "requireServiceName": true,
     "requireEnvironmentName": true,
-    "defaultServiceName": "",              // No defaults
-    "defaultEnvironmentName": "",          // No defaults
-    "rejectIfNoScope": true                // Reject queries without scope
+    "defaultServiceName": "", // No defaults
+    "defaultEnvironmentName": "", // No defaults
+    "rejectIfNoScope": true // Reject queries without scope
   }
 }
 ```
 
 **Behavior:**
--  Queries without `serviceName` → **REJECTED**
--  Queries without `environmentName` → **REJECTED**
--  LLM **must** ask user for service/environment if unclear
+
+- Queries without `serviceName` → **REJECTED**
+- Queries without `environmentName` → **REJECTED**
+- LLM **must** ask user for service/environment if unclear
 
 ### Example 2: Fallback Mode (Staging)
 
@@ -426,15 +441,16 @@ OTel enforcement integrates with Zagalin's security pipeline:
     "requireEnvironmentName": true,
     "defaultServiceName": "default-service",
     "defaultEnvironmentName": "staging",
-    "rejectIfNoScope": false               // Apply defaults if missing
+    "rejectIfNoScope": false // Apply defaults if missing
   }
 }
 ```
 
 **Behavior:**
--  Queries without `serviceName` → Use `"default-service"`
--  Queries without `environmentName` → Use `"staging"`
--  Less strict, but prevents accidental production queries
+
+- Queries without `serviceName` → Use `"default-service"`
+- Queries without `environmentName` → Use `"staging"`
+- Less strict, but prevents accidental production queries
 
 ### Example 3: Disabled (Development)
 
@@ -449,11 +465,12 @@ OTel enforcement integrates with Zagalin's security pipeline:
 ```
 
 **Behavior:**
--  OTel parameters **NOT present** in tool definitions
--  LLM **does NOT see** OTel context in system prompt
--  Queries generated **without** OTel labels
--  Simplest setup - works exactly as before OTel integration
--  Zero OTel overhead
+
+- OTel parameters **NOT present** in tool definitions
+- LLM **does NOT see** OTel context in system prompt
+- Queries generated **without** OTel labels
+- Simplest setup - works exactly as before OTel integration
+- Zero OTel overhead
 
 ---
 
@@ -464,10 +481,12 @@ OTel enforcement integrates with Zagalin's security pipeline:
 #### Test 1: Query Generation with OTel
 
 **Setup:**
+
 - Enable OTel enforcement (strict mode)
 - Set `requireServiceName: true`, `requireEnvironmentName: true`
 
 **Test:**
+
 1. Open a dashboard
 2. Ask: "Create a query for error rate"
 3. **Expected:** LLM asks which service to query
@@ -475,6 +494,7 @@ OTel enforcement integrates with Zagalin's security pipeline:
 5. **Expected:** Query generated with proper OTel labels
 
 **Verification:**
+
 ```promql
 rate(http_requests_total{service_name="payment-service",deployment_environment_name="production",status="500"}[5m])
 ```
@@ -482,17 +502,20 @@ rate(http_requests_total{service_name="payment-service",deployment_environment_n
 #### Test 2: Context Extraction
 
 **Setup:**
+
 - Dashboard with panel showing:
   ```promql
   http_requests_total{service_name="api-gateway",deployment_environment_name="production"}
   ```
 
 **Test:**
+
 1. Ask: "Show me CPU usage"
 2. **Expected:** LLM extracts `service_name="api-gateway"` from panel context
 3. **Expected:** Generated query includes same OTel scope
 
 **Verification:**
+
 ```promql
 rate(cpu_usage_seconds_total{service_name="api-gateway",deployment_environment_name="production"}[5m])
 ```
@@ -500,15 +523,18 @@ rate(cpu_usage_seconds_total{service_name="api-gateway",deployment_environment_n
 #### Test 3: Fallback to Defaults
 
 **Setup:**
+
 - Enable OTel enforcement (fallback mode)
 - Set `defaultServiceName: "default-app"`
 - Set `rejectIfNoScope: false`
 
 **Test:**
+
 1. Ask: "Create a query for memory usage"
 2. **Expected:** Query generated with default service name
 
 **Verification:**
+
 ```promql
 memory_usage_bytes{service_name="default-app"}
 ```
@@ -516,11 +542,13 @@ memory_usage_bytes{service_name="default-app"}
 #### Test 4: Strict Rejection
 
 **Setup:**
+
 - Enable OTel enforcement (strict mode)
 - Set `rejectIfNoScope: true`
 - No defaults configured
 
 **Test:**
+
 1. Ask: "Create a query for disk usage"
 2. LLM doesn't provide `serviceName`
 3. **Expected:** Query validation fails with error
@@ -533,16 +561,19 @@ memory_usage_bytes{service_name="default-app"}
 ### For Administrators
 
 1. **Start with Fallback Mode**
+
    - Enable OTel enforcement with defaults
    - Monitor which services are queried
    - Gradually tighten to strict mode
 
 2. **Document Your Service Names**
+
    - Maintain a list of valid service names
    - Share with users so they know what to query
    - Consider adding to dashboard annotations
 
 3. **Use Dashboard Templates**
+
    - Pre-scope dashboards to specific services
    - Users inherit OTel scope from dashboard context
    - Reduces need for manual service selection
@@ -555,15 +586,18 @@ memory_usage_bytes{service_name="default-app"}
 ### For Users
 
 1. **Include Service in Questions**
-   -  "Show me errors"
-   -  "Show me errors for payment-service"
+
+   - "Show me errors"
+   - "Show me errors for payment-service"
 
 2. **Work from Dashboards**
+
    - Navigate to service-specific dashboard first
    - Zagalin extracts OTel scope from panels automatically
    - Less manual specification needed
 
 3. **Check Existing Queries**
+
    - Look at panel queries to understand OTel labels used
    - Use same service/environment names
    - Maintain consistency across dashboard
@@ -583,6 +617,7 @@ memory_usage_bytes{service_name="default-app"}
 **Cause:** Strict mode enabled, no defaults configured, LLM not providing OTel parameters
 
 **Fix:**
+
 1. Check LLM logs to see if `serviceName`/`environmentName` are in tool calls
 2. Add defaults: `defaultServiceName: "default-app"`
 3. Or disable strict mode: `rejectIfNoScope: false`
@@ -594,6 +629,7 @@ memory_usage_bytes{service_name="default-app"}
 **Cause:** Incorrect context extraction or ambiguous dashboard
 
 **Fix:**
+
 1. Be explicit in question: "Show me errors **for api-gateway**"
 2. Check dashboard has clear service labels in panels
 3. Review backend logs to see what OTel scope was extracted
@@ -605,6 +641,7 @@ memory_usage_bytes{service_name="default-app"}
 **Cause:** OTel enforcement disabled or tool validation disabled
 
 **Fix:**
+
 1. Enable OTel enforcement: `otelEnforcement.enabled: true`
 2. Enable tool validation: `toolCallValidation: true`
 3. Check LLM is calling tools correctly (not generating raw queries)
@@ -616,6 +653,7 @@ memory_usage_bytes{service_name="default-app"}
 **Cause:** Dashboard panels don't have OTel labels, context extraction fails
 
 **Fix:**
+
 1. Add OTel labels to dashboard panel queries
 2. Or configure defaults so LLM can fall back
 3. Or mention service in dashboard title: "Payment Service - Production"
@@ -625,6 +663,7 @@ memory_usage_bytes{service_name="default-app"}
 ## Label Discovery
 
 **Important:** OpenTelemetry labels can use different naming conventions:
+
 - **Prometheus/Loki**: `service_name` (underscore) or `service.name` (dot)
 - **Tempo**: `span.service.name`, `resource.service.name`, or `service.name`
 - **Custom setups**: `app`, `service`, `env`, `environment`, etc.
@@ -632,40 +671,42 @@ memory_usage_bytes{service_name="default-app"}
 Zagalin **automatically discovers** which label names are actually used in your datasources and adapts accordingly.
 
 **See:** [OpenTelemetry Label Discovery Guide](./OTEL_LABEL_DISCOVERY.md) for detailed information on:
+
 - How discovery works
 - Supported label variations (underscore vs dot notation)
 - Fallback behavior
 - Troubleshooting
 
 **Key Features:**
--  Discovers labels from context manager (Prometheus, Loki, Tempo)
--  Tries multiple variations (`service_name`, `service.name`, `service`, `app`, `job`)
--  Caches per datasource for performance
--  Graceful fallback to sensible defaults
+
+- Discovers labels from context manager (Prometheus, Loki, Tempo)
+- Tries multiple variations (`service_name`, `service.name`, `service`, `app`, `job`)
+- Caches per datasource for performance
+- Graceful fallback to sensible defaults
 
 ---
 
 ## Summary
 
- **Conditional Integration** - OTel features **ONLY active when enforcement is enabled**
+**Conditional Integration** - OTel features **ONLY active when enforcement is enabled**
 
- **Zero Overhead When Disabled** - No OTel parameters, prompts, or injection when disabled
+**Zero Overhead When Disabled** - No OTel parameters, prompts, or injection when disabled
 
- **Automatic Label Discovery** - Works with both underscore and dot notation automatically
+**Automatic Label Discovery** - Works with both underscore and dot notation automatically
 
- **Dynamic Tool Building** - Tools adapt based on OTel settings
+**Dynamic Tool Building** - Tools adapt based on OTel settings
 
- **Automatic Scope Injection** - LLM extracts service/environment from context or asks user (when enabled)
+**Automatic Scope Injection** - LLM extracts service/environment from context or asks user (when enabled)
 
- **Security by Default** - Strict mode prevents cross-service data leakage (when enabled)
+**Security by Default** - Strict mode prevents cross-service data leakage (when enabled)
 
- **Flexible Fallbacks** - Defaults enable smooth UX while maintaining security (when enabled)
+**Flexible Fallbacks** - Defaults enable smooth UX while maintaining security (when enabled)
 
- **Full Audit Trail** - All OTel scope decisions logged for compliance (when enabled)
+**Full Audit Trail** - All OTel scope decisions logged for compliance (when enabled)
 
 The integration makes Zagalin **production-ready for multi-tenant environments** without sacrificing ease of use or affecting non-OTel deployments.
 
 ---
 
 **Last Updated:** 2026-01-03
-**Status:**  Implemented, Tested, Conditional on OTel Flag, with Automatic Label Discovery
+**Status:** Implemented, Tested, Conditional on OTel Flag, with Automatic Label Discovery

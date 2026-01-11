@@ -221,7 +221,15 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 		for {
 			select {
 			case <-ctx.Done():
-				c.logger.Debug("Stream context cancelled")
+				c.logger.Info("LLM stream cancelled by client",
+					"linesRead", lineCount,
+					"reason", ctx.Err(),
+				)
+				// Send cancellation notification
+				chunkChan <- LLMStreamChunk{
+					Chunk: "",
+					Done:  true,
+				}
 				return
 			default:
 			}
@@ -306,4 +314,99 @@ func (c *LLMClient) StreamChat(ctx context.Context, req LLMStreamRequest, incomi
 	}()
 
 	return chunkChan, nil
+}
+
+// SimpleChat makes a synchronous non-streaming LLM request and returns the complete response.
+// This is used for query validation where streaming is not needed.
+func (c *LLMClient) SimpleChat(ctx context.Context, req LLMStreamRequest) (string, error) {
+	// Force stream to false for synchronous response
+	req.Stream = false
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	llmURL := fmt.Sprintf("%s/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions", c.grafanaURL)
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", llmURL, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("X-Zagalin-Service", "backend-validation")
+
+	// Use service account token for authentication
+	if c.serviceAccountToken != "" && c.serviceAccountToken != "existing-token-via-plugin-context" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.serviceAccountToken)
+		c.logger.Debug("Using service account token for validation request")
+	} else {
+		grafanaConfig := backend.GrafanaConfigFromContext(ctx)
+		if token, err := grafanaConfig.PluginAppClientSecret(); err == nil && token != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+token)
+			c.logger.Debug("Using plugin context token for validation request")
+		} else {
+			c.logger.Warn("No service account token available for validation", "error", err)
+			return "", fmt.Errorf("service account token required for LLM validation")
+		}
+	}
+
+	// Add plugin context if available
+	pluginCtx := backend.PluginConfigFromContext(ctx)
+	if pluginCtx.OrgID > 0 {
+		httpReq.Header.Set("X-Grafana-Org-Id", fmt.Sprintf("%d", pluginCtx.OrgID))
+	}
+
+	c.logger.Debug("Making synchronous LLM validation request", "url", llmURL)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("failed to make request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		c.logger.Error("LLM validation request failed",
+			"status", resp.StatusCode,
+			"response", string(body),
+		)
+		return "", fmt.Errorf("LLM API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse OpenAI-style response
+	var openAIResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if err := json.Unmarshal(responseBody, &openAIResp); err != nil {
+		c.logger.Warn("Failed to parse LLM response", "error", err, "body", string(responseBody))
+		return "", fmt.Errorf("failed to parse LLM response: %w", err)
+	}
+
+	if openAIResp.Error != nil {
+		return "", fmt.Errorf("LLM API error: %s", openAIResp.Error.Message)
+	}
+
+	if len(openAIResp.Choices) == 0 {
+		return "", fmt.Errorf("no response from LLM")
+	}
+
+	content := openAIResp.Choices[0].Message.Content
+	c.logger.Debug("Received LLM validation response", "length", len(content))
+
+	return content, nil
 }

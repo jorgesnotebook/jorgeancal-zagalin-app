@@ -39,9 +39,11 @@ ci/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+/e2e-matrix-results/
 
 # Editor
 .idea
 
 .eslintcache
 /jorgeancal-zagalin-app/
+*.out

@@ -1,5 +1,5 @@
 ---
-paths: "**/*.{ts,tsx,js,jsx,go}"
+paths: '**/*.{ts,tsx,js,jsx,go}'
 ---
 
 # Code Quality Standards
@@ -13,6 +13,7 @@ This document defines code quality standards including formatting, linting, test
 **Tool**: Prettier 2.8.7
 
 **Configuration** (`.prettierrc.js`):
+
 ```javascript
 module.exports = {
   ...require('./.config/.prettierrc.js'),
@@ -20,6 +21,7 @@ module.exports = {
 ```
 
 **Grafana's Prettier Config** (`.config/.prettierrc.js`):
+
 - **2-space indentation**
 - **Single quotes**
 - **120-character line width**
@@ -27,6 +29,7 @@ module.exports = {
 - **Trailing commas** (ES5 compatible)
 
 **Commands**:
+
 ```bash
 npm run lint:fix           # Auto-format all files
 prettier --write .         # Format specific files
@@ -40,18 +43,21 @@ prettier --check .         # Verify formatting (CI)
 **Tool**: `gofmt` (built-in)
 
 **Commands**:
+
 ```bash
 go fmt ./...                    # Format all Go files
 gofmt -s -w pkg/                # Simplify and write
 ```
 
 **Standards**:
+
 - **Tabs for indentation** (Go convention)
 - **Max line length**: 120 characters (soft limit)
 - **Import grouping**: stdlib → external → internal
 - **Error handling**: Always check errors explicitly
 
 **Example**:
+
 ```go
 package plugin
 
@@ -72,16 +78,15 @@ import (
 **Tool**: ESLint 9.0 with TypeScript support
 
 **Configuration** (`eslint.config.mjs`):
+
 ```javascript
 import baseConfig from './.config/eslint.config.mjs';
 
-export default defineConfig([
-  { ignores: ['dist/', 'node_modules/', 'coverage/'] },
-  ...baseConfig,
-]);
+export default defineConfig([{ ignores: ['dist/', 'node_modules/', 'coverage/'] }, ...baseConfig]);
 ```
 
 **Key Rules**:
+
 - `@typescript-eslint/no-unused-vars`: Error
 - `@typescript-eslint/no-explicit-any`: Warn
 - `react/prop-types`: Off (TypeScript provides types)
@@ -89,6 +94,7 @@ export default defineConfig([
 - `react-hooks/exhaustive-deps`: Warn
 
 **Commands**:
+
 ```bash
 npm run lint           # Run linter
 npm run lint:fix       # Auto-fix issues
@@ -101,11 +107,13 @@ npm run lint:fix       # Auto-fix issues
 **Tool**: `golangci-lint` (recommended)
 
 **Install**:
+
 ```bash
 go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 ```
 
 **Configuration** (`.golangci.yml` - recommended):
+
 ```yaml
 linters:
   enable:
@@ -130,6 +138,7 @@ run:
 ```
 
 **Commands**:
+
 ```bash
 golangci-lint run                  # Run all linters
 golangci-lint run --fix            # Auto-fix issues
@@ -144,15 +153,16 @@ golangci-lint run --fix            # Auto-fix issues
 **Extends**: `.config/tsconfig.json` (Grafana's base config)
 
 **Key Settings**:
+
 ```json
 {
   "compilerOptions": {
-    "strict": true,                   // Enable all strict checks
-    "noImplicitAny": true,            // Error on implicit any
-    "strictNullChecks": true,         // Error on potential null/undefined
-    "noUnusedLocals": true,           // Error on unused variables
-    "noUnusedParameters": true,       // Error on unused params
-    "noImplicitReturns": true,        // Error on missing return statements
+    "strict": true, // Enable all strict checks
+    "noImplicitAny": true, // Error on implicit any
+    "strictNullChecks": true, // Error on potential null/undefined
+    "noUnusedLocals": true, // Error on unused variables
+    "noUnusedParameters": true, // Error on unused params
+    "noImplicitReturns": true, // Error on missing return statements
     "esModuleInterop": true,
     "skipLibCheck": true,
     "jsx": "react",
@@ -163,6 +173,7 @@ golangci-lint run --fix            # Auto-fix issues
 ```
 
 **Type Checking**:
+
 ```bash
 npm run typecheck              # Run TypeScript compiler (no emit)
 ```
@@ -174,6 +185,7 @@ npm run typecheck              # Run TypeScript compiler (no emit)
 Go is statically typed by default. Follow these practices:
 
 **DO**:
+
 ```go
 //  Explicit types for clarity
 func processUser(id string) (*User, error) {
@@ -194,6 +206,7 @@ func GetUser(userID UserID, orgID OrgID) (*User, error) {
 ```
 
 **DON'T**:
+
 ```go
 //  Avoid interface{} unless absolutely necessary
 func process(data interface{}) error {
@@ -213,6 +226,7 @@ func process[T any](data T) error {
 **Framework**: Jest 29.5 with React Testing Library
 
 **Test Structure**:
+
 ```typescript
 // ComponentName.test.tsx
 import { render, screen } from '@testing-library/react';
@@ -235,6 +249,7 @@ describe('ComponentName', () => {
 ```
 
 **Coverage Requirements**:
+
 - **Minimum**: 70% overall coverage
 - **Target**: 80%+ for critical paths
 - **Components**: Test all public components
@@ -242,6 +257,7 @@ describe('ComponentName', () => {
 - **Hooks**: Test custom hooks
 
 **Commands**:
+
 ```bash
 npm run test              # Watch mode
 npm run test:ci           # Single run with coverage
@@ -249,24 +265,25 @@ npm run test -- --coverage # Coverage report
 ```
 
 **What to Test**:
- Component rendering
- User interactions
- State changes
- API integration (mocked)
- Error handling
- Edge cases
+Component rendering
+User interactions
+State changes
+API integration (mocked)
+Error handling
+Edge cases
 
 **What NOT to Test**:
- Third-party libraries
- Trivial getters/setters
- Generated code
- Constants
+Third-party libraries
+Trivial getters/setters
+Generated code
+Constants
 
 ### Backend Testing
 
 **Framework**: Go testing package
 
 **Test Structure**:
+
 ```go
 // feature_test.go
 package plugin
@@ -294,11 +311,13 @@ func TestFeature(t *testing.T) {
 ```
 
 **Coverage Requirements**:
+
 - **Minimum**: 80% code coverage
 - **Target**: 90%+ for critical paths
 - **Security**: 100% coverage for validation, auth, rate limiting
 
 **Commands**:
+
 ```bash
 mage -v coverage                   # Run tests with coverage
 go test ./... -v                   # Run all tests
@@ -307,6 +326,7 @@ go tool cover -html=coverage.out   # View coverage report
 ```
 
 **Table-Driven Tests** (recommended):
+
 ```go
 func TestValidation(t *testing.T) {
     tests := []struct {
@@ -339,6 +359,7 @@ func TestValidation(t *testing.T) {
 **Framework**: Playwright with @grafana/plugin-e2e
 
 **Test Structure**:
+
 ```typescript
 // e2e/plugin.spec.ts
 import { test, expect } from '@grafana/plugin-e2e';
@@ -356,6 +377,7 @@ test('user can create a query', async ({ page, gotoPanel }) => {
 ```
 
 **Commands**:
+
 ```bash
 npm run e2e                    # Run E2E tests
 npm run e2e -- --headed        # Run with browser visible
@@ -364,6 +386,7 @@ npx playwright show-report     # View test report
 ```
 
 **E2E Coverage**:
+
 - Plugin loads and renders
 - Configuration saves correctly
 - Queries execute successfully
@@ -394,6 +417,7 @@ Run the full CI pipeline locally before pushing:
 ```
 
 This script runs:
+
 1. `npm ci` - Clean install
 2. `npm run typecheck` - Type checking
 3. `npm run lint` - Linting
@@ -406,12 +430,14 @@ This script runs:
 ### Code Review Checklist
 
 **Functionality**:
+
 - [ ] Code solves the stated problem
 - [ ] No regressions in existing functionality
 - [ ] Edge cases are handled
 - [ ] Error handling is appropriate
 
 **Code Quality**:
+
 - [ ] Follows KISS principles (simple, not over-engineered)
 - [ ] Functions are small (< 30 lines)
 - [ ] Names are clear and descriptive
@@ -419,12 +445,14 @@ This script runs:
 - [ ] Comments explain WHY, not WHAT
 
 **Testing**:
+
 - [ ] Unit tests cover new code
 - [ ] Tests are meaningful (not just for coverage)
 - [ ] E2E tests for critical paths
 - [ ] Tests pass locally and in CI
 
 **Security**:
+
 - [ ] Input validation at boundaries
 - [ ] No secrets in code
 - [ ] User permissions respected
@@ -432,11 +460,13 @@ This script runs:
 - [ ] No SQL injection risks
 
 **Performance**:
+
 - [ ] No obvious performance issues
 - [ ] Large data sets handled efficiently
 - [ ] No memory leaks
 
 **Documentation**:
+
 - [ ] Complex logic is documented
 - [ ] API changes documented
 - [ ] README updated if needed
@@ -454,6 +484,7 @@ This script runs:
 ```
 
 **Types**:
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `refactor`: Code refactoring (no functional change)
@@ -464,6 +495,7 @@ This script runs:
 - `style`: Code formatting (not CSS)
 
 **Examples**:
+
 ```
 feat: add query validation for PromQL
 
@@ -489,33 +521,38 @@ Update all @grafana/* packages to latest stable version.
 ### Commit Best Practices
 
 **DO**:
--  Write clear, descriptive commit messages
--  Keep commits focused (one logical change per commit)
--  Reference issue numbers (Closes #123)
--  Use imperative mood ("add feature" not "added feature")
+
+- Write clear, descriptive commit messages
+- Keep commits focused (one logical change per commit)
+- Reference issue numbers (Closes #123)
+- Use imperative mood ("add feature" not "added feature")
 
 **DON'T**:
--  Commit commented code
--  Commit debug console.log statements
--  Commit large, unfocused changes
--  Use vague messages like "fix bug" or "update code"
+
+- Commit commented code
+- Commit debug console.log statements
+- Commit large, unfocused changes
+- Use vague messages like "fix bug" or "update code"
 
 ## Pre-Commit Hooks
 
 **Location**: `.git-hooks/pre-commit`
 
 **Checks**:
+
 1. Type checking (`npm run typecheck`)
 2. Linting (`npm run lint`)
 3. Formatting verification
 4. No uncommitted changes to generated files
 
 **Setup**:
+
 ```bash
 git config core.hooksPath .git-hooks
 ```
 
 **Skip** (not recommended):
+
 ```bash
 git commit --no-verify
 ```
@@ -525,12 +562,14 @@ git commit --no-verify
 ### GitHub Actions Workflows
 
 1. **`.github/workflows/ci.yml`** - Main CI pipeline
+
    - Runs on every push and PR
    - Matrix testing across Grafana versions
    - Uploads test reports and coverage
 
 2. **`.github/workflows/release.yml`** - Release pipeline
-   - Triggers on version tags (v*)
+
+   - Triggers on version tags (v\*)
    - Signs plugin
    - Creates GitHub release
    - Publishes to Grafana plugin catalog
@@ -542,23 +581,26 @@ git commit --no-verify
 ### CI Requirements for Merge
 
 All checks must pass:
--  Type checking
--  Linting
--  Unit tests (>70% coverage)
--  E2E tests
--  Build succeeds
--  No security vulnerabilities
+
+- Type checking
+- Linting
+- Unit tests (>70% coverage)
+- E2E tests
+- Build succeeds
+- No security vulnerabilities
 
 ## Performance Standards
 
 ### Frontend Performance
 
 **Targets**:
+
 - Time to Interactive (TTI): < 3 seconds
 - First Contentful Paint (FCP): < 1.5 seconds
 - Bundle size: < 1 MB (gzipped)
 
 **Optimization Techniques**:
+
 - Code splitting (React.lazy)
 - Tree shaking (remove unused code)
 - Minimize dependencies
@@ -566,6 +608,7 @@ All checks must pass:
 - Lazy load non-critical components
 
 **Bundle Analysis**:
+
 ```bash
 npm run build -- --env analyze
 ```
@@ -573,12 +616,14 @@ npm run build -- --env analyze
 ### Backend Performance
 
 **Targets**:
+
 - API response time: < 200ms (p95)
 - Query execution: < 5 seconds (p99)
 - Memory usage: < 100 MB per instance
 - CPU usage: < 50% average
 
 **Profiling**:
+
 ```bash
 go test -cpuprofile=cpu.prof -memprofile=mem.prof -bench=.
 go tool pprof cpu.prof
@@ -590,18 +635,21 @@ go tool pprof mem.prof
 ### Static Analysis
 
 **Frontend**:
+
 - ESLint security rules enabled
 - No `eval()` or `Function()` constructor
 - No `dangerouslySetInnerHTML` without sanitization
 - Use DOMPurify for HTML sanitization
 
 **Backend**:
+
 - `gosec` for security scanning
 - `golangci-lint` with security linters
 - No SQL string concatenation
 - Input validation at all boundaries
 
 **Commands**:
+
 ```bash
 npm audit                      # Check npm dependencies
 gosec ./...                    # Go security scanner
@@ -610,6 +658,7 @@ gosec ./...                    # Go security scanner
 ### Dependency Management
 
 **Audit Dependencies**:
+
 ```bash
 npm audit                      # Check for vulnerabilities
 npm audit fix                  # Auto-fix vulnerabilities
@@ -617,6 +666,7 @@ go list -m -u all              # Check for Go updates
 ```
 
 **Update Policy**:
+
 - Security updates: Apply immediately
 - Minor/patch updates: Monthly
 - Major updates: Quarterly (with testing)
@@ -626,6 +676,7 @@ go list -m -u all              # Check for Go updates
 ### Code Documentation
 
 **TypeScript/JSDoc**:
+
 ```typescript
 /**
  * Executes a PromQL query against Prometheus datasource.
@@ -636,16 +687,13 @@ go list -m -u all              # Check for Go updates
  * @returns Query result with data frames
  * @throws {ValidationError} If query is invalid
  */
-export async function executeQuery(
-  query: string,
-  datasource: string,
-  timeRange: TimeRange
-): Promise<QueryResult> {
+export async function executeQuery(query: string, datasource: string, timeRange: TimeRange): Promise<QueryResult> {
   // Implementation
 }
 ```
 
 **Go Documentation**:
+
 ```go
 // ExecuteQuery executes a PromQL query against the specified datasource.
 // It validates the query, applies rate limiting, and returns data frames.
@@ -666,6 +714,7 @@ func ExecuteQuery(query string, datasource string, timeRange TimeRange) (*QueryR
 ### README Standards
 
 Every module/feature should have:
+
 - Purpose and overview
 - Setup instructions
 - Usage examples
@@ -676,6 +725,7 @@ Every module/feature should have:
 ## Summary
 
 **Quality Gates** (must pass):
+
 1.  Type checking
 2.  Linting
 3.  Formatting
@@ -685,12 +735,14 @@ Every module/feature should have:
 7.  Security audit passes
 
 **Before Every Commit**:
+
 - Run `npm run typecheck`
 - Run `npm run lint`
 - Run `npm run test:ci`
 - Review your changes (git diff)
 
 **Before Every Push**:
+
 - Run `./ci-local.sh` (full CI pipeline)
 - Ensure all tests pass
 - Verify no console warnings/errors

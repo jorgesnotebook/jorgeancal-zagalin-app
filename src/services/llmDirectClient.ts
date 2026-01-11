@@ -43,7 +43,8 @@ export function streamGrafanaLLM(request: LLMStreamRequest): Observable<LLMStrea
   return new Observable<LLMStreamChunk>((subscriber) => {
     import('@grafana/llm')
       .then(({ llm }) => {
-        llm.enabled()
+        llm
+          .enabled()
           .then((enabled) => {
             if (!enabled) {
               subscriber.error(new Error('grafana-llm-app is not enabled or configured'));
@@ -97,83 +98,83 @@ export function streamGrafanaLLM(request: LLMStreamRequest): Observable<LLMStrea
 function streamLLMFallback(request: LLMStreamRequest, subscriber: any): void {
   const url = '/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions';
 
-    const requestBody = {
-      ...request,
-      stream: true,
-    };
+  const requestBody = {
+    ...request,
+    stream: true,
+  };
 
-    fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
-      },
-      body: JSON.stringify(requestBody),
-      credentials: 'same-origin',
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          const error = await response.text();
-          throw new Error(`LLM API error: ${response.status} - ${error}`);
-        }
+  fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+    },
+    body: JSON.stringify(requestBody),
+    credentials: 'same-origin',
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`LLM API error: ${response.status} - ${error}`);
+      }
 
-        if (!response.body) {
-          throw new Error('No response body');
-        }
+      if (!response.body) {
+        throw new Error('No response body');
+      }
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
 
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
 
-            if (done) {
-              subscriber.complete();
-              break;
+          if (done) {
+            subscriber.complete();
+            break;
+          }
+
+          const text = decoder.decode(value, { stream: true });
+
+          const lines = text.split('\n');
+          for (const line of lines) {
+            if (!line.trim() || !line.startsWith('data: ')) {
+              continue;
             }
 
-            const text = decoder.decode(value, { stream: true });
+            const data = line.substring(6);
 
-            const lines = text.split('\n');
-            for (const line of lines) {
-              if (!line.trim() || !line.startsWith('data: ')) {
-                continue;
+            if (data === '[DONE]') {
+              subscriber.next({ done: true });
+              subscriber.complete();
+              return;
+            }
+
+            try {
+              const openAIChunk = JSON.parse(data);
+
+              if (openAIChunk.choices && openAIChunk.choices[0]?.delta?.content) {
+                subscriber.next({
+                  chunk: openAIChunk.choices[0].delta.content,
+                  done: false,
+                });
               }
 
-              const data = line.substring(6);
-
-              if (data === '[DONE]') {
+              if (openAIChunk.choices && openAIChunk.choices[0]?.finish_reason) {
                 subscriber.next({ done: true });
                 subscriber.complete();
                 return;
               }
-
-              try {
-                const openAIChunk = JSON.parse(data);
-
-                if (openAIChunk.choices && openAIChunk.choices[0]?.delta?.content) {
-                  subscriber.next({
-                    chunk: openAIChunk.choices[0].delta.content,
-                    done: false,
-                  });
-                }
-
-                if (openAIChunk.choices && openAIChunk.choices[0]?.finish_reason) {
-                  subscriber.next({ done: true });
-                  subscriber.complete();
-                  return;
-                }
-              } catch (parseError) {
-                console.warn('[Zagalin] Failed to parse SSE chunk:', data, parseError);
-              }
+            } catch (parseError) {
+              console.warn('[Zagalin] Failed to parse SSE chunk:', data, parseError);
             }
           }
-        } catch (readError) {
-          subscriber.error(readError);
         }
-      })
-      .catch((fetchError) => {
-        subscriber.error(fetchError);
-      });
+      } catch (readError) {
+        subscriber.error(readError);
+      }
+    })
+    .catch((fetchError) => {
+      subscriber.error(fetchError);
+    });
 }

@@ -124,61 +124,72 @@ func detectSignalType(message string, context AssistantContext) string {
 	return "general"
 }
 
-func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
-	ctx := req.Context()
+type llmChatPipeline struct {
+	user         *UserIdentity
+	assistantReq AssistantRequest
+	skill        string
+	mode         string
+	messages     []AssistantMessage
+	llmReq       LLMStreamRequest
+}
 
-	user, err := a.extractUserFromRequest(req)
-	if err != nil {
-		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
-		return
-	}
+func (a *App) authenticateRequest(req *http.Request) (*UserIdentity, error) {
+	return a.extractUserFromRequest(req)
+}
 
+func (a *App) checkRateLimit(user *UserIdentity) error {
 	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
 		if !a.guardrails.rateLimiter.Allow(user.UserLogin) {
 			backend.Logger.Warn("Rate limit exceeded", "user", user.UserLogin)
-			sendErrorResponse(rw, "Rate limit exceeded", fmt.Errorf("too many requests"), http.StatusTooManyRequests)
-			return
+			return fmt.Errorf("too many requests")
 		}
 	}
+	return nil
+}
 
+func (a *App) parseAssistantRequest(req *http.Request) (*AssistantRequest, error) {
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
-		sendErrorResponse(rw, "Failed to read request body", err, http.StatusBadRequest)
-		return
+		return nil, fmt.Errorf("failed to read request body: %w", err)
 	}
 	defer req.Body.Close()
 
 	var assistantReq AssistantRequest
 	if err := json.Unmarshal(body, &assistantReq); err != nil {
-		sendErrorResponse(rw, "Invalid request format", err, http.StatusBadRequest)
-		return
+		return nil, fmt.Errorf("invalid request format: %w", err)
 	}
 
 	if assistantReq.Message == "" && len(assistantReq.History) == 0 {
-		sendErrorResponse(rw, "Message or history required", fmt.Errorf("empty request"), http.StatusBadRequest)
-		return
+		return nil, fmt.Errorf("message or history required")
 	}
 
-	skill := assistantReq.SkillHint
+	return &assistantReq, nil
+}
+
+func (a *App) determineSkillAndMode(assistantReq *AssistantRequest) (skill string, mode string) {
+	skill = assistantReq.SkillHint
 	if skill == "" {
 		skill = DetectSkill(assistantReq.Message, assistantReq.Context)
 	}
 
-	mode := assistantReq.Mode
+	mode = assistantReq.Mode
 	if mode == "" {
 		mode = "standard"
 	}
 
-	systemPrompt := BuildSystemPrompt(skill, assistantReq.Context, a.settings, a.contextManager, mode)
+	return skill, mode
+}
 
+func (a *App) buildMessages(skill string, assistantReq *AssistantRequest) []AssistantMessage {
+	systemPrompt := BuildSystemPrompt(skill, assistantReq.Context, a.settings, a.contextManager, assistantReq.Mode)
 	userPrompt := BuildUserPrompt(skill, assistantReq.Message, assistantReq.Context)
 
-	messages := []AssistantMessage{}
-
-	messages = append(messages, AssistantMessage{
-		Role:    "system",
-		Content: systemPrompt,
-	})
+	messages := []AssistantMessage{
+		{
+			Role:    "system",
+			Content: systemPrompt,
+		},
+	}
 
 	messages = append(messages, assistantReq.History...)
 
@@ -202,6 +213,10 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		}
 	}
 
+	return messages
+}
+
+func (a *App) buildLLMRequest(messages []AssistantMessage, mode string) LLMStreamRequest {
 	maxTokens := a.settings.StandardModeMaxTokens
 	temperature := a.settings.StandardModeTemperature
 
@@ -218,7 +233,7 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		backend.Logger.Debug("Using default model from grafana-llm-app (no model configured in Zagalin settings)", "mode", mode)
 	}
 
-	llmReq := LLMStreamRequest{
+	return LLMStreamRequest{
 		Model:               model,
 		Messages:            messages,
 		Temperature:         temperature,
@@ -228,6 +243,9 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		ToolChoice:          "auto",
 		Stream:              true,
 	}
+}
+
+func (a *App) createLLMClient() *LLMClient {
 	serviceAccountToken := ""
 	if a.settings != nil && a.settings.ServiceAccountToken != "" {
 		serviceAccountToken = a.settings.ServiceAccountToken
@@ -236,12 +254,38 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		backend.Logger.Debug("No service account token in settings, will try plugin context fallback")
 	}
 
-	llmClient := NewLLMClient(
+	return NewLLMClient(
 		getGrafanaURL(),
 		serviceAccountToken,
 		http.DefaultClient,
 		backend.Logger,
 	)
+}
+
+func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+
+	user, err := a.authenticateRequest(req)
+	if err != nil {
+		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
+		return
+	}
+
+	if err := a.checkRateLimit(user); err != nil {
+		sendErrorResponse(rw, "Rate limit exceeded", err, http.StatusTooManyRequests)
+		return
+	}
+
+	assistantReq, err := a.parseAssistantRequest(req)
+	if err != nil {
+		sendErrorResponse(rw, "Invalid request", err, http.StatusBadRequest)
+		return
+	}
+
+	skill, mode := a.determineSkillAndMode(assistantReq)
+	messages := a.buildMessages(skill, assistantReq)
+	llmReq := a.buildLLMRequest(messages, mode)
+	llmClient := a.createLLMClient()
 
 	chunkChan, err := llmClient.StreamChat(ctx, llmReq, req)
 	if err != nil {
@@ -256,7 +300,7 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		"user", user.UserLogin,
 		"orgId", user.OrgID,
 		"skill", skill,
-		"signalType", signalType, 
+		"signalType", signalType,
 		"hasDashboardContext", assistantReq.Context.Dashboard != nil,
 		"messageLength", len(assistantReq.Message),
 		"historyLength", len(assistantReq.History),
@@ -312,7 +356,7 @@ func streamSSEResponse(ctx context.Context, rw http.ResponseWriter, chunkChan <-
 	}
 }
 
-func (a *App) streamSSEResponseWithValidation(ctx context.Context, rw http.ResponseWriter, chunkChan <-chan LLMStreamChunk, skill string, user *UserInfo) {
+func (a *App) streamSSEResponseWithValidation(ctx context.Context, rw http.ResponseWriter, chunkChan <-chan LLMStreamChunk, skill string, user *UserIdentity) {
 	rw.Header().Set("Content-Type", "text/event-stream")
 	rw.Header().Set("Cache-Control", "no-cache")
 	rw.Header().Set("Connection", "keep-alive")
@@ -334,10 +378,20 @@ func (a *App) streamSSEResponseWithValidation(ctx context.Context, rw http.Respo
 
 	backend.Logger.Debug("Starting SSE stream with validation")
 
+	startTime := time.Now()
+	chunkCount := 0
+
 	for {
 		select {
 		case <-ctx.Done():
-			backend.Logger.Debug("Client disconnected")
+			// Client disconnected (user clicked stop or network issue)
+			backend.Logger.Info("LLM stream cancelled - client disconnected",
+				"user", user.UserLogin,
+				"skill", skill,
+				"duration", time.Since(startTime),
+				"chunksDelivered", chunkCount,
+				"reason", ctx.Err(),
+			)
 			return
 
 		case chunk, ok := <-chunkChan:
@@ -347,6 +401,8 @@ func (a *App) streamSSEResponseWithValidation(ctx context.Context, rw http.Respo
 				flusher.Flush()
 				return
 			}
+
+			chunkCount++
 
 			backend.Logger.Debug("Received chunk from LLM", "hasToolCall", chunk.ToolCall != nil, "hasChunk", chunk.Chunk != "", "hasError", chunk.Error != "", "done", chunk.Done)
 
@@ -386,6 +442,15 @@ func (a *App) streamSSEResponseWithValidation(ctx context.Context, rw http.Respo
 			flusher.Flush()
 
 			if chunk.Done || chunk.Error != "" {
+				// Stream completed successfully or with error
+				backend.Logger.Info("LLM stream completed",
+					"user", user.UserLogin,
+					"skill", skill,
+					"duration", time.Since(startTime),
+					"chunksDelivered", chunkCount,
+					"completedSuccessfully", chunk.Done && chunk.Error == "",
+					"error", chunk.Error,
+				)
 				return
 			}
 		}
@@ -408,7 +473,7 @@ func isCompleteJSON(s string) bool {
 	return braceCount == 0
 }
 
-func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, user *UserInfo) LLMStreamChunk {
+func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, user *UserIdentity) LLMStreamChunk {
 	var args map[string]interface{}
 	if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
 		return LLMStreamChunk{
@@ -608,7 +673,7 @@ func (a *App) extractLogQLFromToolArgs(args map[string]interface{}) string {
 	return query
 }
 
-func (a *App) extractUserFromRequest(req *http.Request) (*UserInfo, error) {
+func (a *App) extractUserFromRequest(req *http.Request) (*UserIdentity, error) {
 	pluginContext := backend.PluginConfigFromContext(req.Context())
 
 	if pluginContext.User == nil {
@@ -621,16 +686,13 @@ func (a *App) extractUserFromRequest(req *http.Request) (*UserInfo, error) {
 		return nil, fmt.Errorf("user login is empty")
 	}
 
-	return &UserInfo{
+	return &UserIdentity{
+		UserID:    0, // backend.User doesn't expose ID
 		UserLogin: user.Login,
+		UserEmail: user.Email,
 		OrgID:     pluginContext.OrgID,
+		OrgName:   "", // backend.PluginContext doesn't expose OrgName
 	}, nil
-}
-
-
-type UserInfo struct {
-	UserLogin string
-	OrgID     int64
 }
 
 func getGrafanaURL() string {
@@ -680,11 +742,7 @@ func (a *App) orchestrateRunFull(ctx context.Context, run *RunState, req Assista
 
 	defer func() {
 		a.runManager.CloseEventChannel(run.RunID)
-
-		go func() {
-			time.Sleep(1 * time.Hour)
-			a.runManager.CleanupRun(run.RunID)
-		}()
+		a.runManager.ScheduleCleanup(run.RunID, 1*time.Hour)
 	}()
 
 	EmitRunStarted(run.EventChan, run.RunID, run.ConversationID)
@@ -1076,7 +1134,7 @@ func (a *App) buildFinalMessage(plan *ExecutionPlan, artifacts []Artifact) strin
 	message.WriteString("\n")
 
 	if len(artifacts) > 0 {
-		message.WriteString("**Evidence:**\n")
+		message.WriteString("**Artifacts:**\n")
 		queryCount := 0
 		linkCount := 0
 		traceCount := 0
@@ -1103,7 +1161,7 @@ func (a *App) buildFinalMessage(plan *ExecutionPlan, artifacts []Artifact) strin
 	}
 
 	message.WriteString("**Conclusion:**\n")
-	message.WriteString("The investigation has been completed according to the plan. Review the evidence above and the detailed findings in each step.\n\n")
+	message.WriteString("The investigation has been completed according to the plan. Review the artifacts above and the detailed findings in each step.\n\n")
 
 	message.WriteString("**Next Steps:**\n")
 	message.WriteString("- Review the generated queries and artifacts\n")

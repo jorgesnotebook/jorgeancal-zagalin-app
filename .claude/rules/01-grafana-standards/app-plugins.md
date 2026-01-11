@@ -1,5 +1,5 @@
 ---
-paths: "{src/**/*.{ts,tsx},pkg/**/*.go}"
+paths: '{src/**/*.{ts,tsx},pkg/**/*.go}'
 ---
 
 # App Plugin Development Guide
@@ -9,6 +9,7 @@ This document provides comprehensive guidance for developing Grafana app plugins
 ## What is an App Plugin?
 
 **App plugins** enable comprehensive, integrated solutions with:
+
 - Custom pages and navigation
 - Multiple plugin types bundled together (panels, data sources)
 - Preconfigured dashboards
@@ -22,12 +23,14 @@ This document provides comprehensive guidance for developing Grafana app plugins
 ## App Plugin Architecture
 
 ### Frontend Components
+
 - **Pages**: React components for custom views
 - **Navigation**: Links in Grafana's main navigation
 - **Configuration**: Settings UI for plugin setup
 - **UI Extensions**: Extend existing Grafana UI
 
 ### Backend Components (Optional)
+
 - **HTTP Resources**: Custom API endpoints
 - **Data Queries**: Query proxying with security
 - **Health Checks**: Plugin status monitoring
@@ -57,6 +60,7 @@ export const MyPage = () => {
 ```
 
 **Register in plugin.json**:
+
 ```json
 {
   "includes": [
@@ -76,6 +80,7 @@ export const MyPage = () => {
 Add backend components for secure API integration:
 
 **Why add a backend?**
+
 - Secure API calls (hide credentials from frontend)
 - Query proxying with validation
 - Custom HTTP resources
@@ -83,6 +88,7 @@ Add backend components for secure API integration:
 - Rate limiting and governance
 
 **Backend Structure**:
+
 ```
 pkg/
  main.go              # Plugin binary entry
@@ -93,6 +99,7 @@ pkg/
 ```
 
 **Backend Capabilities**:
+
 1. **Custom Resources**: HTTP endpoints for flexible integrations
 2. **Query Handler**: Process data queries
 3. **Health Check**: Report plugin status
@@ -104,6 +111,7 @@ pkg/
 **Security Model**: All backend requests include user context from Grafana.
 
 **User Identity Extraction**:
+
 ```go
 import "github.com/grafana/grafana-plugin-sdk-go/backend"
 
@@ -118,14 +126,16 @@ func extractUserIdentity(ctx context.Context) (*UserIdentity, error) {
 ```
 
 **Never**:
--  Store user credentials in frontend
--  Bypass Grafana's authentication
--  Make authenticated API calls from frontend
+
+- Store user credentials in frontend
+- Bypass Grafana's authentication
+- Make authenticated API calls from frontend
 
 **Always**:
--  Proxy through backend with user context
--  Use Grafana's secure storage for secrets
--  Forward user identity to downstream services
+
+- Proxy through backend with user context
+- Use Grafana's secure storage for secrets
+- Forward user identity to downstream services
 
 **This plugin implements**: `pkg/plugin/query_proxy.go::extractUserIdentity()`
 
@@ -149,6 +159,7 @@ func (a *App) CallResource(ctx context.Context, req *backend.CallResourceRequest
 ```
 
 **Resource Handler Use Cases**:
+
 - Custom authentication proxies
 - Auto-complete data for query editors
 - File uploads/downloads
@@ -162,12 +173,14 @@ func (a *App) CallResource(ctx context.Context, req *backend.CallResourceRequest
 Use service accounts for backend-to-Grafana API calls:
 
 **Why use service accounts?**
+
 - Backend operations independent of user sessions
 - Background tasks (context refresh, caching)
 - API calls without user context
 - Token management and rotation
 
 **Implementation**:
+
 ```go
 // Create service account token via Grafana API
 // Store in plugin settings (secureJsonData)
@@ -178,6 +191,7 @@ req.Header.Set("Authorization", "Bearer "+serviceAccountToken)
 ```
 
 **Security**:
+
 - Store tokens in `secureJsonData` (encrypted)
 - Rotate tokens regularly
 - Use least-privilege permissions
@@ -190,11 +204,13 @@ req.Header.Set("Authorization", "Bearer "+serviceAccountToken)
 Implement fine-grained permissions for plugin features:
 
 **Grafana Roles**:
+
 - **Viewer**: Read-only access
 - **Editor**: Can create/edit
 - **Admin**: Full access
 
 **Page-Level RBAC** (plugin.json):
+
 ```json
 {
   "includes": [
@@ -209,6 +225,7 @@ Implement fine-grained permissions for plugin features:
 ```
 
 **Runtime RBAC Check**:
+
 ```typescript
 import { contextSrv } from '@grafana/runtime';
 
@@ -218,6 +235,7 @@ if (contextSrv.hasRole('Admin')) {
 ```
 
 **Backend RBAC**:
+
 ```go
 user := backend.PluginConfigFromContext(ctx).User
 
@@ -231,6 +249,7 @@ if user.Role != "Admin" {
 Bundle preconfigured dashboards with your plugin:
 
 **Dashboard Structure**:
+
 ```
 src/dashboards/
  overview.json
@@ -238,6 +257,7 @@ src/dashboards/
 ```
 
 **Register in plugin.json**:
+
 ```json
 {
   "includes": [
@@ -251,6 +271,7 @@ src/dashboards/
 ```
 
 **Best Practices**:
+
 - Include default dashboards for quick start
 - Use plugin's data sources in dashboards
 - Provide both overview and detailed dashboards
@@ -261,6 +282,7 @@ src/dashboards/
 Implement feature flags for conditional functionality:
 
 **Configuration**:
+
 ```typescript
 interface PluginSettings {
   enableBetaFeatures?: boolean;
@@ -269,6 +291,7 @@ interface PluginSettings {
 ```
 
 **Usage**:
+
 ```typescript
 const settings = getPluginSettings();
 
@@ -278,6 +301,7 @@ if (settings.enableBetaFeatures) {
 ```
 
 **Backend Feature Toggles**:
+
 ```go
 type Settings struct {
     EnableQueryValidation bool `json:"enableQueryValidation"`
@@ -286,6 +310,7 @@ type Settings struct {
 ```
 
 **When to use**:
+
 - Beta/experimental features
 - Gradual rollouts
 - A/B testing
@@ -298,6 +323,7 @@ type Settings struct {
 Control how users navigate to your plugin:
 
 **Default Root Page**:
+
 ```json
 {
   "defaultNavUrl": "/a/your-plugin-id/home"
@@ -305,6 +331,7 @@ Control how users navigate to your plugin:
 ```
 
 **Deep Linking**:
+
 ```typescript
 import { locationService } from '@grafana/runtime';
 
@@ -316,15 +343,18 @@ locationService.goBack();
 ```
 
 **Breadcrumbs**:
+
 ```typescript
 import { PluginPage } from '@grafana/runtime';
 
-<PluginPage pageNav={{
-  text: 'Details',
-  parentItem: { text: 'Home', url: '/a/your-plugin-id/home' }
-}}>
+<PluginPage
+  pageNav={{
+    text: 'Details',
+    parentItem: { text: 'Home', url: '/a/your-plugin-id/home' },
+  }}
+>
   {/* Content */}
-</PluginPage>
+</PluginPage>;
 ```
 
 **This plugin implements**: Global floating chat button using portal mounting (persists across navigation)
@@ -334,15 +364,17 @@ import { PluginPage } from '@grafana/runtime';
 Implement proper error handling patterns:
 
 **Frontend Error Boundaries**:
+
 ```typescript
 import { ErrorBoundaryAlert } from '@grafana/ui';
 
 <ErrorBoundaryAlert>
   <YourComponent />
-</ErrorBoundaryAlert>
+</ErrorBoundaryAlert>;
 ```
 
 **Backend Error Responses**:
+
 ```go
 func handleError(sender backend.CallResourceResponseSender, statusCode int, message string) error {
     return sender.Send(&backend.CallResourceResponse{
@@ -356,6 +388,7 @@ func handleError(sender backend.CallResourceResponseSender, statusCode int, mess
 ```
 
 **Error Types**:
+
 - **Validation errors**: 400 Bad Request
 - **Authentication errors**: 401 Unauthorized
 - **Permission errors**: 403 Forbidden
@@ -363,14 +396,16 @@ func handleError(sender backend.CallResourceResponseSender, statusCode int, mess
 - **Server errors**: 500 Internal Server Error
 
 **Never**:
--  Expose stack traces to users
--  Log sensitive data in errors
--  Return raw database errors
+
+- Expose stack traces to users
+- Log sensitive data in errors
+- Return raw database errors
 
 **Always**:
--  Sanitize error messages
--  Log errors with context
--  Provide actionable error messages
+
+- Sanitize error messages
+- Log errors with context
+- Provide actionable error messages
 
 ## Performance Best Practices
 
@@ -386,12 +421,13 @@ const LazyPage = lazy(() => import('./pages/HeavyPage'));
 
 <Suspense fallback={<LoadingPlaceholder text="Loading..." />}>
   <LazyPage />
-</Suspense>
+</Suspense>;
 ```
 
 ### Caching Strategies
 
 **Frontend Caching**:
+
 ```typescript
 // Use React Query for data caching
 import { useQuery } from '@tanstack/react-query';
@@ -404,6 +440,7 @@ const { data, isLoading } = useQuery({
 ```
 
 **Backend Caching**:
+
 ```go
 // Cache expensive operations
 type Cache struct {
@@ -504,6 +541,7 @@ func (r *RateLimiter) Allow(userID string) bool {
 ```
 
 **Access in backend**:
+
 ```go
 apiKey := pluginCtx.DecryptedSecureJSONData["apiKey"]
 ```
@@ -525,6 +563,7 @@ const sanitizedHTML = DOMPurify.sanitize(llmResponse);
 For integrating Large Language Models into app plugins:
 
 **Via grafana-llm-app**:
+
 - Use backend proxy pattern (secure)
 - Never call LLM APIs from frontend
 - Construct system prompts on backend
@@ -582,6 +621,7 @@ test('app plugin loads successfully', async ({ page, gotoAppPage }) => {
 Work with nested plugins:
 
 **Bundle other plugins**:
+
 ```json
 {
   "dependencies": {
@@ -597,6 +637,7 @@ Work with nested plugins:
 ```
 
 **Check if plugin is installed**:
+
 ```typescript
 import { getBackendSrv } from '@grafana/runtime';
 
@@ -610,6 +651,7 @@ const isInstalled = await getBackendSrv().get('/api/plugins/grafana-llm-app');
 Enable GitOps workflows by supporting provisioning:
 
 **Provisioning File** (`provisioning/plugins/your-plugin.yaml`):
+
 ```yaml
 apiVersion: 1
 
@@ -625,6 +667,7 @@ apps:
 ```
 
 **Test provisioning**:
+
 ```bash
 # Place file in Grafana provisioning directory
 cp provisioning/plugins/your-plugin.yaml /etc/grafana/provisioning/plugins/
@@ -644,6 +687,7 @@ Add per-user storage for preferences using Grafana's built-in user storage API.
 ### React Hook Pattern (Recommended)
 
 **Using `usePluginUserStorage` hook**:
+
 ```typescript
 import { usePluginUserStorage } from '@grafana/runtime';
 import { useState, useEffect } from 'react';
@@ -709,6 +753,7 @@ function MyComponent() {
 ### API Methods
 
 **getItem(key)** - Retrieve stored value:
+
 ```typescript
 const value = await storage.getItem<T>('myKey');
 if (value) {
@@ -717,6 +762,7 @@ if (value) {
 ```
 
 **setItem(key, value)** - Store value:
+
 ```typescript
 await storage.setItem('myKey', { foo: 'bar' });
 ```
@@ -724,23 +770,26 @@ await storage.setItem('myKey', { foo: 'bar' });
 ### Best Practices
 
 **DO**:
--  Use for user preferences (theme, default values, UI state)
--  Provide defaults when no stored value exists
--  Handle errors gracefully (storage may fail)
--  Use TypeScript types for type safety
--  Load preferences on component mount
--  Save immediately when user changes preference
+
+- Use for user preferences (theme, default values, UI state)
+- Provide defaults when no stored value exists
+- Handle errors gracefully (storage may fail)
+- Use TypeScript types for type safety
+- Load preferences on component mount
+- Save immediately when user changes preference
 
 **DON'T**:
--  Store sensitive data (passwords, API keys, tokens)
--  Store large amounts of data (>1MB per user)
--  Use for shared team data (user storage is per-user)
--  Assume storage is always available (provide fallback)
--  Store frequently changing data (use component state instead)
+
+- Store sensitive data (passwords, API keys, tokens)
+- Store large amounts of data (>1MB per user)
+- Use for shared team data (user storage is per-user)
+- Assume storage is always available (provide fallback)
+- Store frequently changing data (use component state instead)
 
 ### Fallback Strategy
 
 **Automatic fallback to localStorage**:
+
 ```typescript
 // Grafana handles fallback automatically
 // No additional code needed - same API works for both
@@ -752,6 +801,7 @@ localStorage.setItem('grafana.plugin.your-plugin-id.preferences', JSON.stringify
 ### Migration from localStorage
 
 **If you previously used localStorage directly**:
+
 ```typescript
 // Old approach (localStorage)
 localStorage.setItem('myPlugin.preferences', JSON.stringify(prefs));
@@ -762,6 +812,7 @@ await storage.setItem('preferences', prefs);
 ```
 
 **Migration helper**:
+
 ```typescript
 function migrateFromLocalStorage() {
   const storage = usePluginUserStorage();
@@ -794,12 +845,13 @@ function migrateFromLocalStorage() {
 **For complex storage needs or Grafana < 11.5**:
 
 **Frontend**:
+
 ```typescript
 import { getBackendSrv } from '@grafana/runtime';
 
 // Save user preference
 await getBackendSrv().post('/api/plugins/your-plugin-id/resources/user-storage', {
-  preference: 'value'
+  preference: 'value',
 });
 
 // Load user preference
@@ -807,6 +859,7 @@ const data = await getBackendSrv().get('/api/plugins/your-plugin-id/resources/us
 ```
 
 **Backend**:
+
 ```go
 // Store per-user data in plugin data directory
 userDir := filepath.Join(pluginDataPath, "users", userID)
@@ -819,6 +872,7 @@ ioutil.WriteFile(filepath.Join(userDir, "preferences.json"), data, 0644)
 ### Use Cases
 
 **Good use cases**:
+
 - Default query type selection
 - UI theme preferences
 - Preferred visualization settings
@@ -827,6 +881,7 @@ ioutil.WriteFile(filepath.Join(userDir, "preferences.json"), data, 0644)
 - Editor panel sizes
 
 **Bad use cases**:
+
 - API keys or tokens (use secure backend storage)
 - Large datasets (use backend with caching)
 - Shared team data (use backend or Grafana variables)
@@ -842,11 +897,12 @@ import { reportInteraction } from '@grafana/runtime';
 
 reportInteraction('plugin_page_viewed', {
   page: 'home',
-  pluginVersion: '1.0.0'
+  pluginVersion: '1.0.0',
 });
 ```
 
 **Best Practices**:
+
 - Never send PII (emails, IPs, names)
 - Use aggregated metrics only
 - Make reporting opt-in or clearly documented
@@ -879,6 +935,7 @@ npx @grafana/create-plugin@latest update
 ```
 
 This updates:
+
 - Configuration files (webpack, eslint, prettier)
 - GitHub workflows
 - Dependencies
@@ -904,17 +961,20 @@ Before publishing your app plugin:
 ## Resources
 
 ### Official Documentation
+
 - **App Plugins**: https://grafana.com/developers/plugin-tools/how-to-guides/app-plugins/
 - **Backend Plugins**: https://grafana.com/developers/plugin-tools/key-concepts/backend-plugins
 - **Best Practices**: https://grafana.com/developers/plugin-tools/key-concepts/best-practices
 
 ### This Plugin's Implementation
+
 - **Backend**: `pkg/plugin/` (app.go, resources.go, assistant.go, etc.)
 - **Frontend**: `src/` (pages, components, services)
 - **Configuration**: `src/plugin.json`
 - **Documentation**: `docs/` folder
 
 ### Community Support
+
 - **Grafana Community Forum**: https://community.grafana.com/
 - **GitHub Discussions**: https://github.com/grafana/grafana/discussions
 - **Slack**: #plugin-development channel

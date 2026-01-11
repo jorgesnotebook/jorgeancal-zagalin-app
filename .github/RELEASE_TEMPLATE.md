@@ -13,9 +13,11 @@
 ### Major Features
 
 #### {Feature 1 Name}
+
 {2-3 sentence description of what it does and why it matters}
 
 **Key capabilities**:
+
 - Bullet point 1
 - Bullet point 2
 - Bullet point 3
@@ -23,9 +25,11 @@
 **Why it matters**: {1-2 sentences on user benefit}
 
 #### {Feature 2 Name}
+
 {Description}
 
 **Key capabilities**:
+
 - Bullet points
 
 **Why it matters**: {User benefit}
@@ -76,6 +80,7 @@
 ### Recommended Settings
 
 **For Development**:
+
 ```json
 {
   // Dev config
@@ -83,6 +88,7 @@
 ```
 
 **For Production**:
+
 ```json
 {
   // Prod config
@@ -111,11 +117,13 @@
 ### New Installation
 
 **Via Grafana CLI**:
+
 ```bash
 grafana-cli plugins install jorgeancal-zagalin-app {VERSION}
 ```
 
 **Via Docker**:
+
 ```bash
 docker run -d \
   -p 3000:3000 \
@@ -124,6 +132,7 @@ docker run -d \
 ```
 
 **Via Helm**:
+
 ```yaml
 plugins:
   - jorgeancal-zagalin-app {VERSION}
@@ -137,6 +146,7 @@ grafana-cli plugins upgrade jorgeancal-zagalin-app
 ```
 
 **Docker Compose**:
+
 ```bash
 docker compose pull
 docker compose up -d
@@ -179,6 +189,7 @@ docker compose up -d
 4. Try out the new features!
 
 **Example queries to try**:
+
 - "Show me the error rate for my services"
 - "Explain this panel to me"
 - "Find traces with high latency"

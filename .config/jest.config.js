@@ -44,11 +44,11 @@ if (typeof global.window === 'undefined') {
   };
 
   // Mock HTML element constructors
-  global.HTMLElement = function() {};
+  global.HTMLElement = function () {};
   global.HTMLElement.prototype = { addEventListener: () => {}, removeEventListener: () => {} };
-  global.Element = function() {};
+  global.Element = function () {};
   global.Element.prototype = { addEventListener: () => {}, removeEventListener: () => {} };
-  global.Node = function() {};
+  global.Node = function () {};
   global.Node.prototype = {};
 
   global.window = {
@@ -134,7 +134,7 @@ module.exports = {
   // Jest will throw `Cannot use import statement outside module` if it tries to load an
   // ES module without it being transformed first. ./config/README.md#esm-errors-with-jest
   transformIgnorePatterns: [
-    nodeModulesToTransform([...grafanaESModules, ...getGrafanaLLMESModules(), ...additionalESModules])
+    nodeModulesToTransform([...grafanaESModules, ...getGrafanaLLMESModules(), ...additionalESModules]),
   ],
   watchPathIgnorePatterns: ['<rootDir>/node_modules', '<rootDir>/dist'],
 };

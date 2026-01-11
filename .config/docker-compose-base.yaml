@@ -16,10 +16,10 @@ services:
     # WARNING: The following security options are for DEVELOPMENT ONLY
     # Remove for production deployments to maintain security hardening
     security_opt:
-      - 'apparmor:unconfined'  # Disables AppArmor protection
-      - 'seccomp:unconfined'   # Disables system call filtering
+      - 'apparmor:unconfined' # Disables AppArmor protection
+      - 'seccomp:unconfined' # Disables system call filtering
     cap_add:
-      - SYS_PTRACE  # Enables process tracing for debugging
+      - SYS_PTRACE # Enables process tracing for debugging
     volumes:
       - ../dist:/var/lib/grafana/plugins/jorgeancal-zagalin-app
       - ../provisioning:/etc/grafana/provisioning
@@ -28,11 +28,11 @@ services:
     environment:
       NODE_ENV: development
       GF_LOG_FILTERS: plugin.jorgeancal-zagalin-app:debug
-      GF_LOG_LEVEL: ${GF_LOG_LEVEL:-debug}  # Use 'info' for production
+      GF_LOG_LEVEL: ${GF_LOG_LEVEL:-debug} # Use 'info' for production
       GF_DATAPROXY_LOGGING: 1
       # WARNING: Allows unsigned plugins - DEVELOPMENT ONLY
       GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: ${ALLOW_UNSIGNED_PLUGINS:-jorgeancal-zagalin-app}
       GF_INSTALL_PLUGINS: grafana-llm-app
       # Enable service accounts for backend plugin authentication
       GF_FEATURE_TOGGLES_ENABLE: externalServiceAccounts
-      GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: "true"
+      GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: 'true'

@@ -23,20 +23,23 @@ const (
 )
 
 type RunState struct {
-	RunID            string
-	ConversationID   string
-	UserLogin        string
-	Status           RunStatus
-	Plan             *ExecutionPlan
-	CurrentStepIndex int
-	Artifacts        []Artifact
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	CancelCtx        context.Context
-	CancelFunc       context.CancelFunc
-	EventChan        chan RunEvent
-	pauseChan        chan bool     
-	mu               sync.RWMutex
+	RunID              string
+	ConversationID     string
+	UserLogin          string
+	Status             RunStatus
+	Plan               *ExecutionPlan
+	CurrentStepIndex   int
+	Artifacts          []Artifact
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	CleanupScheduledAt time.Time
+	CleanupError       error
+	CleanupStatus      string // "scheduled", "cleaning", "cleaned", "failed"
+	CancelCtx          context.Context
+	CancelFunc         context.CancelFunc
+	EventChan          chan RunEvent
+	pauseChan          chan bool
+	mu                 sync.RWMutex
 }
 
 type ExecutionPlan struct {
@@ -326,6 +329,38 @@ func (rm *RunManager) CleanupRun(runID string) error {
 	rm.logger.Info("Run cleaned up", "runId", runID)
 
 	return nil
+}
+
+func (rm *RunManager) ScheduleCleanup(runID string, delay time.Duration) {
+	run, err := rm.GetRun(runID)
+	if err != nil {
+		rm.logger.Error("Failed to schedule cleanup", "runId", runID, "error", err)
+		return
+	}
+
+	run.mu.Lock()
+	run.CleanupScheduledAt = time.Now().UTC().Add(delay)
+	run.CleanupStatus = "scheduled"
+	run.mu.Unlock()
+
+	go func() {
+		time.Sleep(delay)
+
+		run.mu.Lock()
+		run.CleanupStatus = "cleaning"
+		run.mu.Unlock()
+
+		if err := rm.CleanupRun(runID); err != nil {
+			run.mu.Lock()
+			run.CleanupStatus = "failed"
+			run.CleanupError = err
+			run.mu.Unlock()
+
+			rm.logger.Error("Run cleanup failed", "runId", runID, "error", err)
+		} else {
+			rm.logger.Info("Run cleanup completed", "runId", runID)
+		}
+	}()
 }
 
 func (rm *RunManager) cleanupRoutine() {

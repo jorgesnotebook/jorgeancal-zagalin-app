@@ -1,12 +1,12 @@
 ---
-paths: "pkg/**/*.go"
+paths: 'pkg/**/*.go'
 ---
 
 # Backend Tour - Go
 
 A guided tour of the backend codebase for this plugin. Perfect for backend developers getting started.
 
-##  Backend Stack
+## Backend Stack
 
 ```mermaid
 graph LR
@@ -17,7 +17,7 @@ graph LR
     GoTest[Go testing] --> Unit[Unit testing]
 ```
 
-##  Directory Structure
+## Directory Structure
 
 ```
 pkg/
@@ -26,20 +26,20 @@ pkg/
      app.go                   # Main plugin app
      resources.go             # HTTP route handlers
      settings.go              # Configuration
-    
+
      storage.go               # Conversation storage
      guardrails.go            # Rate limiting
-    
+
      assistant.go             # LLM orchestration
      assistant_prompts.go     # System prompts
      assistant_tools.go       # Function calling tools
      llm_client.go            # grafana-llm-app client
-    
+
      query_proxy.go           # Query security pipeline
      query_validation.go      # Injection prevention
      datasource.go            # Datasource detection
      otel_enforcement.go      # OTel scope enforcement
-    
+
      context/                 # Context extraction
          manager.go           # Context manager
          metrics.go           # Prometheus
@@ -49,7 +49,7 @@ pkg/
 
 **Code Volume**: ~7,887 lines
 
-##  Entry Point
+## Entry Point
 
 ### main.go - Plugin Bootstrap
 
@@ -76,6 +76,7 @@ func main() {
 ```
 
 **What happens**:
+
 1. Grafana launches this binary as subprocess
 2. Communication via gRPC
 3. `plugin.NewApp` creates plugin instance
@@ -129,12 +130,13 @@ func NewApp(ctx context.Context, settings backend.AppInstanceSettings) (
 ```
 
 **Key Points**:
+
 - One instance per organization
 - Initialized with settings
 - Background services started
 - Rate limiters per instance
 
-##  HTTP Resource Handlers
+## HTTP Resource Handlers
 
 ### resources.go - Router
 
@@ -179,17 +181,19 @@ func (a *App) CallResource(
 **Pattern**: Switch on path, delegate to handlers
 
 **URL Format**:
+
 ```
 /api/plugins/jorgeancal-zagalin-app/resources/{path}
 ```
 
-##  LLM Integration
+## LLM Integration
 
 ### assistant.go - LLM Orchestration
 
 **File**: `pkg/plugin/assistant.go:1-300`
 
 **Flow**:
+
 ```mermaid
 graph TD
     Request[Frontend request]
@@ -205,6 +209,7 @@ graph TD
 ```
 
 **Key Method**:
+
 ```go
 func (a *App) handleLLMChat(
     ctx context.Context,
@@ -251,10 +256,11 @@ func (a *App) handleLLMChat(
 ```
 
 **Why backend handles LLM**:
--  Secure system prompts (not exposed to frontend)
--  Context injection from datasources
--  Rate limiting and governance
--  Audit logging with user identity
+
+- Secure system prompts (not exposed to frontend)
+- Context injection from datasources
+- Rate limiting and governance
+- Audit logging with user identity
 
 ### assistant_prompts.go - System Prompts
 
@@ -289,6 +295,7 @@ IMPORTANT:
 ```
 
 **Why on backend**:
+
 - User can't see/modify prompts
 - Can inject sensitive context
 - Centralized control
@@ -300,6 +307,7 @@ IMPORTANT:
 **Purpose**: HTTP client for grafana-llm-app
 
 **Key Methods**:
+
 ```go
 type LLMClient struct {
     httpClient *http.Client
@@ -335,6 +343,7 @@ func (c *LLMClient) ChatStream(
 ```
 
 **SSE Stream Format**:
+
 ```
 data: {"choices":[{"delta":{"content":"Hello"}}]}
 
@@ -386,18 +395,20 @@ func getAvailableTools(ctx context.Context, settings *Settings) []Tool {
 ```
 
 **Tool Execution** (handled by frontend):
+
 - Backend defines available tools
 - LLM requests tool execution
 - Frontend executes via `zagalinTools.ts`
 - Result returned to LLM
 
-##  Security Pipeline
+## Security Pipeline
 
 ### query_proxy.go - Query Security
 
 **File**: `pkg/plugin/query_proxy.go:1-300`
 
 **Pipeline**:
+
 ```mermaid
 graph TD
     Request[Request]
@@ -412,6 +423,7 @@ graph TD
 ```
 
 **Implementation**:
+
 ```go
 func (a *App) handleQuery(
     ctx context.Context,
@@ -484,6 +496,7 @@ func (a *App) handleQuery(
 **Validates**: PromQL, LogQL, TraceQL
 
 **Pattern-Based Validation**:
+
 ```go
 func (v *QueryValidator) validatePromQL(query string) *ValidationResult {
     result := &ValidationResult{Valid: true}
@@ -541,6 +554,7 @@ func (v *QueryValidator) validatePromQL(query string) *ValidationResult {
 **File**: `pkg/plugin/guardrails.go:1-150`
 
 **Token Bucket Algorithm**:
+
 ```go
 type RateLimiter struct {
     limiters map[string]*rate.Limiter
@@ -570,13 +584,14 @@ func (r *RateLimiter) Allow(userID string) bool {
 
 **Per-User Limiting**: Each user has independent bucket
 
-##  Storage
+## Storage
 
 ### storage.go - File-Based Storage
 
 **File**: `pkg/plugin/storage.go:1-250`
 
 **Storage Path**:
+
 ```
 $GF_PLUGIN_APP_DATA_PATH/
  users/
@@ -588,6 +603,7 @@ $GF_PLUGIN_APP_DATA_PATH/
 ```
 
 **Implementation**:
+
 ```go
 func (a *App) saveConversation(
     userID string,
@@ -614,22 +630,24 @@ func (a *App) saveConversation(
 ```
 
 **Security**:
+
 - Per-user directories
 - No cross-user access
 - File permissions: 0644 (user read/write)
 
-##  Context Manager
+## Context Manager
 
 ### context/manager.go - Background Service
 
 **File**: `pkg/plugin/context/manager.go:1-200`
 
 **Architecture**:
+
 ```
 manager.Start()
-    
+
      goroutine (runs forever)
-        
+
          Every N minutes:
              Extract Prometheus metrics
              Extract Loki streams
@@ -638,6 +656,7 @@ manager.Start()
 ```
 
 **Implementation**:
+
 ```go
 type Manager struct {
     settings   *Settings
@@ -707,6 +726,7 @@ func (m *Manager) GetContext() *ContextCache {
 ```
 
 **Benefits**:
+
 - Reduces LLM token usage
 - Pre-extracted context ready
 - Background refresh (non-blocking)
@@ -716,6 +736,7 @@ func (m *Manager) GetContext() *ContextCache {
 **File**: `pkg/plugin/context/metrics.go:1-150`
 
 **Extracts**:
+
 - Metric names
 - Label names
 - Label values (sampled)
@@ -743,7 +764,7 @@ func (m *Manager) extractMetrics(ctx context.Context) ([]Metric, error) {
 }
 ```
 
-##  Testing Backend
+## Testing Backend
 
 ### Unit Tests
 
@@ -788,6 +809,7 @@ func TestValidatePromQL(t *testing.T) {
 ```
 
 **Run tests**:
+
 ```bash
 # All tests
 go test ./...
@@ -799,29 +821,31 @@ mage -v coverage
 go test ./pkg/plugin -v
 ```
 
-##  Best Practices
+## Best Practices
 
 ### DO:
--  Extract user identity in every handler
--  Validate all input
--  Use structured logging
--  Handle errors explicitly
--  Write table-driven tests
--  Use contexts for cancellation
--  Lock shared state (sync.RWMutex)
--  Close resources (defer)
+
+- Extract user identity in every handler
+- Validate all input
+- Use structured logging
+- Handle errors explicitly
+- Write table-driven tests
+- Use contexts for cancellation
+- Lock shared state (sync.RWMutex)
+- Close resources (defer)
 
 ### DON'T:
--  Trust frontend input
--  Ignore errors
--  Use panic() in handlers
--  Store user credentials
--  Log sensitive data
--  Block goroutines indefinitely
--  Use global state
--  Skip tests
 
-##  Debugging Backend
+- Trust frontend input
+- Ignore errors
+- Use panic() in handlers
+- Store user credentials
+- Log sensitive data
+- Block goroutines indefinitely
+- Use global state
+- Skip tests
+
+## Debugging Backend
 
 ### Logging
 
@@ -859,29 +883,31 @@ dlv test ./pkg/plugin
 (dlv) continue
 ```
 
-##  Key Files Reference
+## Key Files Reference
 
-| Feature | File |
-|---------|------|
-| Entry point | `pkg/main.go` |
-| Plugin app | `pkg/plugin/app.go` |
-| HTTP router | `pkg/plugin/resources.go` |
-| LLM handler | `pkg/plugin/assistant.go` |
-| Security pipeline | `pkg/plugin/query_proxy.go` |
-| Validation | `pkg/plugin/query_validation.go` |
-| Rate limiting | `pkg/plugin/guardrails.go` |
-| Storage | `pkg/plugin/storage.go` |
-| Context manager | `pkg/plugin/context/manager.go` |
-| Settings | `pkg/plugin/settings.go` |
+| Feature           | File                             |
+| ----------------- | -------------------------------- |
+| Entry point       | `pkg/main.go`                    |
+| Plugin app        | `pkg/plugin/app.go`              |
+| HTTP router       | `pkg/plugin/resources.go`        |
+| LLM handler       | `pkg/plugin/assistant.go`        |
+| Security pipeline | `pkg/plugin/query_proxy.go`      |
+| Validation        | `pkg/plugin/query_validation.go` |
+| Rate limiting     | `pkg/plugin/guardrails.go`       |
+| Storage           | `pkg/plugin/storage.go`          |
+| Context manager   | `pkg/plugin/context/manager.go`  |
+| Settings          | `pkg/plugin/settings.go`         |
 
-##  Next Steps
+## Next Steps
 
 **Deep dive**:
+
 - Frontend tour: `.claude/rules/00-getting-started/frontend-tour.md`
 - Common tasks: `.claude/rules/00-getting-started/common-tasks.md`
 - Architecture: `.claude/rules/00-getting-started/architecture-tour.md`
 
 **Learn more**:
+
 - Clean code: `.claude/rules/02-development/clean-code.md`
 - Testing: `.claude/rules/02-development/testing.md`
 - Security: `.claude/rules/01-grafana-standards/security.md`

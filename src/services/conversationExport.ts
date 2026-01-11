@@ -6,17 +6,12 @@ export type ExportFormat = 'json' | 'markdown';
  * Export conversation directly from localStorage (client-side)
  * No backend API call needed since conversations are stored in localStorage
  */
-export async function exportConversation(
-  conversation: Conversation,
-  format: ExportFormat
-): Promise<void> {
+export async function exportConversation(conversation: Conversation, format: ExportFormat): Promise<void> {
   try {
-    const content = format === 'json'
-      ? exportAsJSON(conversation)
-      : exportAsMarkdown(conversation);
+    const content = format === 'json' ? exportAsJSON(conversation) : exportAsMarkdown(conversation);
 
     const blob = new Blob([content], {
-      type: format === 'json' ? 'application/json' : 'text/markdown'
+      type: format === 'json' ? 'application/json' : 'text/markdown',
     });
 
     const filename = generateFilename(conversation, format);

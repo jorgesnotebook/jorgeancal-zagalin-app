@@ -43,9 +43,7 @@ export class VectorSearchService {
         topK: limit,
       });
 
-      return results
-        .filter((r) => r.score > 0.7)
-        .map((r) => r.payload);
+      return results.filter((r) => r.score > 0.7).map((r) => r.payload);
     } catch (err) {
       console.error('Zagalin: Dashboard search failed:', err);
       return [];
@@ -68,9 +66,7 @@ export class VectorSearchService {
         topK: limit,
       });
 
-      return results
-        .filter((r) => r.score > 0.8)
-        .map((r) => r.payload);
+      return results.filter((r) => r.score > 0.8).map((r) => r.payload);
     } catch (err) {
       console.error('Zagalin: Query search failed:', err);
       return [];
@@ -93,9 +89,7 @@ export class VectorSearchService {
         topK: limit,
       });
 
-      return results
-        .filter((r) => r.score > 0.75)
-        .map((r) => r.payload);
+      return results.filter((r) => r.score > 0.75).map((r) => r.payload);
     } catch (err) {
       console.error('Zagalin: Panel search failed:', err);
       return [];

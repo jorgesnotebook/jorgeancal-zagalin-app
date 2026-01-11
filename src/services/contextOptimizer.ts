@@ -51,10 +51,7 @@ function formatFullContext(context: GrafanaContext): string {
  * @param maxTokens - Maximum tokens to use for context (default: 1000)
  * @returns Optimized context with essential and supplemental parts
  */
-export function optimizeContext(
-  fullContext: GrafanaContext,
-  maxTokens = 1000
-): OptimizedContext {
+export function optimizeContext(fullContext: GrafanaContext, maxTokens = 1000): OptimizedContext {
   const estimated = estimateTokens(fullContext);
 
   if (estimated <= maxTokens) {
@@ -69,9 +66,7 @@ export function optimizeContext(
     dashboard: fullContext.dashboard?.title,
     dashboardUid: fullContext.dashboard?.uid,
     panel: fullContext.panel?.title,
-    timeRange: fullContext.timeRange
-      ? `${fullContext.timeRange.from} to ${fullContext.timeRange.to}`
-      : undefined,
+    timeRange: fullContext.timeRange ? `${fullContext.timeRange.from} to ${fullContext.timeRange.to}` : undefined,
   };
 
   const supplemental = {

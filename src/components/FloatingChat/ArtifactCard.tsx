@@ -50,10 +50,18 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact }) => {
   const getLanguage = () => {
     if (artifact.type === 'query') {
       const format = artifact.metadata?.format || artifact.metadata?.signal;
-      if (format === 'promql') {return 'promql';}
-      if (format === 'logql') {return 'logql';}
-      if (format === 'metrics') {return 'promql';}
-      if (format === 'logs') {return 'logql';}
+      if (format === 'promql') {
+        return 'promql';
+      }
+      if (format === 'logql') {
+        return 'logql';
+      }
+      if (format === 'metrics') {
+        return 'promql';
+      }
+      if (format === 'logs') {
+        return 'logql';
+      }
     }
     return 'text';
   };
@@ -78,9 +86,7 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact }) => {
         <span className={styles.icon}>{getIcon()}</span>
         <div className={styles.info}>
           <span className={styles.type}>{getTypeLabel()}</span>
-          {artifact.metadata?.signal && (
-            <span className={styles.signal}>{artifact.metadata.signal}</span>
-          )}
+          {artifact.metadata?.signal && <span className={styles.signal}>{artifact.metadata.signal}</span>}
         </div>
         <div className={styles.actions}>
           <IconButton
@@ -127,7 +133,9 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact }) => {
           {artifact.metadata && Object.keys(artifact.metadata).length > 0 && (
             <div className={styles.metadata}>
               {Object.entries(artifact.metadata).map(([key, value]) => {
-                if (key === 'signal' || key === 'format') {return null;}
+                if (key === 'signal' || key === 'format') {
+                  return null;
+                }
                 return (
                   <div key={key} className={styles.metadataItem}>
                     <span className={styles.metadataKey}>{key}:</span>

@@ -127,21 +127,39 @@ func (a *App) handleSetupStatus(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// versionDetectionMiddleware extracts Grafana version from X-Grafana-Version header
+// and caches it for use in health checks and logging
+func (a *App) versionDetectionMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Attempt to detect version from header (optional, non-blocking)
+		version := a.versionDetector.DetectFromHeader(r)
+
+		// Log warnings only on first successful detection
+		if version.IsAvailable && !a.versionDetector.GetVersion().IsAvailable {
+			a.versionDetector.LogVersionWarnings(r.Context())
+		}
+
+		// Continue to next handler regardless of version detection result
+		next(w, r)
+	}
+}
+
 func (a *App) registerRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/ping", a.handlePing)
-	mux.HandleFunc("/echo", a.handleEcho)
-	mux.HandleFunc("/settings", a.handleGetSettings)
-	mux.HandleFunc("/health/setup", a.handleSetupStatus)
-	mux.HandleFunc("/context/status", a.handleContextStatus)
-	mux.HandleFunc("/context/refresh", a.handleContextRefresh)
+	// Wrap handlers with version detection middleware
+	mux.HandleFunc("/ping", a.versionDetectionMiddleware(a.handlePing))
+	mux.HandleFunc("/echo", a.versionDetectionMiddleware(a.handleEcho))
+	mux.HandleFunc("/settings", a.versionDetectionMiddleware(a.handleGetSettings))
+	mux.HandleFunc("/health/setup", a.versionDetectionMiddleware(a.handleSetupStatus))
+	mux.HandleFunc("/context/status", a.versionDetectionMiddleware(a.handleContextStatus))
+	mux.HandleFunc("/context/refresh", a.versionDetectionMiddleware(a.handleContextRefresh))
 
-	mux.HandleFunc("/query", a.handleQuery)
-	mux.HandleFunc("/datasources", a.handleListDatasources)
+	mux.HandleFunc("/query", a.versionDetectionMiddleware(a.handleQuery))
+	mux.HandleFunc("/datasources", a.versionDetectionMiddleware(a.handleListDatasources))
 
-	mux.HandleFunc("/llm/chat", a.handleLLMChat)
+	mux.HandleFunc("/llm/chat", a.versionDetectionMiddleware(a.handleLLMChat))
 
-	mux.HandleFunc("/runs/start", a.handleStartRun)
-	mux.HandleFunc("/runs/", a.handleRunRoutes)
+	mux.HandleFunc("/runs/start", a.versionDetectionMiddleware(a.handleStartRun))
+	mux.HandleFunc("/runs/", a.versionDetectionMiddleware(a.handleRunRoutes))
 }
 
 func (a *App) handleContextStatus(w http.ResponseWriter, req *http.Request) {

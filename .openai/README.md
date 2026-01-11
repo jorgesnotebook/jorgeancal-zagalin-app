@@ -26,6 +26,7 @@ Unlike other AI tools (Claude Code, Copilot, Cursor) that automatically load the
 ## Consistency with Other AI Tools
 
 All AI tools in this project follow the same principles:
+
 - **KISS Mindset** - Keep it simple
 - **Security-First** - All code secure by default
 - **Shared Documentation** - All tools reference `docs/` folder

@@ -1,5 +1,5 @@
 ---
-paths: "{src/**/*.{ts,tsx},pkg/**/*.go}"
+paths: '{src/**/*.{ts,tsx},pkg/**/*.go}'
 ---
 
 # Grafana LLM App Integration Guide
@@ -9,6 +9,7 @@ This document defines how to integrate with the **grafana-llm-app** plugin for L
 ## Overview
 
 The **grafana-llm-app** is a Grafana plugin that provides:
+
 - LLM provider abstraction (OpenAI, Azure OpenAI, Anthropic, etc.)
 - Unified API for LLM interactions
 - Streaming support via Server-Sent Events (SSE)
@@ -19,6 +20,7 @@ The **grafana-llm-app** is a Grafana plugin that provides:
 ## Integration Architecture
 
 ### High-Level Flow
+
 ```mermaid
 graph TD
     Frontend[Your Plugin Frontend]
@@ -28,6 +30,7 @@ graph TD
 ```
 
 **Security Model**:
+
 - User authentication flows through your backend to grafana-llm-app
 - grafana-llm-app handles provider credentials securely
 - Your plugin never sees provider API keys
@@ -37,6 +40,7 @@ graph TD
 ### Requirements
 
 **Minimum versions**:
+
 - Grafana LLM app plugin: v0.22+ (for MCP support)
 - `@grafana/llm` npm package: Latest version
 - Grafana: 10.0+
@@ -44,6 +48,7 @@ graph TD
 ### Frontend Integration (Official Pattern)
 
 **Installation**:
+
 ```json
 {
   "dependencies": {
@@ -53,6 +58,7 @@ graph TD
 ```
 
 **Basic LLM Usage**:
+
 ```typescript
 import { llm, isLLMPluginEnabled } from '@grafana/llm';
 
@@ -68,19 +74,20 @@ const response = await llm.chatCompletions({
   messages: [
     {
       role: 'system',
-      content: 'You are a helpful assistant for Grafana metrics.'
+      content: 'You are a helpful assistant for Grafana metrics.',
     },
     {
       role: 'user',
-      content: 'What is Prometheus?'
-    }
-  ]
+      content: 'What is Prometheus?',
+    },
+  ],
 });
 
 console.log(response.choices[0].message.content);
 ```
 
 **Streaming Responses**:
+
 ```typescript
 import { llm, accumulateContent } from '@grafana/llm';
 import { Observable } from 'rxjs';
@@ -111,12 +118,14 @@ stream$.subscribe({
 **MCP** enables LLMs to execute tools and gather real-time data, creating **agents** that actively interact with Grafana.
 
 **Workflow**:
+
 1. Setup MCP client with plugin identification
 2. Retrieve available tools
 3. Send tools with LLM requests
 4. Process tool calls in a loop until LLM completes
 
 **MCP Client Setup**:
+
 ```typescript
 import { MCPClient, MCPClientProvider, useMCPClient } from '@grafana/llm';
 import { ErrorBoundary } from 'react-error-boundary';
@@ -146,14 +155,14 @@ function YourComponent() {
     // Send request with tools
     let messages = [
       { role: 'system', content: 'You are an agent that can query Grafana data.' },
-      { role: 'user', content: 'What is the CPU usage right now?' }
+      { role: 'user', content: 'What is the CPU usage right now?' },
     ];
 
     while (true) {
       const response = await llm.chatCompletions({
         model: llm.LLM_MODEL.BASE,
         messages,
-        tools // Include available tools
+        tools, // Include available tools
       });
 
       const message = response.choices[0].message;
@@ -166,15 +175,12 @@ function YourComponent() {
       // Execute tool calls
       messages.push(message);
       for (const toolCall of message.tool_calls) {
-        const result = await mcpClient.callTool(
-          toolCall.function.name,
-          JSON.parse(toolCall.function.arguments)
-        );
+        const result = await mcpClient.callTool(toolCall.function.name, JSON.parse(toolCall.function.arguments));
 
         messages.push({
           role: 'tool',
           tool_call_id: toolCall.id,
-          content: JSON.stringify(result)
+          content: JSON.stringify(result),
         });
       }
     }
@@ -187,6 +193,7 @@ function YourComponent() {
 ### Error Handling (Official Recommendations)
 
 **Always verify LLM availability**:
+
 ```typescript
 import { isLLMPluginEnabled } from '@grafana/llm';
 
@@ -197,6 +204,7 @@ if (!isLLMPluginEnabled()) {
 ```
 
 **Troubleshooting checklist**:
+
 1.  Check plugin installed: Administration > Plugins > "grafana-llm-app"
 2.  Verify configuration: Test connection in LLM app settings
 3.  Monitor network: Check browser DevTools for failed API requests
@@ -204,6 +212,7 @@ if (!isLLMPluginEnabled()) {
 5.  Add logging: Log client state for debugging
 
 **Error boundaries**:
+
 ```typescript
 import { ErrorBoundary } from 'react-error-boundary';
 
@@ -212,7 +221,7 @@ import { ErrorBoundary } from 'react-error-boundary';
   onError={(error) => console.error('LLM error:', error)}
 >
   <LLMFeature />
-</ErrorBoundary>
+</ErrorBoundary>;
 ```
 
 ## Alternative: Backend Proxy Pattern (This Plugin's Approach)
@@ -220,6 +229,7 @@ import { ErrorBoundary } from 'react-error-boundary';
 **This plugin uses a custom backend proxy pattern** instead of direct frontend LLM calls for enhanced security and control.
 
 ### Usage Pattern
+
 ```typescript
 import { llm } from '@grafana/llm';
 
@@ -230,6 +240,7 @@ import { llm } from '@grafana/llm';
 ```
 
 **Note**: This plugin implements a **custom backend proxy pattern** instead of direct frontend usage:
+
 - Frontend calls our backend `/llm/chat` endpoint
 - Backend constructs secure system prompts
 - Backend injects context and skills automatically
@@ -242,6 +253,7 @@ See: `src/services/assistantService.ts` and `pkg/plugin/llm_client.go`
 ### Go Client Setup
 
 **Import the llmclient package**:
+
 ```go
 // Note: llmclient is part of the grafana-llm-app repository
 // You need to vendor it or use Go modules
@@ -249,6 +261,7 @@ import "github.com/grafana/grafana-llm-app/pkg/llmclient"
 ```
 
 **This plugin implements custom client** in `pkg/plugin/llm_client.go`:
+
 - Constructs requests to grafana-llm-app API
 - Handles SSE streaming responses
 - Manages user authentication headers
@@ -257,11 +270,13 @@ import "github.com/grafana/grafana-llm-app/pkg/llmclient"
 ### API Endpoints
 
 #### Chat Completion (Streaming)
+
 ```
 POST /api/plugins/grafana-llm-app/resources/llm/chat
 ```
 
 **Request**:
+
 ```json
 {
   "model": "gpt-4",
@@ -281,6 +296,7 @@ POST /api/plugins/grafana-llm-app/resources/llm/chat
 ```
 
 **Response**: Server-Sent Events (SSE) stream
+
 ```
 data: {"choices":[{"delta":{"content":"Prometheus"}}]}
 
@@ -290,11 +306,13 @@ data: [DONE]
 ```
 
 #### Chat Completion (Non-Streaming)
+
 Same endpoint, set `"stream": false` for complete response.
 
 ### Authentication Pattern
 
 **User Context Forwarding**:
+
 ```go
 // Extract user from Grafana request context
 user := backend.PluginConfigFromContext(ctx).User
@@ -309,6 +327,7 @@ req.Header.Set("X-Grafana-Org-ID", strconv.FormatInt(user.OrgID, 10))
 ### Streaming Implementation
 
 **SSE Parsing Pattern**:
+
 ```go
 scanner := bufio.NewScanner(resp.Body)
 for scanner.Scan() {
@@ -336,6 +355,7 @@ for scanner.Scan() {
 ### Function Calling (Tool Use)
 
 **Request with tools**:
+
 ```json
 {
   "model": "gpt-4",
@@ -364,25 +384,31 @@ for scanner.Scan() {
 ```
 
 **Response with tool call**:
+
 ```json
 {
-  "choices": [{
-    "message": {
-      "role": "assistant",
-      "tool_calls": [{
-        "id": "call_abc123",
-        "type": "function",
-        "function": {
-          "name": "query_prometheus",
-          "arguments": "{\"query\":\"up\"}"
-        }
-      }]
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "call_abc123",
+            "type": "function",
+            "function": {
+              "name": "query_prometheus",
+              "arguments": "{\"query\":\"up\"}"
+            }
+          }
+        ]
+      }
     }
-  }]
+  ]
 }
 ```
 
 **This plugin implements function calling** in:
+
 - `pkg/plugin/assistant_tools.go` - Tool definitions
 - `src/services/zagalinTools.ts` - Tool execution handlers
 
@@ -391,6 +417,7 @@ for scanner.Scan() {
 ### Supported Providers
 
 grafana-llm-app includes built-in support for:
+
 1. **OpenAI** (GPT-4, GPT-3.5)
 2. **Azure OpenAI** (Enterprise deployments)
 3. **Anthropic** (Claude models)
@@ -398,6 +425,7 @@ grafana-llm-app includes built-in support for:
 ### Configuration Structure
 
 **In Grafana plugin settings**:
+
 ```json
 {
   "provider": "openai",
@@ -412,6 +440,7 @@ grafana-llm-app includes built-in support for:
 ```
 
 **Anthropic Example**:
+
 ```json
 {
   "provider": "anthropic",
@@ -427,6 +456,7 @@ grafana-llm-app includes built-in support for:
 ### Model Mapping
 
 grafana-llm-app provides abstract model types:
+
 - `gpt-4` → Provider-specific model ID
 - `gpt-3.5-turbo` → Provider-specific model ID
 - `claude-3-opus` → Provider-specific model ID
@@ -436,29 +466,32 @@ grafana-llm-app provides abstract model types:
 ## Security Best Practices
 
 ### DO:
- **Always proxy through your backend** - Never call grafana-llm-app from frontend
- **Forward user context** - Include user authentication headers
- **Validate input on backend** - Sanitize user messages before sending to LLM
- **Sanitize output** - Use DOMPurify on LLM responses before rendering
- **Implement rate limiting** - Prevent abuse and control costs
- **Log LLM requests** - Audit trail for debugging and cost tracking
- **Set reasonable timeouts** - LLM calls can be slow
- **Handle errors gracefully** - LLM APIs can fail
+
+**Always proxy through your backend** - Never call grafana-llm-app from frontend
+**Forward user context** - Include user authentication headers
+**Validate input on backend** - Sanitize user messages before sending to LLM
+**Sanitize output** - Use DOMPurify on LLM responses before rendering
+**Implement rate limiting** - Prevent abuse and control costs
+**Log LLM requests** - Audit trail for debugging and cost tracking
+**Set reasonable timeouts** - LLM calls can be slow
+**Handle errors gracefully** - LLM APIs can fail
 
 ### DON'T:
- **Don't store API keys in frontend** - Use secure backend storage
- **Don't trust LLM output** - Always sanitize before rendering
- **Don't skip rate limiting** - LLM calls are expensive
- **Don't expose raw errors to users** - Sanitize error messages
- **Don't bypass user authentication** - Always include user context
- **Don't hardcode provider URLs** - Use configuration
- **Don't ignore streaming errors** - Handle SSE disconnections
+
+**Don't store API keys in frontend** - Use secure backend storage
+**Don't trust LLM output** - Always sanitize before rendering
+**Don't skip rate limiting** - LLM calls are expensive
+**Don't expose raw errors to users** - Sanitize error messages
+**Don't bypass user authentication** - Always include user context
+**Don't hardcode provider URLs** - Use configuration
+**Don't ignore streaming errors** - Handle SSE disconnections
 
 ## Implementation Patterns
 
 ### Pattern 1: Backend Proxy (Recommended)
 
 **Advantages**:
+
 - Secure system prompts (not visible to frontend)
 - Automatic context injection
 - Rate limiting and cost control
@@ -466,12 +499,14 @@ grafana-llm-app provides abstract model types:
 - Function calling with secure execution
 
 **This plugin uses this pattern**:
+
 1. Frontend: `assistantService.sendMessage()` → Backend `/llm/chat`
 2. Backend: Construct secure prompt + inject context
 3. Backend: Call grafana-llm-app with user auth
 4. Backend: Stream response back to frontend via SSE
 
 **Files**:
+
 - `src/services/assistantService.ts` - Frontend client
 - `pkg/plugin/assistant.go` - Backend handler
 - `pkg/plugin/llm_client.go` - grafana-llm-app client
@@ -480,11 +515,13 @@ grafana-llm-app provides abstract model types:
 ### Pattern 2: Direct Frontend (Not Recommended)
 
 **Use only for**:
+
 - Simple chat interfaces with no security concerns
 - Prototypes and demos
 - Public-facing chatbots with no sensitive data
 
 **Limitations**:
+
 - System prompts visible in frontend code
 - No backend validation
 - Difficult to implement rate limiting
@@ -495,6 +532,7 @@ grafana-llm-app provides abstract model types:
 ### Development Sandbox
 
 grafana-llm-app provides a **developer sandbox** in dev mode:
+
 - Access: `http://localhost:3000/plugins/grafana-llm-app`
 - Test LLM providers end-to-end
 - Validate streaming responses
@@ -519,24 +557,27 @@ func (m *MockLLMClient) Chat(ctx context.Context, req ChatRequest) (ChatResponse
 ```
 
 **Frontend mocking**:
+
 ```typescript
 jest.mock('@grafana/llm', () => ({
   llm: {
     chat: jest.fn().mockResolvedValue({
-      content: 'Mocked response'
-    })
-  }
+      content: 'Mocked response',
+    }),
+  },
 }));
 ```
 
 ## Performance Optimization
 
 ### Streaming Benefits
+
 - **Perceived latency**: Users see responses immediately
 - **Error recovery**: Can handle partial responses
 - **Cost control**: Can cancel expensive requests early
 
 ### Caching Strategies
+
 - **Context caching**: Cache Prometheus metrics, Loki streams
 - **Response caching**: Cache common queries (short TTL)
 - **Prompt templates**: Reuse prompt structures
@@ -544,6 +585,7 @@ jest.mock('@grafana/llm', () => ({
 **This plugin implements context caching**: `pkg/plugin/context/manager.go`
 
 ### Rate Limiting
+
 - Implement token bucket algorithm per user
 - Set per-minute and per-day limits
 - Track LLM token usage for cost control
@@ -553,43 +595,51 @@ jest.mock('@grafana/llm', () => ({
 ## Troubleshooting
 
 ### grafana-llm-app Not Responding
+
 ```
 Error: grafana-llm-app plugin not found
 ```
 
 **Solution**: Install and enable grafana-llm-app:
+
 ```bash
 grafana-cli plugins install grafana-llm-app
 grafana-server restart
 ```
 
 ### Authentication Errors
+
 ```
 Error: Unauthorized
 ```
 
 **Solution**: Verify user context headers are forwarded:
+
 ```go
 req.Header.Set("X-Grafana-User", user.Login)
 req.Header.Set("X-Grafana-Org-ID", strconv.FormatInt(user.OrgID, 10))
 ```
 
 ### Streaming Disconnections
+
 ```
 Error: SSE connection lost
 ```
 
 **Solution**:
+
 - Implement retry logic with exponential backoff
 - Handle `[DONE]` marker properly
 - Set appropriate timeouts (60s+ for LLM calls)
 
 ### Provider Configuration Missing
+
 ```
 Error: No LLM provider configured
 ```
 
 **Solution**: Configure grafana-llm-app in Grafana UI:
+
 1. Navigate to grafana-llm-app settings
 2. Select provider (OpenAI, Anthropic, etc.)
 3. Enter API key in secure field
@@ -600,6 +650,7 @@ Error: No LLM provider configured
 If you need to extend grafana-llm-app with a new provider:
 
 ### Backend Implementation
+
 1. Create `pkg/plugin/myprovider_provider.go`
 2. Implement `LLMProvider` interface:
    ```go
@@ -612,12 +663,14 @@ If you need to extend grafana-llm-app with a new provider:
 3. Register in `pkg/plugin/provider.go::createProvider()`
 
 ### Frontend Implementation
+
 1. Add provider to `ProviderType` enum
 2. Create `MyProviderConfig.tsx` component
 3. Add settings interface with TypeScript types
 4. Update `LLMConfig.tsx` with provider card
 
 ### Reference Implementation
+
 See Anthropic provider PR: https://github.com/grafana/grafana-llm-app/pull/566
 
 ## Resources

@@ -12,17 +12,7 @@
 export function needsOrchestration(message: string): boolean {
   const lowerMessage = message.toLowerCase().trim();
 
-  const greetings = [
-    'hi',
-    'hello',
-    'hey',
-    'good morning',
-    'good afternoon',
-    'good evening',
-    'sup',
-    'yo',
-    'howdy',
-  ];
+  const greetings = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'sup', 'yo', 'howdy'];
 
   if (greetings.some((greeting) => lowerMessage === greeting || lowerMessage.startsWith(greeting + ' '))) {
     return false;
@@ -60,7 +50,7 @@ export function needsOrchestration(message: string): boolean {
     'what data',
     'what metrics',
     'what metric',
-    'what\'s this showing',
+    "what's this showing",
     'what is displayed',
     'what are the trends',
     'what trends',
