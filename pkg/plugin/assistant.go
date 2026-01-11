@@ -59,7 +59,8 @@ func detectSignalType(message string, context AssistantContext) string {
 		if strings.Contains(messageLower, "dashboard") ||
 			strings.Contains(messageLower, "panel") ||
 			strings.Contains(messageLower, "what am i seeing") ||
-			strings.Contains(messageLower, "what do i see") {
+			strings.Contains(messageLower, "what do i see") ||
+			strings.Contains(messageLower, "what am i looking at") {
 			return "dashboard"
 		}
 
@@ -286,6 +287,22 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 	messages := a.buildMessages(skill, assistantReq)
 	llmReq := a.buildLLMRequest(messages, mode)
 	llmClient := a.createLLMClient()
+
+	// DEBUG: Log tools being sent
+	backend.Logger.Info("LLM request prepared",
+		"skill", skill,
+		"mode", mode,
+		"model", llmReq.Model,
+		"toolCount", len(llmReq.Tools),
+		"temperature", llmReq.Temperature,
+	)
+	if len(llmReq.Tools) > 0 {
+		toolNames := make([]string, 0, len(llmReq.Tools))
+		for _, tool := range llmReq.Tools {
+			toolNames = append(toolNames, tool.Function.Name)
+		}
+		backend.Logger.Info("Tools included in LLM request", "tools", toolNames)
+	}
 
 	chunkChan, err := llmClient.StreamChat(ctx, llmReq, req)
 	if err != nil {

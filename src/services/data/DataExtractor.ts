@@ -545,21 +545,22 @@ export class DataExtractor {
     timeRange: TimeRange,
     maxLogLines: number
   ): Promise<LogQueryResult> {
-    const response = await getBackendSrv().post('/api/ds/query', {
+    // Use our plugin's /query endpoint for security pipeline (rate limiting, validation, etc.)
+    const response = await this.executeQuery({
+      datasource: datasourceUid,
       queries: [
         {
           refId: 'A',
-          expr: query,
+          datasourceUid,
           queryType: 'range',
-          datasource: {
-            type: 'loki',
-            uid: datasourceUid,
-          },
-          maxLines: maxLogLines,
+          expr: query,
+          maxDataPoints: maxLogLines,
         },
       ],
-      from: timeRange.from,
-      to: timeRange.to,
+      timeRange: {
+        from: timeRange.from,
+        to: timeRange.to,
+      },
     });
 
     return {

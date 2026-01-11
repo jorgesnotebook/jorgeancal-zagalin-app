@@ -46,103 +46,14 @@ interface Message extends ConversationMessage {
   artifacts?: Artifact[];
 }
 
+/**
+ * This function is disabled per .claude/rules/99-output-format/no-evidence-sections.md
+ * The plugin's UX philosophy is "no evidence sections" - users want clear answers, not investigation artifacts.
+ * @deprecated - Function kept for reference but disabled
+ */
 function wrapEvidenceSections(content: string): string {
-  const evidenceCheckPattern =
-    /(Evidence Check:|0\.\s*\*\*Evidence Check\*\*[^\n]*\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
-
-  const availableContextPattern = /(---\s*AVAILABLE CONTEXT\s*---)((?:[\s\S]*?)(?=---\s*UNKNOWN CONTEXT|$))/gi;
-
-  const unknownContextPattern = /(---\s*UNKNOWN CONTEXT\s*---)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
-
-  const investigationMemoryPattern =
-    /(Investigation Memory:|2\.\s*\*\*Investigation Memory\*\*[^\n]*\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
-
-  const metadataPattern = /(\*\*Metadata\*\*:?\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
-
-  const technicalDetailsPattern =
-    /(\*\*Technical Details\*\*:?\n|\*\*How the query works\*\*:?\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
-
-  let processed = content;
-
-  processed = processed.replace(evidenceCheckPattern, (match, header, body) => {
-    return `<details class="evidence-section">
-<summary class="evidence-header">📋 ${header.trim()}</summary>
-<div class="evidence-body">
-
-${body.trim()}
-
-</div>
-</details>
-
-`;
-  });
-
-  processed = processed.replace(availableContextPattern, (match, header, body) => {
-    return `<details class="evidence-section">
-<summary class="evidence-header">✅ Available Context</summary>
-<div class="evidence-body">
-
-${body.trim()}
-
-</div>
-</details>
-
-`;
-  });
-
-  processed = processed.replace(unknownContextPattern, (match, header, body) => {
-    return `<details class="evidence-section">
-<summary class="evidence-header">⚠️ Unknown Context</summary>
-<div class="evidence-body">
-
-${body.trim()}
-
-</div>
-</details>
-
-`;
-  });
-
-  processed = processed.replace(investigationMemoryPattern, (match, header, body) => {
-    return `<details class="evidence-section">
-<summary class="evidence-header">🧠 ${header.trim()}</summary>
-<div class="evidence-body">
-
-${body.trim()}
-
-</div>
-</details>
-
-`;
-  });
-
-  processed = processed.replace(metadataPattern, (match, header, body) => {
-    return `<details class="evidence-section">
-<summary class="evidence-header">ℹ️ ${header.trim()}</summary>
-<div class="evidence-body">
-
-${body.trim()}
-
-</div>
-</details>
-
-`;
-  });
-
-  processed = processed.replace(technicalDetailsPattern, (match, header, body) => {
-    return `<details class="evidence-section">
-<summary class="evidence-header">🔧 ${header.trim()}</summary>
-<div class="evidence-body">
-
-${body.trim()}
-
-</div>
-</details>
-
-`;
-  });
-
-  return processed;
+  // Return content unchanged - no evidence wrapping per UX rules
+  return content;
 }
 
 function sanitizeMarkdown(content: string): string {
@@ -198,6 +109,14 @@ export function ChatPanel() {
   const [frontendCurrentStepIndex, setFrontendCurrentStepIndex] = useState(0);
   const [frontendArtifacts, setFrontendArtifacts] = useState<Artifact[]>([]);
   const [frontendStreamingText, setFrontendStreamingText] = useState('');
+
+  // Suppress unused warnings for components hidden per UX rules but kept for future use
+  // @ts-ignore - ArtifactCard and ReasoningDisplay are intentionally unused
+  void ArtifactCard;
+  // @ts-ignore - ReasoningDisplay is intentionally unused
+  void ReasoningDisplay;
+  // Artifacts are collected but not displayed per .claude/rules/99-output-format/no-evidence-sections.md
+  void frontendArtifacts;
   const [isFrontendOrchestrating, setIsFrontendOrchestrating] = useState(false);
 
   const [isSimpleStreaming, setIsSimpleStreaming] = useState(false);
@@ -401,15 +320,18 @@ export function ChatPanel() {
     setIsSimpleStreaming(true);
     simpleStreamingContentRef.current = '';
 
+    // Extract fresh context at the moment of asking (includes current URL, template vars, time range)
+    const currentContext = await ContextService.getContext();
+
     streamAssistantChat({
       message: userMessage.content,
       enrichedMessage: enrichedPrompt,
       history: messages.map((m) => ({ role: m.role, content: m.content })),
       context: {
-        dashboard: context.dashboard,
-        panel: context.panel,
-        timeRange: context.timeRange,
-        templateVars: context.templateVariables,
+        dashboard: currentContext.dashboard,
+        panel: currentContext.panel,
+        timeRange: currentContext.timeRange,
+        templateVars: currentContext.templateVariables,
       },
       attachedContexts: conversation?.contexts,
     }).subscribe({
@@ -503,14 +425,17 @@ export function ChatPanel() {
     setIsSimpleStreaming(true);
     simpleStreamingContentRef.current = '';
 
+    // Extract fresh context at the moment of asking (includes current URL, template vars, time range)
+    const currentContext = await ContextService.getContext();
+
     streamAssistantChat({
       message: enhancedQuery,
       history: messages.map((m) => ({ role: m.role, content: m.content })),
       context: {
-        dashboard: context.dashboard,
-        panel: context.panel,
-        timeRange: context.timeRange,
-        templateVars: context.templateVariables,
+        dashboard: currentContext.dashboard,
+        panel: currentContext.panel,
+        timeRange: currentContext.timeRange,
+        templateVars: currentContext.templateVariables,
       },
       attachedContexts: conversation?.contexts,
       mode,
@@ -747,14 +672,16 @@ export function ChatPanel() {
                 }}
               />
               {message.actions && message.actions.length > 0 && renderActions(message.actions)}
-              {message.artifacts && message.artifacts.length > 0 && (
+              {/* Artifacts hidden per .claude/rules/99-output-format/no-evidence-sections.md */}
+              {/* {message.artifacts && message.artifacts.length > 0 && (
                 <div className={s.artifactsSection}>
                   {message.artifacts.map((artifact) => (
                     <ArtifactCard key={artifact.id} artifact={artifact} />
                   ))}
                 </div>
-              )}
-              {message.role === 'assistant' && (
+              )} */}
+              {/* Reasoning hidden per .claude/rules/99-output-format/no-evidence-sections.md */}
+              {/* {message.role === 'assistant' && (
                 <ReasoningDisplay
                   reasoning={message.reasoning}
                   sources={message.sources}
@@ -762,7 +689,7 @@ export function ChatPanel() {
                   caveats={message.caveats}
                   collapsed={true}
                 />
-              )}
+              )} */}
               {message.role === 'assistant' && (
                 <div className={s.messageActions}>
                   <IconButton
@@ -781,15 +708,15 @@ export function ChatPanel() {
             <PlanVisualization plan={frontendPlan} currentStepIndex={frontendCurrentStepIndex} />
           )}
 
-          {/* Artifacts */}
-          {frontendArtifacts.length > 0 && isFrontendOrchestrating && (
+          {/* Artifacts hidden per .claude/rules/99-output-format/no-evidence-sections.md */}
+          {/* {frontendArtifacts.length > 0 && isFrontendOrchestrating && (
             <div className={s.artifactsSection}>
-              <h4 className={s.artifactsHeading}>Evidence</h4>
+              <h4 className={s.artifactsHeading}>Artifacts</h4>
               {frontendArtifacts.map((artifact) => (
                 <ArtifactCard key={artifact.id} artifact={artifact} />
               ))}
             </div>
-          )}
+          )} */}
 
           {/* Thinking indicator */}
           {(isFrontendOrchestrating || isSimpleStreaming) && !displayedContent && (
@@ -1009,49 +936,6 @@ const getStyles = (theme: GrafanaTheme2) => ({
     word-break: break-word;
     line-height: 1.5;
     font-size: ${theme.typography.body.fontSize};
-
-    /* Evidence section styles */
-    details.evidence-section {
-      margin: ${theme.spacing(1, 0)};
-      border: 1px solid ${theme.colors.border.weak};
-      border-radius: ${theme.shape.radius.default};
-      background: ${theme.colors.background.secondary};
-      overflow: hidden;
-    }
-
-    summary.evidence-header {
-      padding: ${theme.spacing(1, 1.5)};
-      cursor: pointer;
-      user-select: none;
-      font-weight: ${theme.typography.fontWeightMedium};
-      color: ${theme.colors.text.secondary};
-      background: ${theme.colors.background.secondary};
-      transition: background 0.2s ease;
-      display: flex;
-      align-items: center;
-      gap: ${theme.spacing(0.5)};
-
-      &:hover {
-        background: ${theme.colors.emphasize(theme.colors.background.secondary, 0.03)};
-      }
-
-      &::marker {
-        content: '▶ ';
-        font-size: 0.8em;
-      }
-    }
-
-    details.evidence-section[open] summary.evidence-header::marker {
-      content: '▼ ';
-    }
-
-    div.evidence-body {
-      padding: ${theme.spacing(1.5)};
-      border-top: 1px solid ${theme.colors.border.weak};
-      background: ${theme.colors.background.primary};
-      font-size: ${theme.typography.bodySmall.fontSize};
-      color: ${theme.colors.text.secondary};
-    }
 
     /* Headers */
     h1,

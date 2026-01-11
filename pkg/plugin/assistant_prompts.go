@@ -366,22 +366,17 @@ Format your response as:
 		Name: "troubleshoot",
 		TaskInstructions: `Your task is to provide structured troubleshooting based ONLY on available context.
 
-**EVIDENCE-GATED INVESTIGATION - CRITICAL**
+**CONTEXT-GATED INVESTIGATION - CRITICAL**
 Before proceeding, you MUST check:
 - Do I have panel queries, metric results, or log results?
 - Do I have explicit statements about signal presence/absence?
 
-If NO evidence is available, you MUST:
+If NO context is available, you MUST:
 - STOP immediately
 - Ask ONE question: "Which dashboard or panel should I base the investigation on?"
 - Do NOT speculate, assume, or invent symptoms
 
 REQUIRED STRUCTURE:
-0. **Evidence Check** (MANDATORY FIRST STEP)
-   - Available signals: [List what you can see from queries/panels]
-   - Missing signals: [List what's not visible]
-   - Cannot proceed without: [If blocking evidence missing, stop here]
-
 1. **Most likely causes** (ranked by probability, with correlation analysis)
    - Cause 1: [Description] (Confidence: High/Med/Low)
      - Correlation: Does this correlate with traffic? Deploys? GC? CPU throttling?
@@ -416,7 +411,7 @@ REQUIRED STRUCTURE:
    - If [condition], then [action]
 
 6. **Confidence: [High/Medium/Low]**
-   - Explain what data this is based on
+   - State clearly what context you have and what's missing
 
 CONTEXT STRUCTURE:
 You will receive:
@@ -439,14 +434,12 @@ ENFORCEMENT RULES (NON-NEGOTIABLE):
 - If you have not SEEN a metric → do NOT mention it
 - If you have not SEEN an error → do NOT assume failure
 - If you have not SEEN a trend → do NOT describe one
-- If evidence is MISSING → STOP and ask for it
+- If context is MISSING → STOP and ask for it
 - NEVER ask for screenshots, files, exports, or "what it looks like"
 - Hypotheses MUST be traceable to specific queries or panels
 
-EXAMPLE GOOD RESPONSE (WITH EVIDENCE):
-"Evidence Check:
-   - Available signals: Memory usage (panel 2), CPU (panel 1), request rate (panel 3)
-   - Missing signals: Error rate, GC metrics, database connections
+EXAMPLE GOOD RESPONSE:
+"Based on panel data from Memory usage (panel 2), CPU (panel 1), and request rate (panel 3):
 
    Most likely causes:
    1. Memory leak in application (High) - heap usage increasing linearly per panel 2
@@ -1120,6 +1113,15 @@ func buildTroubleshootPrompt(userMessage string, context AssistantContext) strin
 		prompt += fmt.Sprintf("\n**Time Range**: %s to %s\n", context.TimeRange.From, context.TimeRange.To)
 	}
 
+	if len(context.TemplateVars) > 0 {
+		prompt += "\n**Template Variables**:\n"
+		for _, v := range context.TemplateVars {
+			if currentValue, ok := v.Current["value"]; ok {
+				prompt += fmt.Sprintf("- $%s = %v\n", v.Name, currentValue)
+			}
+		}
+	}
+
 	prompt += "\n--- UNKNOWN CONTEXT ---\n"
 	prompt += "Do NOT reference metrics, panels, or thresholds not listed above.\n"
 
@@ -1168,6 +1170,15 @@ func buildAnalyzeDashboardPrompt(context AssistantContext) string {
 	if context.TimeRange != nil {
 		prompt += "\n## Time Range\n"
 		prompt += fmt.Sprintf("Looking at data from %s to %s\n", context.TimeRange.From, context.TimeRange.To)
+	}
+
+	if len(context.TemplateVars) > 0 {
+		prompt += "\n## Template Variables\n"
+		for _, v := range context.TemplateVars {
+			if currentValue, ok := v.Current["value"]; ok {
+				prompt += fmt.Sprintf("- $%s = %v\n", v.Name, currentValue)
+			}
+		}
 	}
 
 	if context.Panel != nil {
@@ -1374,7 +1385,7 @@ func scoreAnalyzeDashboard(input string, context AssistantContext) int {
 	score := 0
 
 	highConfidencePatterns := []string{
-		"what do i see", "what am i looking at", "describe this dashboard",
+		"what do i see", "what am i seeing", "what am i looking at", "describe this dashboard",
 		"what is this dashboard", "what's on this dashboard",
 	}
 	for _, pattern := range highConfidencePatterns {

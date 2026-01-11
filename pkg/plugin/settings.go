@@ -131,27 +131,12 @@ func applyDefaults(s *PluginSettings) {
 		s.DesignModeTemperature = 0.8
 	}
 
-	if s.OtelEnforcement.Enabled {
-		if !s.OtelEnforcement.RequireServiceName && !s.OtelEnforcement.RequireEnvironmentName {
-			s.OtelEnforcement.RequireServiceName = true
-			s.OtelEnforcement.RequireEnvironmentName = true
-		}
+	// OTel defaults: only set numeric/string defaults, respect boolean values from UI
+	if s.QueryValidation.MaxQueryComplexity == 0 {
+		s.QueryValidation.MaxQueryComplexity = 100
 	}
-
-	if s.QueryValidation.Enabled {
-		if s.QueryValidation.MaxQueryComplexity == 0 {
-			s.QueryValidation.MaxQueryComplexity = 100
-		}
-		if !s.QueryValidation.LogValidationAttempts {
-			s.QueryValidation.LogValidationAttempts = true
-		}
-		if s.QueryValidation.EnableLLMValidation && s.QueryValidation.LLMValidationMode == "" {
-			s.QueryValidation.LLMValidationMode = "advisory"
-		}
-	}
-
-	if s.QueryValidation.Enabled {
-		s.ToolCallValidation = true
+	if s.QueryValidation.EnableLLMValidation && s.QueryValidation.LLMValidationMode == "" {
+		s.QueryValidation.LLMValidationMode = "advisory"
 	}
 }
 

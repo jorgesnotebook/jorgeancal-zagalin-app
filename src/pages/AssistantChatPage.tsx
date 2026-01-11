@@ -13,6 +13,7 @@ import { type ToolCall } from '../services/zagalinTools';
 import { useZagalinConfig } from '../hooks/useZagalinConfig';
 import { streamAssistantChatRouted as streamAssistantChat } from '../services/assistantServiceRouter';
 import type { AssistantRequest, StreamChunk } from '../services/assistantService';
+import { ContextService } from '../services/contextService';
 
 interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -123,13 +124,21 @@ function AssistantChatPage() {
         }
       }
 
+      // Extract fresh context at the moment of asking (includes current URL, template vars, time range)
+      const currentContext = await ContextService.getContext();
+
       const assistantRequest: AssistantRequest = {
         message: enhancedQuery || userMessage.content,
         history: messages.map((m) => ({
           role: m.role,
           content: m.content,
         })),
-        context: {},
+        context: {
+          dashboard: currentContext.dashboard,
+          panel: currentContext.panel,
+          timeRange: currentContext.timeRange,
+          templateVars: currentContext.templateVariables,
+        },
       };
 
       let accumulatedContent = '';

@@ -472,9 +472,13 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Execute queries via Grafana query client
+	// Execute queries via Grafana query client and collect results
+	queryResponse := &QueryResponse{
+		Results: make(map[string]QueryResult),
+	}
+
 	for _, query := range queryReq.Queries {
-		_, err := a.grafanaQueryClient.ExecuteQuery(
+		grafanaResp, err := a.grafanaQueryClient.ExecuteQuery(
 			req.Context(),
 			user,
 			queryReq.Datasource,
@@ -492,6 +496,26 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 			sendErrorResponse(w, "Failed to execute query", err, http.StatusInternalServerError)
 			return
 		}
+
+		// Convert GrafanaQueryResponse to QueryResponse format
+		if grafanaResp != nil && grafanaResp.Results != nil {
+			for refID, resultData := range grafanaResp.Results {
+				result := QueryResult{
+					RefID:  resultData.RefID,
+					Frames: resultData.Frames,
+					Error:  resultData.Error,
+				}
+
+				// Safely convert Meta to map[string]interface{}
+				if resultData.Meta != nil {
+					if metaMap, ok := resultData.Meta.(map[string]interface{}); ok {
+						result.Meta = metaMap
+					}
+				}
+
+				queryResponse.Results[refID] = result
+			}
+		}
 	}
 
 	auditLog := map[string]interface{}{
@@ -507,12 +531,8 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 
 	backend.Logger.Info("Query audit log", "audit", auditLog)
 
-	responseData := map[string]interface{}{
-		"success": true,
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(responseData); err != nil {
+	if err := json.NewEncoder(w).Encode(queryResponse); err != nil {
 		backend.Logger.Error("Failed to encode response", "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
