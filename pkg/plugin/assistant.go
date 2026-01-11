@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -642,8 +643,15 @@ func (a *App) extractPromQLFromToolArgs(args map[string]interface{}) string {
 	filterParts = append(filterParts, a.extractOTelLabelsFromArgs(args, DatasourcePrometheus)...)
 
 	if filters, ok := args["filters"].(map[string]interface{}); ok {
-		for k, v := range filters {
-			filterParts = append(filterParts, fmt.Sprintf("%s=\"%v\"", k, v))
+		// Sort keys to ensure deterministic output
+		keys := make([]string, 0, len(filters))
+		for k := range filters {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			filterParts = append(filterParts, fmt.Sprintf("%s=\"%v\"", k, filters[k]))
 		}
 	}
 
