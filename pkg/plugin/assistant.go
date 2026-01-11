@@ -265,7 +265,7 @@ func (a *App) createLLMClient() *LLMClient {
 func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	user, err := a.authenticateRequest(req)
+	user, err := extractUserIdentity(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
 		return
