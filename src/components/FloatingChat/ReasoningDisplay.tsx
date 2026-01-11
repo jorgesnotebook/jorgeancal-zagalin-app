@@ -2,7 +2,12 @@ import React, { useState } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { useStyles2, Icon, Badge } from '@grafana/ui';
-import { calculateConfidenceLevel, formatConfidencePercentage, type ReasoningStep, type SourceReference } from '../../types/explainableAI';
+import {
+  calculateConfidenceLevel,
+  formatConfidencePercentage,
+  type ReasoningStep,
+  type SourceReference,
+} from '../../types/explainableAI';
 
 interface ReasoningDisplayProps {
   reasoning?: ReasoningStep[];
@@ -12,13 +17,7 @@ interface ReasoningDisplayProps {
   collapsed?: boolean;
 }
 
-export function ReasoningDisplay({
-  reasoning,
-  sources,
-  confidence,
-  caveats,
-  collapsed = true,
-}: ReasoningDisplayProps) {
+export function ReasoningDisplay({ reasoning, sources, confidence, caveats, collapsed = true }: ReasoningDisplayProps) {
   const s = useStyles2(getStyles);
   const [isExpanded, setIsExpanded] = useState(!collapsed);
 
@@ -96,10 +95,7 @@ export function ReasoningDisplay({
                 {sources.map((source, idx) => (
                   <div key={idx} className={s.sourceItem}>
                     <span className={s.sourceName}>{source.name}</span>
-                    <Badge
-                      text={formatConfidencePercentage(source.relevance)}
-                      color="blue"
-                    />
+                    <Badge text={formatConfidencePercentage(source.relevance)} color="blue" />
                   </div>
                 ))}
               </div>

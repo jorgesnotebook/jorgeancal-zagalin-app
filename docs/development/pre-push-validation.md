@@ -11,44 +11,54 @@ The pre-push git hook runs a comprehensive validation pipeline before allowing c
 The pre-push hook executes the following checks in sequence:
 
 ### 1. Type Checking (1/5)
+
 ```bash
 npm run typecheck
 ```
+
 - Validates TypeScript types across the entire codebase
 - Ensures no type errors or `any` usage violations
 - **Time**: ~5-10 seconds
 
 ### 2. Linting (2/5)
+
 ```bash
 npm run lint
 ```
+
 - Runs ESLint on frontend code
 - Checks code style and best practices
 - Identifies potential bugs
 - **Time**: ~5-10 seconds
 
 ### 3. Unit Tests (3/5)
+
 ```bash
 npm run test:ci
 ```
+
 - Runs all Jest unit tests
 - Generates coverage report
 - **Requirement**: >70% coverage
 - **Time**: ~15-30 seconds
 
 ### 4. Build (4/5)
+
 ```bash
 npm run build
 ```
+
 - Compiles frontend TypeScript to JavaScript
 - Bundles with Webpack
 - Creates `dist/` directory
 - **Time**: ~20-30 seconds
 
 ### 5. Plugin Validation (5/5)
+
 ```bash
 npx @grafana/plugin-validator@latest
 ```
+
 - Packages plugin as `.zip` archive
 - Runs Grafana's official plugin validator
 - Checks:
@@ -66,25 +76,30 @@ npx @grafana/plugin-validator@latest
 ## Validation Requirements
 
 ### Type Checking
+
 - ✅ All TypeScript files compile without errors
 - ✅ No implicit `any` types
 - ✅ Strict null checks pass
 
 ### Linting
+
 - ✅ No ESLint errors
 - ⚠️ Warnings allowed but discouraged
 
 ### Unit Tests
+
 - ✅ All tests pass
 - ✅ Coverage >= 70%
 - ✅ No test failures
 
 ### Build
+
 - ✅ Webpack build succeeds
 - ✅ No build errors
 - ✅ Source maps generated
 
 ### Plugin Validation
+
 - ✅ Valid plugin.json metadata
 - ✅ No high-severity security vulnerabilities
 - ⚠️ Unsigned plugin warning (expected for development)
@@ -108,11 +123,13 @@ To skip these checks (not recommended), use: git push --no-verify
 #### Security Vulnerabilities
 
 **Error**:
+
 ```
 error: osv-scanner detected a high severity issue in package @modelcontextprotocol/sdk
 ```
 
 **Solution**:
+
 ```bash
 # Try automatic fix
 npm audit fix
@@ -127,17 +144,20 @@ npm audit
 #### Type Errors
 
 **Error**:
+
 ```
 src/components/MyComponent.tsx:45:12 - error TS2322: Type 'string' is not assignable to type 'number'
 ```
 
 **Solution**:
+
 - Fix the type error in the reported file
 - Run `npm run typecheck` to verify
 
 #### Test Failures
 
 **Error**:
+
 ```
 FAIL src/components/AppConfig/AppConfig.test.tsx
   ● Components/AppConfig › renders the Zagalin Configuration page with main sections
@@ -145,18 +165,21 @@ FAIL src/components/AppConfig/AppConfig.test.tsx
 ```
 
 **Solution**:
+
 - Fix the failing test
 - Run `npm run test:ci` to verify
 
 #### Build Failures
 
 **Error**:
+
 ```
 ERROR in ./src/components/MyComponent.tsx
 Module not found: Error: Can't resolve '@grafana/ui'
 ```
 
 **Solution**:
+
 - Install missing dependencies: `npm install`
 - Fix import paths
 - Run `npm run build` to verify
@@ -170,12 +193,14 @@ git push --no-verify
 ```
 
 **⚠️ WARNING**: This bypasses all safety checks and may result in:
+
 - CI failures
 - Breaking changes
 - Security vulnerabilities
 - Failed deployments
 
 **When to skip**:
+
 - Emergency hotfix (fix it properly later)
 - Known false positive (fix the validation, not skip it)
 - Working with incomplete feature (use feature branch)
@@ -183,12 +208,14 @@ git push --no-verify
 ## CI vs Local Validation
 
 ### Pre-Push Hook (Local)
+
 - Runs on every push attempt
 - Fast feedback (~1-2 minutes)
 - Catches issues before they reach CI
 - Can be skipped with `--no-verify`
 
 ### CI Pipeline (GitHub Actions)
+
 - Runs on every push to GitHub
 - More comprehensive (E2E tests, backend tests)
 - Cannot be skipped
@@ -206,12 +233,14 @@ nano .git/hooks/pre-push
 ```
 
 **Common customizations**:
+
 - Add backend build: `mage -v buildAll`
 - Add E2E tests: `npm run e2e` (slower)
 - Skip specific steps (not recommended)
 - Add custom validation scripts
 
 **After editing**:
+
 ```bash
 chmod +x .git/hooks/pre-push
 ```
@@ -223,6 +252,7 @@ chmod +x .git/hooks/pre-push
 **Issue**: Push proceeds without validation
 
 **Solution**: Ensure hook is executable
+
 ```bash
 chmod +x .git/hooks/pre-push
 ls -la .git/hooks/pre-push
@@ -233,6 +263,7 @@ ls -la .git/hooks/pre-push
 **Issue**: `jq: command not found` error
 
 **Solution**: Install jq
+
 ```bash
 # macOS
 brew install jq
@@ -249,6 +280,7 @@ apk add jq
 **Issue**: `jorgeancal-zagalin-app-0.0.5.zip` left in directory
 
 **Solution**: Hook should clean up automatically, but if not:
+
 ```bash
 rm -f *.zip jorgeancal-zagalin-app
 ```
@@ -260,6 +292,7 @@ The hook includes a cleanup trap that removes temporary files on exit.
 **Issue**: Validation hangs or times out
 
 **Solution**:
+
 ```bash
 # Clear npm cache
 npm cache clean --force
@@ -273,6 +306,7 @@ npx @grafana/plugin-validator@latest jorgeancal-zagalin-app-0.0.5.zip
 ### VS Code
 
 Add to `.vscode/tasks.json`:
+
 ```json
 {
   "version": "2.0.0",
@@ -296,6 +330,7 @@ Run with: `Cmd+Shift+P` → "Tasks: Run Task" → "Pre-Push Validation"
 ### Terminal Alias
 
 Add to `~/.bashrc` or `~/.zshrc`:
+
 ```bash
 alias validate='cd $(git rev-parse --show-toplevel) && .git/hooks/pre-push'
 ```
@@ -305,6 +340,7 @@ Use: `validate` from anywhere in the repo
 ## Best Practices
 
 ### DO:
+
 - ✅ Run validation before every push
 - ✅ Fix issues immediately when found
 - ✅ Keep dependencies updated (`npm audit fix`)
@@ -312,6 +348,7 @@ Use: `validate` from anywhere in the repo
 - ✅ Check validation output carefully
 
 ### DON'T:
+
 - ❌ Skip validation with `--no-verify` regularly
 - ❌ Ignore warnings (they become errors)
 - ❌ Push broken code "to fix it later"
@@ -349,14 +386,14 @@ npm run typecheck && npm run lint
 
 Average validation times on modern hardware:
 
-| Step | Time | Failures/Month |
-|------|------|----------------|
-| Type Checking | 8s | 2-5 |
-| Linting | 7s | 1-3 |
-| Unit Tests | 25s | 3-8 |
-| Build | 28s | 1-2 |
-| Plugin Validation | 15s | 0-2 |
-| **Total** | **~83s** | **7-20** |
+| Step              | Time     | Failures/Month |
+| ----------------- | -------- | -------------- |
+| Type Checking     | 8s       | 2-5            |
+| Linting           | 7s       | 1-3            |
+| Unit Tests        | 25s      | 3-8            |
+| Build             | 28s      | 1-2            |
+| Plugin Validation | 15s      | 0-2            |
+| **Total**         | **~83s** | **7-20**       |
 
 **Success rate**: ~80% pass on first attempt
 

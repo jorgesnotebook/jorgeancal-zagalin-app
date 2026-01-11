@@ -26,8 +26,7 @@ export function FloatingChatButton() {
     if (saved) {
       try {
         return JSON.parse(saved);
-      } catch (e) {
-      }
+      } catch (e) {}
     }
     return { x: window.innerWidth - 470, y: window.innerHeight - 620 };
   });
@@ -37,8 +36,7 @@ export function FloatingChatButton() {
     if (saved) {
       try {
         return JSON.parse(saved);
-      } catch (e) {
-      }
+      } catch (e) {}
     }
     return { width: 450, height: 600 };
   });
@@ -170,12 +168,7 @@ export function FloatingChatButton() {
             }}
           >
             <img src="public/plugins/jorgeancal-zagalin-app/img/logo.png" alt="Zagalin" className={s.headerLogo} />
-            <IconButton
-              name="times"
-              size="lg"
-              tooltip="Close"
-              onClick={toggleChat}
-            />
+            <IconButton name="times" size="lg" tooltip="Close" onClick={toggleChat} />
           </div>
           <div className={s.chatPanelContent}>
             <ChatPanel />

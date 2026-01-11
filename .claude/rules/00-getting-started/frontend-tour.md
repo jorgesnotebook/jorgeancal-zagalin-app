@@ -1,12 +1,12 @@
 ---
-paths: "src/**/*.{ts,tsx}"
+paths: 'src/**/*.{ts,tsx}'
 ---
 
 # Frontend Tour - React/TypeScript
 
 A guided tour of the frontend codebase for this plugin. Perfect for frontend developers getting started.
 
-##  Frontend Stack
+## Frontend Stack
 
 ```mermaid
 graph LR
@@ -21,7 +21,7 @@ graph LR
     Playwright[Playwright] --> E2E[E2E testing]
 ```
 
-##  Directory Structure
+## Directory Structure
 
 ```
 src/
@@ -56,7 +56,7 @@ src/
 
 **Pattern**: Components (UI) ↔ Services (Logic) ↔ Backend (API)
 
-##  Entry Point
+## Entry Point
 
 ### module.tsx - Plugin Registration
 
@@ -67,23 +67,22 @@ import { AppPlugin } from '@grafana/data';
 import { App } from './components/App';
 import { AppConfig } from './components/AppConfig';
 
-export const plugin = new AppPlugin<AppJsonData>()
-  .setRootPage(App)
-  .addConfigPage({
-    title: 'Configuration',
-    icon: 'cog',
-    body: AppConfig,
-    id: 'configuration',
-  });
+export const plugin = new AppPlugin<AppJsonData>().setRootPage(App).addConfigPage({
+  title: 'Configuration',
+  icon: 'cog',
+  body: AppConfig,
+  id: 'configuration',
+});
 ```
 
 **Key Points**:
+
 - Registers app plugin with Grafana
 - Sets root page (`App`)
 - Adds configuration page
 - Grafana calls this on plugin load
 
-##  Component Architecture
+## Component Architecture
 
 ### App.tsx - Main Application
 
@@ -111,12 +110,14 @@ graph TD
 **File**: `src/pages/ChatPage.tsx:1-200`
 
 **What it does**:
+
 - Full-screen chat interface
 - Manages conversation state
 - Streams LLM responses
 - Handles message sending
 
 **Key features**:
+
 ```typescript
 // 1. State management
 const [messages, setMessages] = useState<Message[]>([]);
@@ -125,27 +126,24 @@ const [isStreaming, setIsStreaming] = useState(false);
 // 2. Send message
 const sendMessage = async (text: string) => {
   // Add user message
-  setMessages(prev => [...prev, { role: 'user', content: text }]);
+  setMessages((prev) => [...prev, { role: 'user', content: text }]);
 
   // Stream LLM response
   const stream$ = assistantService.streamChat(messages);
   stream$.subscribe({
     next: (chunk) => updateStreamingMessage(chunk),
-    complete: () => setIsStreaming(false)
+    complete: () => setIsStreaming(false),
   });
 };
 
 // 3. Render messages
-{messages.map(msg => (
-  <MessageBubble
-    key={msg.id}
-    role={msg.role}
-    content={msg.content}
-  />
-))}
+{
+  messages.map((msg) => <MessageBubble key={msg.id} role={msg.role} content={msg.content} />);
+}
 ```
 
 **UI Components Used**:
+
 - `<PluginPage>` - Page wrapper
 - `<Stack>` - Layout
 - `<Button>` - Actions
@@ -155,11 +153,13 @@ const sendMessage = async (text: string) => {
 ### FloatingChat - Global Chat Button
 
 **Files**:
+
 - `src/globalChatMount.tsx` - Portal mounting
 - `src/components/FloatingChat/FloatingChatButton.tsx` - Button
 - `src/components/FloatingChat/FloatingChat.tsx` - Overlay
 
 **Architecture**:
+
 ```mermaid
 graph TD
     Mount[globalChatMount.tsx]
@@ -170,11 +170,13 @@ graph TD
 ```
 
 **Key Pattern**: **Portal Mounting**
+
 - Mounts once when plugin loads
 - Persists across Grafana navigation
 - Only visible on dashboard pages
 
 **Detection**:
+
 ```typescript
 // Check if on dashboard page
 const isDashboardPage = window.location.pathname.includes('/d/');
@@ -184,7 +186,7 @@ if (isDashboardPage) {
 }
 ```
 
-##  Services Layer
+## Services Layer
 
 ### Pattern: Separation of Concerns
 
@@ -196,9 +198,10 @@ graph TD
 ```
 
 **Benefits**:
--  Testable logic (no UI dependencies)
--  Reusable across components
--  Single source of truth for API calls
+
+- Testable logic (no UI dependencies)
+- Reusable across components
+- Single source of truth for API calls
 
 ### assistantService.ts - LLM Client
 
@@ -207,6 +210,7 @@ graph TD
 **Purpose**: API client for LLM chat
 
 **Key Methods**:
+
 ```typescript
 export const assistantService = {
   // Stream chat (SSE)
@@ -228,10 +232,7 @@ export const assistantService = {
 
   // Non-streaming chat
   async chat(messages: Message[]): Promise<string> {
-    const response = await getBackendSrv().post(
-      '/api/plugins/jorgeancal-zagalin-app/resources/llm/chat',
-      { messages }
-    );
+    const response = await getBackendSrv().post('/api/plugins/jorgeancal-zagalin-app/resources/llm/chat', { messages });
     return response.content;
   },
 };
@@ -246,18 +247,20 @@ export const assistantService = {
 **Purpose**: Dual-tier storage (backend + localStorage)
 
 **Architecture**:
+
 ```
 conversationStorage
-  
+
    Try backend first
       storageApiClient.ts
           POST /storage/conversations
-  
+
    Fallback to localStorage
        localStorage.setItem('zagalin-conversations', ...)
 ```
 
 **Key Methods**:
+
 ```typescript
 export const conversationStorage = {
   async saveConversation(conv: Conversation): Promise<void> {
@@ -293,6 +296,7 @@ export const conversationStorage = {
 **Purpose**: Extract context from Grafana (dashboard, panels, time range)
 
 **What it extracts**:
+
 ```typescript
 interface GrafanaContext {
   dashboard: {
@@ -309,6 +313,7 @@ interface GrafanaContext {
 ```
 
 **Usage**:
+
 ```typescript
 import { extractGrafanaContext } from 'services/contextService';
 
@@ -323,11 +328,9 @@ const context = extractGrafanaContext();
 **Purpose**: Execute tools that LLM requests
 
 **Pattern**:
+
 ```typescript
-export async function executeTool(
-  toolName: string,
-  args: any
-): Promise<any> {
+export async function executeTool(toolName: string, args: any): Promise<any> {
   switch (toolName) {
     case 'query_prometheus':
       return await queryPrometheus(args);
@@ -345,6 +348,7 @@ export async function executeTool(
 ```
 
 **Integration with LLM**:
+
 ```mermaid
 graph TD
     LLM[LLM requests tool]
@@ -353,11 +357,12 @@ graph TD
     Call --> Return[Return result to LLM]
 ```
 
-##  UI Components & Styling
+## UI Components & Styling
 
 ### Always Use @grafana/ui
 
 ** NEVER do this**:
+
 ```typescript
 // Custom button - BAD!
 <button className="my-custom-button">Click</button>
@@ -367,6 +372,7 @@ graph TD
 ```
 
 ** ALWAYS do this**:
+
 ```typescript
 import { Button, useTheme2, useStyles2 } from '@grafana/ui';
 import { css } from '@emotion/css';
@@ -392,10 +398,11 @@ const getStyles = (theme: GrafanaTheme2) => ({
 ```
 
 **Why**:
--  Consistent with Grafana
--  Theme support (light/dark)
--  Accessibility
--  Won't break on updates
+
+- Consistent with Grafana
+- Theme support (light/dark)
+- Accessibility
+- Won't break on updates
 
 ### Common Components
 
@@ -439,7 +446,7 @@ import {
 </Alert>
 ```
 
-##  Backend Integration
+## Backend Integration
 
 ### Using getBackendSrv()
 
@@ -449,30 +456,25 @@ import {
 import { getBackendSrv } from '@grafana/runtime';
 
 // GET request
-const data = await getBackendSrv().get(
-  '/api/plugins/jorgeancal-zagalin-app/resources/my-endpoint'
-);
+const data = await getBackendSrv().get('/api/plugins/jorgeancal-zagalin-app/resources/my-endpoint');
 
 // POST request
-const response = await getBackendSrv().post(
-  '/api/plugins/jorgeancal-zagalin-app/resources/my-endpoint',
-  { key: 'value' }
-);
+const response = await getBackendSrv().post('/api/plugins/jorgeancal-zagalin-app/resources/my-endpoint', {
+  key: 'value',
+});
 
 // With query params
-const results = await getBackendSrv().get(
-  '/api/plugins/jorgeancal-zagalin-app/resources/search',
-  { query: 'test' }
-);
+const results = await getBackendSrv().get('/api/plugins/jorgeancal-zagalin-app/resources/search', { query: 'test' });
 ```
 
 **Why use getBackendSrv()**:
--  Handles authentication automatically
--  Adds CSRF tokens
--  Retry logic built-in
--  Error handling
 
-##  Testing Frontend
+- Handles authentication automatically
+- Adds CSRF tokens
+- Retry logic built-in
+- Error handling
+
+## Testing Frontend
 
 ### Unit Tests (Jest)
 
@@ -513,6 +515,7 @@ describe('MyComponent', () => {
 ```
 
 **Run tests**:
+
 ```bash
 npm run test          # Watch mode
 npm run test:ci       # Single run
@@ -535,37 +538,41 @@ test('feature works end-to-end', async ({ page, gotoAppPage }) => {
 });
 ```
 
-##  Best Practices
+## Best Practices
 
 ### DO:
--  Use @grafana/ui components
--  Extract logic to services
--  Use TypeScript types
--  Handle loading states
--  Handle error states
--  Write tests for components
--  Use semantic HTML
--  Use theme variables
+
+- Use @grafana/ui components
+- Extract logic to services
+- Use TypeScript types
+- Handle loading states
+- Handle error states
+- Write tests for components
+- Use semantic HTML
+- Use theme variables
 
 ### DON'T:
--  Build custom UI components
--  Mix UI and business logic
--  Use `any` type
--  Hardcode colors/spacing
--  Forget error handling
--  Skip accessibility
--  Use inline styles
--  Console.log in production
 
-##  Debugging Frontend
+- Build custom UI components
+- Mix UI and business logic
+- Use `any` type
+- Hardcode colors/spacing
+- Forget error handling
+- Skip accessibility
+- Use inline styles
+- Console.log in production
+
+## Debugging Frontend
 
 ### React DevTools
+
 ```bash
 # Install browser extension
 # Then inspect components in browser
 ```
 
 ### Console Logging (Development Only)
+
 ```typescript
 if (process.env.NODE_ENV === 'development') {
   console.log('Debug:', value);
@@ -573,6 +580,7 @@ if (process.env.NODE_ENV === 'development') {
 ```
 
 ### Network Tab
+
 ```bash
 # Browser DevTools → Network
 # Filter by "Fetch/XHR"
@@ -580,33 +588,36 @@ if (process.env.NODE_ENV === 'development') {
 ```
 
 ### Source Maps
+
 ```bash
 # Webpack generates source maps
 # Set breakpoints in TypeScript source
 # Not transpiled JavaScript
 ```
 
-##  Key Files Reference
+## Key Files Reference
 
-| Feature | Files |
-|---------|-------|
-| Chat UI | `src/pages/ChatPage.tsx` |
+| Feature         | Files                                                     |
+| --------------- | --------------------------------------------------------- |
+| Chat UI         | `src/pages/ChatPage.tsx`                                  |
 | Floating button | `src/globalChatMount.tsx`, `src/components/FloatingChat/` |
-| LLM client | `src/services/assistantService.ts` |
-| Storage | `src/services/conversationStorage.ts` |
-| Context | `src/services/contextService.ts` |
-| Tools | `src/services/zagalinTools.ts` |
-| Config | `src/components/AppConfig/AppConfig.tsx` |
-| Types | `src/types/types.ts` |
+| LLM client      | `src/services/assistantService.ts`                        |
+| Storage         | `src/services/conversationStorage.ts`                     |
+| Context         | `src/services/contextService.ts`                          |
+| Tools           | `src/services/zagalinTools.ts`                            |
+| Config          | `src/components/AppConfig/AppConfig.tsx`                  |
+| Types           | `src/types/types.ts`                                      |
 
-##  Next Steps
+## Next Steps
 
 **Deep dive**:
+
 - Backend tour: `.claude/rules/00-getting-started/backend-tour.md`
 - Common tasks: `.claude/rules/00-getting-started/common-tasks.md`
 - Architecture: `.claude/rules/00-getting-started/architecture-tour.md`
 
 **Learn more**:
+
 - Clean code: `.claude/rules/02-development/clean-code.md`
 - Testing: `.claude/rules/02-development/testing.md`
 - Grafana UI: https://developers.grafana.com/ui

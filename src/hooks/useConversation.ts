@@ -94,105 +94,117 @@ export function useConversation(): UseConversationReturn {
   /**
    * Create a new conversation
    */
-  const createNew = useCallback(async (grafanaContext?: GrafanaContext) => {
-    const context = grafanaContextToConversationContext(grafanaContext);
+  const createNew = useCallback(
+    async (grafanaContext?: GrafanaContext) => {
+      const context = grafanaContextToConversationContext(grafanaContext);
 
-    const newConv = await ConversationStorage.createConversation(storage, context);
-    setConversation(newConv);
-    conversationRef.current = newConv;
-    await ConversationStorage.saveConversation(storage, newConv);
-    await refreshConversationList();
-  }, [refreshConversationList, storage]);
+      const newConv = await ConversationStorage.createConversation(storage, context);
+      setConversation(newConv);
+      conversationRef.current = newConv;
+      await ConversationStorage.saveConversation(storage, newConv);
+      await refreshConversationList();
+    },
+    [refreshConversationList, storage]
+  );
 
   /**
    * Load an existing conversation
    */
-  const loadConversation = useCallback(async (id: string) => {
-    setIsLoading(true);
-    try {
-      const conv = await ConversationStorage.getConversation(storage, id);
-      if (conv) {
-        setConversation(conv);
-        conversationRef.current = conv;
-      } else {
-        console.warn(`Conversation ${id} not found`);
+  const loadConversation = useCallback(
+    async (id: string) => {
+      setIsLoading(true);
+      try {
+        const conv = await ConversationStorage.getConversation(storage, id);
+        if (conv) {
+          setConversation(conv);
+          conversationRef.current = conv;
+        } else {
+          console.warn(`Conversation ${id} not found`);
+        }
+      } catch (error) {
+        console.error('Failed to load conversation:', error);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error('Failed to load conversation:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [storage]);
+    },
+    [storage]
+  );
 
   /**
    * Add a message to the current conversation
    */
-  const addMessage = useCallback(async (message: ConversationMessage, grafanaContext?: GrafanaContext) => {
-    const currentConv = conversationRef.current;
+  const addMessage = useCallback(
+    async (message: ConversationMessage, grafanaContext?: GrafanaContext) => {
+      const currentConv = conversationRef.current;
 
-    console.log('[useConversation] addMessage called. Current conversation:', currentConv?.id);
-    console.log('[useConversation] Current message count:', currentConv?.messages?.length || 0);
+      console.log('[useConversation] addMessage called. Current conversation:', currentConv?.id);
+      console.log('[useConversation] Current message count:', currentConv?.messages?.length || 0);
 
-    if (!currentConv) {
-      console.log('[useConversation] No active conversation. Creating new one with context.');
+      if (!currentConv) {
+        console.log('[useConversation] No active conversation. Creating new one with context.');
 
-      const context = grafanaContextToConversationContext(grafanaContext);
+        const context = grafanaContextToConversationContext(grafanaContext);
 
-      const newConv = await ConversationStorage.createConversation(storage, context);
-      const updatedConv = {
-        ...newConv,
-        messages: [message]
-      };
-      console.log('[useConversation] Created new conversation:', updatedConv.id);
-      setConversation(updatedConv);
-      conversationRef.current = updatedConv;
-      await ConversationStorage.saveConversation(storage, updatedConv);
-      await refreshConversationList();
-      console.log('[useConversation] New conversation saved');
-      return;
-    }
-
-    console.log('[useConversation] Adding to existing conversation:', currentConv.id);
-
-    const updated = {
-      ...currentConv,
-      messages: [...currentConv.messages, message],
-      updatedAt: new Date()
-    };
-
-    if (currentConv.messages.length === 0 && message.role === 'user') {
-      updated.title = message.content.slice(0, 50);
-      if (message.content.length > 50) {
-        updated.title += '...';
+        const newConv = await ConversationStorage.createConversation(storage, context);
+        const updatedConv = {
+          ...newConv,
+          messages: [message],
+        };
+        console.log('[useConversation] Created new conversation:', updatedConv.id);
+        setConversation(updatedConv);
+        conversationRef.current = updatedConv;
+        await ConversationStorage.saveConversation(storage, updatedConv);
+        await refreshConversationList();
+        console.log('[useConversation] New conversation saved');
+        return;
       }
-    }
 
-    setConversation(updated);
-    conversationRef.current = updated;
-    await ConversationStorage.saveConversation(storage, updated);
-    await refreshConversationList();
-  }, [refreshConversationList, storage]);
+      console.log('[useConversation] Adding to existing conversation:', currentConv.id);
+
+      const updated = {
+        ...currentConv,
+        messages: [...currentConv.messages, message],
+        updatedAt: new Date(),
+      };
+
+      if (currentConv.messages.length === 0 && message.role === 'user') {
+        updated.title = message.content.slice(0, 50);
+        if (message.content.length > 50) {
+          updated.title += '...';
+        }
+      }
+
+      setConversation(updated);
+      conversationRef.current = updated;
+      await ConversationStorage.saveConversation(storage, updated);
+      await refreshConversationList();
+    },
+    [refreshConversationList, storage]
+  );
 
   /**
    * Delete a conversation
    */
-  const deleteConversation = useCallback(async (id: string) => {
-    console.log('[useConversation] Deleting conversation:', id);
-    try {
-      await ConversationStorage.deleteConversation(storage, id);
+  const deleteConversation = useCallback(
+    async (id: string) => {
+      console.log('[useConversation] Deleting conversation:', id);
+      try {
+        await ConversationStorage.deleteConversation(storage, id);
 
-      if (conversation?.id === id) {
-        setConversation(null);
-        conversationRef.current = null;
+        if (conversation?.id === id) {
+          setConversation(null);
+          conversationRef.current = null;
+        }
+
+        await refreshConversationList();
+        console.log('[useConversation] Conversation deleted successfully');
+      } catch (error) {
+        console.error('[useConversation] Failed to delete conversation:', error);
+        throw error;
       }
-
-      await refreshConversationList();
-      console.log('[useConversation] Conversation deleted successfully');
-    } catch (error) {
-      console.error('[useConversation] Failed to delete conversation:', error);
-      throw error;
-    }
-  }, [conversation, refreshConversationList, storage]);
+    },
+    [conversation, refreshConversationList, storage]
+  );
 
   /**
    * Delete all conversations
@@ -214,46 +226,52 @@ export function useConversation(): UseConversationReturn {
   /**
    * Update conversation title
    */
-  const updateTitle = useCallback(async (id: string, title: string) => {
-    const sanitizedTitle = title.trim().slice(0, 200);
+  const updateTitle = useCallback(
+    async (id: string, title: string) => {
+      const sanitizedTitle = title.trim().slice(0, 200);
 
-    if (sanitizedTitle.length === 0) {
-      console.warn('Title cannot be empty');
-      return;
-    }
+      if (sanitizedTitle.length === 0) {
+        console.warn('Title cannot be empty');
+        return;
+      }
 
-    if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(sanitizedTitle)) {
-      console.warn('Title contains invalid characters');
-      return;
-    }
+      if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(sanitizedTitle)) {
+        console.warn('Title contains invalid characters');
+        return;
+      }
 
-    await ConversationStorage.updateTitle(storage, id, sanitizedTitle);
+      await ConversationStorage.updateTitle(storage, id, sanitizedTitle);
 
-    if (conversation?.id === id) {
-      setConversation({
-        ...conversation,
-        title: sanitizedTitle
-      });
-    }
+      if (conversation?.id === id) {
+        setConversation({
+          ...conversation,
+          title: sanitizedTitle,
+        });
+      }
 
-    await refreshConversationList();
-  }, [conversation, refreshConversationList, storage]);
+      await refreshConversationList();
+    },
+    [conversation, refreshConversationList, storage]
+  );
 
   /**
    * Toggle pin status
    */
-  const togglePin = useCallback(async (id: string) => {
-    await ConversationStorage.togglePin(storage, id);
+  const togglePin = useCallback(
+    async (id: string) => {
+      await ConversationStorage.togglePin(storage, id);
 
-    if (conversation?.id === id) {
-      setConversation({
-        ...conversation,
-        isPinned: !conversation.isPinned
-      });
-    }
+      if (conversation?.id === id) {
+        setConversation({
+          ...conversation,
+          isPinned: !conversation.isPinned,
+        });
+      }
 
-    await refreshConversationList();
-  }, [conversation, refreshConversationList, storage]);
+      await refreshConversationList();
+    },
+    [conversation, refreshConversationList, storage]
+  );
 
   /**
    * Clear the current conversation (start fresh)
@@ -266,65 +284,71 @@ export function useConversation(): UseConversationReturn {
   /**
    * Add a new context (dashboard) to the current conversation
    */
-  const addContext = useCallback(async (grafanaContext: GrafanaContext) => {
-    const currentConv = conversationRef.current;
-    if (!currentConv) {
-      console.warn('[useConversation] No active conversation to add context to');
-      return;
-    }
+  const addContext = useCallback(
+    async (grafanaContext: GrafanaContext) => {
+      const currentConv = conversationRef.current;
+      if (!currentConv) {
+        console.warn('[useConversation] No active conversation to add context to');
+        return;
+      }
 
-    const newContext = grafanaContextToConversationContext(grafanaContext);
-    if (!newContext) {
-      console.warn('[useConversation] Invalid context - missing dashboard UID');
-      return;
-    }
+      const newContext = grafanaContextToConversationContext(grafanaContext);
+      if (!newContext) {
+        console.warn('[useConversation] Invalid context - missing dashboard UID');
+        return;
+      }
 
-    const exists = currentConv.contexts.some(
-      ctx => ctx.dashboardUid === newContext.dashboardUid && ctx.panelId === newContext.panelId
-    );
+      const exists = currentConv.contexts.some(
+        (ctx) => ctx.dashboardUid === newContext.dashboardUid && ctx.panelId === newContext.panelId
+      );
 
-    if (exists) {
-      console.log('[useConversation] Context already attached:', newContext.dashboardUid);
-      return;
-    }
+      if (exists) {
+        console.log('[useConversation] Context already attached:', newContext.dashboardUid);
+        return;
+      }
 
-    console.log('[useConversation] Adding context to conversation:', newContext.dashboardUid);
+      console.log('[useConversation] Adding context to conversation:', newContext.dashboardUid);
 
-    const updated = {
-      ...currentConv,
-      contexts: [...currentConv.contexts, newContext],
-      updatedAt: new Date(),
-    };
+      const updated = {
+        ...currentConv,
+        contexts: [...currentConv.contexts, newContext],
+        updatedAt: new Date(),
+      };
 
-    setConversation(updated);
-    conversationRef.current = updated;
-    await ConversationStorage.saveConversation(storage, updated);
-    console.log('[useConversation] Context added successfully');
-  }, [storage]);
+      setConversation(updated);
+      conversationRef.current = updated;
+      await ConversationStorage.saveConversation(storage, updated);
+      console.log('[useConversation] Context added successfully');
+    },
+    [storage]
+  );
 
   /**
    * Remove a context (dashboard) from the current conversation
    */
-  const removeContext = useCallback(async (dashboardUid: string) => {
-    const currentConv = conversationRef.current;
-    if (!currentConv) {
-      console.warn('[useConversation] No active conversation to remove context from');
-      return;
-    }
+  const removeContext = useCallback(
+    async (dashboardUid: string) => {
+      const currentConv = conversationRef.current;
+      if (!currentConv) {
+        console.warn('[useConversation] No active conversation to remove context from');
+        return;
+      }
 
-    console.log('[useConversation] Removing context from conversation:', dashboardUid);
+      console.log('[useConversation] Removing context from conversation:', dashboardUid);
 
-    const updated = {
-      ...currentConv,
-      contexts: currentConv.contexts.filter(ctx => ctx.dashboardUid !== dashboardUid),
-      updatedAt: new Date(),
-    };
+      const updated = {
+        ...currentConv,
+        contexts: currentConv.contexts.filter((ctx) => ctx.dashboardUid !== dashboardUid),
+        updatedAt: new Date(),
+      };
 
-    setConversation(updated);
-    conversationRef.current = updated;
-    await ConversationStorage.saveConversation(storage, updated);
-    console.log('[useConversation] Context removed successfully');
-  }, [storage]);
+      setConversation(updated);
+      conversationRef.current = updated;
+      await ConversationStorage.saveConversation(storage, updated);
+      console.log('[useConversation] Context removed successfully');
+    },
+    [storage]
+  );
 
   return {
     conversation,
@@ -341,6 +365,6 @@ export function useConversation(): UseConversationReturn {
     togglePin,
     clearCurrent,
     isLoading,
-    currentId: conversation?.id || null
+    currentId: conversation?.id || null,
   };
 }

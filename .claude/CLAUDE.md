@@ -18,6 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Technology Stack
 
 **Frontend:**
+
 - React 18 with TypeScript
 - Grafana UI components (@grafana/ui)
 - RxJS for streaming LLM responses
@@ -25,13 +26,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Jest for unit tests, Playwright for E2E
 
 **Backend:**
+
 - Go 1.21+ with grafana-plugin-sdk-go
 - Mage build system
 - Context manager for Prometheus/Loki/Tempo metadata extraction
 - Rate limiting, query validation, and guardrails system
 - File-based user storage for conversations
 
-##  Comprehensive Documentation
+## Comprehensive Documentation
 
 **IMPORTANT**: Before modifying features, read the complete documentation:
 
@@ -40,12 +42,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **[Architecture](../docs/development/architecture.md)** - System architecture and design decisions
 
 **Quick Reference**:
+
 - Feature count: 18 active features + 4 implemented but unused
 - Code volume: 7,887 lines (backend) + 3,725 lines (frontend services)
 - Configuration fields: 25+ settings (only 1 required for basic use)
 - API endpoints: 20+ endpoints across LLM, Storage, Query, Health, and Runs
 
 **Before implementing new features**:
+
 1. Check if feature already exists (see FEATURES_OVERVIEW.md)
 2. Review API documentation (see api/ENDPOINTS.md)
 3. Understand security pipeline (Rate limiting → Allowlist → Validation → OTel → Execute)
@@ -124,11 +128,13 @@ mage -v build
 ### 1. Dual Storage System
 
 The plugin uses a **fallback storage pattern**:
+
 - **Primary**: Backend Go storage (file-based in `GF_PLUGIN_APP_DATA_PATH`)
 - **Fallback**: Browser localStorage
 - **Migration**: Automatic migration from localStorage to backend on first backend availability
 
 **Files**:
+
 - `src/services/conversationStorage.ts` - Main storage interface
 - `src/services/storageApiClient.ts` - Backend API client
 - `pkg/plugin/storage.go` - Backend storage implementation
@@ -138,11 +144,13 @@ The plugin uses a **fallback storage pattern**:
 ### 2. Context Manager (Backend)
 
 The Go backend maintains a **cached context** of Prometheus metrics, Loki streams, and Tempo traces:
+
 - Runs background refresh every N minutes (configurable)
 - Extracts metric names, labels, log streams from datasources
 - Provides `/context/status` and `/context/refresh` endpoints
 
 **Files**:
+
 - `pkg/plugin/context/manager.go` - Main context manager
 - `pkg/plugin/context/metrics.go` - Prometheus integration
 - `pkg/plugin/context/logs.go` - Loki integration
@@ -153,18 +161,21 @@ The Go backend maintains a **cached context** of Prometheus metrics, Loki stream
 ### 3. Global Chat Mounting
 
 The floating chat button uses a **portal mounting pattern**:
+
 - `globalChatMount.tsx` creates a global div (`#zagalin-global-chat-root`)
 - Mounts once when the module loads (not per page)
 - Persists across Grafana navigation
 - Only displays on dashboard pages
 
 **Files**:
+
 - `src/globalChatMount.tsx` - Global mount logic
 - `src/components/FloatingChat/FloatingChatButton.tsx` - Floating button component
 
 ### 4. LLM Streaming
 
 Uses **backend proxy pattern** for secure LLM integration:
+
 - Frontend calls backend `/llm/chat` endpoint
 - Backend constructs system prompts securely (Senior Staff SRE persona)
 - Backend auto-detects skills and injects context
@@ -173,6 +184,7 @@ Uses **backend proxy pattern** for secure LLM integration:
 - SSE streaming for real-time responses
 
 **Files**:
+
 - `pkg/plugin/assistant.go` - LLM HTTP handler and orchestration
 - `pkg/plugin/assistant_prompts.go` - System prompts (secure, server-side)
 - `pkg/plugin/assistant_tools.go` - Function calling tool definitions
@@ -183,12 +195,14 @@ Uses **backend proxy pattern** for secure LLM integration:
 ### 5. Context Service (Frontend)
 
 Extracts runtime context from Grafana:
+
 - Dashboard UID, title, panels
 - Time range from URL params
 - Panel queries (PromQL/LogQL)
 - Template variables
 
 **Files**:
+
 - `src/services/contextService.ts` - Context extraction
 - `src/services/useGrafanaContext.ts` - React hook
 - `src/services/contextOptimizer.ts` - Context size reduction
@@ -245,6 +259,7 @@ pkg/
 This project follows KISS principles to maintain code quality and reduce technical debt:
 
 **Core Principles:**
+
 1. **Solve the actual problem** - Don't add features that aren't needed
 2. **Prefer simple solutions** - Use existing patterns before inventing new ones
 3. **Avoid over-engineering** - Three similar lines are better than a premature abstraction
@@ -252,16 +267,18 @@ This project follows KISS principles to maintain code quality and reduce technic
 5. **Minimal dependencies** - Every dependency is a liability
 
 **When coding:**
--  **Don't:** Create abstractions for one-time use
--  **Do:** Wait for 3+ similar uses before abstracting
--  **Don't:** Add error handling for impossible scenarios
--  **Do:** Validate at boundaries (user input, external APIs)
--  **Don't:** Add feature flags or backward-compatibility shims unnecessarily
--  **Do:** Just change the code when you can
--  **Don't:** Add configurability for every possible option
--  **Do:** Start with sensible defaults, add config only when needed
+
+- **Don't:** Create abstractions for one-time use
+- **Do:** Wait for 3+ similar uses before abstracting
+- **Don't:** Add error handling for impossible scenarios
+- **Do:** Validate at boundaries (user input, external APIs)
+- **Don't:** Add feature flags or backward-compatibility shims unnecessarily
+- **Do:** Just change the code when you can
+- **Don't:** Add configurability for every possible option
+- **Do:** Start with sensible defaults, add config only when needed
 
 **Refactoring guide:**
+
 - If you see duplicate code in 3+ places → refactor
 - If you see complex logic → simplify first, optimize second
 - If you see unused code → delete it immediately
@@ -299,6 +316,7 @@ if len(allowedFunctions) == 0 {
 ```
 
 **When to comment:**
+
 - Complex algorithms or non-obvious logic
 - Important edge cases or gotchas
 - Security-critical code sections
@@ -306,6 +324,7 @@ if len(allowedFunctions) == 0 {
 - Performance optimizations with trade-offs
 
 **When NOT to comment:**
+
 - Function signatures (use clear names instead)
 - Variable declarations (use descriptive names)
 - Simple loops or conditionals
@@ -314,6 +333,7 @@ if len(allowedFunctions) == 0 {
 ### Decision-Making Guide for AI Assistants
 
 **When to ask questions:**
+
 - User request is ambiguous and has multiple valid interpretations
 - Feature could be implemented in several architecturally different ways
 - Unclear which existing pattern to follow
@@ -321,6 +341,7 @@ if len(allowedFunctions) == 0 {
 - Breaking changes that affect existing functionality
 
 **When to proceed without asking:**
+
 - Bug fix with clear root cause and solution
 - Adding obvious missing functionality (e.g., missing test for existing feature)
 - Following established patterns in the codebase
@@ -328,6 +349,7 @@ if len(allowedFunctions) == 0 {
 - Documentation updates
 
 **When to use EnterPlanMode:**
+
 - New feature implementation (unless trivial)
 - Changes affecting multiple files or components
 - Architectural decisions needed
@@ -335,6 +357,7 @@ if len(allowedFunctions) == 0 {
 - User would benefit from seeing the plan before implementation
 
 **When NOT to use EnterPlanMode:**
+
 - Single-line or few-line fixes
 - Adding obvious missing tests
 - Documentation updates
@@ -346,6 +369,7 @@ if len(allowedFunctions) == 0 {
 All code changes must consider security implications from the start.
 
 **Security Principles:**
+
 1. **Never trust user input** - Validate and sanitize everything
 2. **Principle of least privilege** - Users only access what they're authorized for
 3. **Defense in depth** - Multiple layers of security
@@ -355,6 +379,7 @@ All code changes must consider security implications from the start.
 **Key Security Requirements:**
 
 **Authentication & Authorization:**
+
 - All backend queries use user's security context (see `pkg/plugin/query_proxy.go::extractUserIdentity`)
 - No credential storage - use session-based auth
 - User identity logged in audit trail
@@ -362,6 +387,7 @@ All code changes must consider security implications from the start.
 - Never store API keys in localStorage or frontend code
 
 **Query Execution Pipeline (pkg/plugin/query_proxy.go::handleQuery):**
+
 1. Extract user identity from request context
 2. Rate limiting per user (token bucket algorithm)
 3. Datasource allowlist check (if configured)
@@ -371,24 +397,28 @@ All code changes must consider security implications from the start.
 7. Audit logging with user identity
 
 **Input Validation:**
+
 - Validate all user input (query parameters, messages, config)
 - Sanitize LLM output before rendering (use DOMPurify)
 - Limit message size (max 50KB per message)
 - Files: `pkg/plugin/query_validation.go`, frontend uses `dompurify`
 
 **Rate Limiting & Abuse Prevention:**
+
 - Token bucket algorithm per user (default: 60 req/min)
 - Budget limits for LLM costs
 - Query time range clamping (prevent expensive queries)
 - File: `pkg/plugin/guardrails.go`
 
 **Data Privacy:**
+
 - Conversations stored per-user with access control
 - No cross-user data leakage
 - PII handling in logs (user IDs hashed)
 - File: `pkg/plugin/storage.go`
 
 **Security Checklist for New Features:**
+
 - [ ] Does it accept user input? → Add validation
 - [ ] Does it access data? → Check user permissions
 - [ ] Does it make external calls? → Use proper auth
@@ -399,6 +429,7 @@ All code changes must consider security implications from the start.
 - [ ] Does it log? → Don't log PII or credentials
 
 **Security Resources:**
+
 - OWASP Top 10: https://owasp.org/www-project-top-ten/
 - Grafana Security: https://grafana.com/docs/grafana/latest/setup-grafana/configure-security/
 
@@ -411,6 +442,7 @@ The plugin implements **manual pattern-based query validation** to prevent injec
 **No External Dependencies** - Uses manual pattern matching instead of external parsers to keep binary size small and avoid licensing issues.
 
 **Per-Query-Type Controls** - Each query language can be enabled/disabled independently:
+
 - `Enabled` - Master switch for all validation
 - `EnablePromQLValidation` - Toggle PromQL validation
 - `EnableLogQLValidation` - Toggle LogQL validation
@@ -438,24 +470,28 @@ type QueryValidationSettings struct {
 ### Validation Methods
 
 **PromQL Validation (`validatePromQL`):**
+
 - Balanced braces, brackets, parentheses (respects string escaping)
 - Invalid operator detection (`===`, `!==`, `<>`, `++`, `--`)
 - Complexity estimation (count operators, functions, selectors)
 - Function allowlist enforcement (pattern matching for `function(`)
 
 **LogQL Validation (`validateLogQL`):**
+
 - Log selector requirement (`{...}` must be present)
 - Balanced braces (respects string escaping)
 - Filter operator detection (`|=`, `!=`, `|~`, `!~`)
 - Complexity estimation (count selectors, filters, operators)
 
 **TraceQL Validation (`validateTraceQL`):**
+
 - Balanced braces (respects string escaping)
 - Valid attribute prefix detection (`span.`, `resource.`, intrinsic fields)
 - Invalid operator detection (`===`, `!==`, `<>`)
 - Complexity estimation (count selectors, operators)
 
 **Generic Validation (`validateGeneric`):**
+
 - Query length limits (max 10KB)
 - SQL injection pattern detection (`DROP TABLE`, `UNION SELECT`, etc.)
 - Dangerous command patterns
@@ -471,6 +507,7 @@ type QueryValidationSettings struct {
 ### Files
 
 **Core Implementation:**
+
 - `pkg/plugin/query_validation.go` - Validation engine (~450 lines)
   - `NewQueryValidator()` - Constructor with defaults
   - `ValidateQuery()` - Main entry point, routes to specific validators
@@ -479,6 +516,7 @@ type QueryValidationSettings struct {
   - Complexity counters and sanitization helpers
 
 **Testing:**
+
 - `pkg/plugin/query_validation_test.go` - Comprehensive test suite (~560 lines)
   - Valid query tests
   - Invalid syntax tests
@@ -488,10 +526,12 @@ type QueryValidationSettings struct {
   - Integration tests
 
 **Integration:**
+
 - `pkg/plugin/query_proxy.go::handleQuery` - Validation integrated into security pipeline
 - `src/components/AppConfig/AppConfig.tsx` - UI configuration with per-type toggles
 
 **Supporting:**
+
 - `pkg/plugin/settings.go` - Settings structure and defaults
 - `pkg/plugin/datasource.go` - Datasource type detection for routing queries to correct validator
 - `pkg/plugin/resources_test.go` - Integration tests
@@ -499,12 +539,14 @@ type QueryValidationSettings struct {
 ### Audit Logging
 
 All validation events are logged with full user context:
+
 ```go
 func (a *App) logQueryValidationFailure(user, datasource, result)
 func (a *App) logQuerySanitization(user, datasource, result)
 ```
 
 Logs include:
+
 - User ID, org ID, datasource UID
 - Violation type
 - Original query (for audit)
@@ -514,6 +556,7 @@ Logs include:
 ### Recommended Settings
 
 **Development:**
+
 ```json
 {
   "enabled": true,
@@ -527,6 +570,7 @@ Logs include:
 ```
 
 **Production:**
+
 ```json
 {
   "enabled": true,
@@ -541,14 +585,14 @@ Logs include:
 
 ### Security Notes
 
--  Manual pattern-based validation (no external parser dependencies)
--  Defense in depth - complements rate limiting, datasource governance, OTel enforcement
--  Comprehensive audit logging with user context
--  Zero external dependencies (no AGPL licensing concerns)
--  Small binary size impact (~0 bytes, no new dependencies)
--  Sanitization mode is risky - default to strict mode in production
--  Pattern matching is less precise than AST parsing but sufficient for security
--  LLM validation is placeholder for future implementation
+- Manual pattern-based validation (no external parser dependencies)
+- Defense in depth - complements rate limiting, datasource governance, OTel enforcement
+- Comprehensive audit logging with user context
+- Zero external dependencies (no AGPL licensing concerns)
+- Small binary size impact (~0 bytes, no new dependencies)
+- Sanitization mode is risky - default to strict mode in production
+- Pattern matching is less precise than AST parsing but sufficient for security
+- LLM validation is placeholder for future implementation
 
 ### Testing Coverage
 
@@ -558,11 +602,65 @@ Logs include:
 - Edge cases: Empty queries, very long queries, escaped strings
 - Integration: Full request pipeline with validation enabled
 
+## Grafana Version Compatibility
+
+The plugin implements **defensive version detection** to warn users about unsupported Grafana versions without blocking functionality.
+
+### Version Detection Strategy
+
+**Frontend-First Approach:**
+- Primary detection from `config.buildInfo.version` (Grafana runtime)
+- Optional backend detection via `X-Grafana-Version` HTTP header
+- Graceful fallback to "unknown" if version unavailable (respects disabled reporting)
+
+**Minimum Supported Version**: Grafana 10.4.0
+
+### Implementation
+
+**Frontend:**
+- `src/services/versionDetector.ts` - Version detection and compatibility checking
+- `src/services/versionReporter.ts` - HTTP header injection for backend
+- `src/components/VersionWarning/VersionWarning.tsx` - Warning UI component
+
+**Backend:**
+- `pkg/plugin/version.go` - Version parsing and comparison logic
+- `pkg/plugin/version_detector.go` - HTTP header extraction and caching
+- `pkg/plugin/app.go` - VersionDetector integration
+- `pkg/plugin/resources.go` - Middleware wraps all handlers
+
+### Key Features
+
+- **Defensive, Not Restrictive**: Warnings displayed but features not auto-disabled
+- **Privacy-Respecting**: Only sends version if available (respects disabled reporting)
+- **Configuration-Based Control**: User controls features via settings (not automatic)
+- **Health Check Integration**: Version info included in `/health` endpoint
+
+### User Experience
+
+**Configuration Page**: Warning alert shown at top if version unsupported or unavailable
+**Health Endpoint**: Returns version object with `detected`, `isAvailable`, `isSupported`, `warnings`
+**Backend Logs**: Version detected and logged on startup with minimum version info
+
+### Testing
+
+- Frontend: `src/services/versionDetector.test.ts` (comprehensive unit tests)
+- Backend: `pkg/plugin/version_test.go`, `pkg/plugin/version_detector_test.go`
+- Integration: `pkg/plugin/resources_test.go` (health endpoint + middleware tests)
+
+### Documentation
+
+See **[docs/VERSION_COMPATIBILITY.md](../docs/VERSION_COMPATIBILITY.md)** for complete guide including:
+- Supported versions and compatibility matrix
+- Troubleshooting version detection issues
+- API reference and examples
+- Privacy considerations
+
 ## Development Notes
 
 ### Backend Changes Require Full Rebuild
 
 When modifying Go code:
+
 1. Build backend: `mage -v buildAll`
 2. Restart Docker: `npm run server` (or `docker compose restart`)
 3. Backend binary is `dist/gpx_zagalin_*` (platform-specific)
@@ -582,15 +680,18 @@ When modifying Go code:
 ### CI/CD Pipeline
 
 **GitHub Actions**:
+
 - `.github/workflows/ci.yml` - Main CI (build, test, E2E)
 - `.github/workflows/release.yml` - Release on version tags
 - `.github/workflows/is-compatible.yml` - Grafana compatibility check
 
 **Local CI**:
+
 - `ci-local.sh` - Runs full pipeline locally
 - Use before pushing to catch issues early
 
 **Pre-commit Hooks**:
+
 - `.git-hooks/pre-commit` - Runs typecheck, lint, format checks
 - Prevents committing broken code
 - Skip with `git commit --no-verify` (not recommended)
@@ -610,32 +711,38 @@ When modifying Go code:
 ## Common Issues & Solutions
 
 ### Backend not starting
+
 - Check `GF_PLUGIN_APP_DATA_PATH` is writable
 - Check backend binary has execute permissions: `chmod +x dist/gpx_*`
 - Check Grafana logs: `docker logs jorgeancal-zagalin-app`
 
 ### LLM queries failing
+
 - Verify grafana-llm-app is installed and configured
 - Check Health API: `/api/plugins/jorgeancal-zagalin-app/health`
 - Check backend logs for rate limiting or validation errors
 
 ### Conversation storage not persisting
+
 - Check backend API: `/api/plugins/jorgeancal-zagalin-app/resources/storage/conversations`
 - Verify `GF_PLUGIN_APP_DATA_PATH` exists and is writable
 - Falls back to localStorage if backend unavailable
 
 ### Floating chat not appearing
+
 - Only appears on dashboard pages (URL pattern: `/d/:uid/`)
 - Check browser console for mount errors
 - Check `globalChatMount.tsx` initialization
 
 ### E2E tests failing
+
 - Ensure Grafana is running: `npm run server`
 - Wait for Grafana to be ready: http://localhost:3000
 - Check Playwright logs: `npx playwright show-report`
 - E2E requires grafana-llm-app plugin installed
 
 ### Query validation blocking valid queries
+
 - Check which validation types are enabled in plugin settings
 - Review backend logs for validation failure details
 - Consider adjusting `maxQueryComplexity` if queries are legitimately complex
@@ -655,6 +762,7 @@ When modifying Go code:
 Comprehensive documentation is organized in the `docs/` directory:
 
 **When to use docs:**
+
 - **Architecture questions** → `docs/development/architecture.md`
 - **API details** → `docs/api/` folder
 - **Setup instructions** → `docs/getting-started/`
@@ -666,6 +774,7 @@ Comprehensive documentation is organized in the `docs/` directory:
 ## AI Tools Configuration
 
 The repository has AI-specific configuration for multiple tools:
+
 - **`.claude/`** - Claude Code configuration
   - `CLAUDE.md` - This file - Main project instructions
   - `README.md` - Overview of Claude configuration and rule system
@@ -688,6 +797,7 @@ All AI tools reference `docs/` for detailed documentation.
 ### Modular Rules System
 
 The `.claude/rules/` directory contains focused, path-scoped documentation:
+
 - Rules automatically load based on file paths (using YAML frontmatter)
 - Each rule file covers a specific topic (Grafana standards, LLM integration, testing, etc.)
 - Rules can be organized in subdirectories for better structure

@@ -1,5 +1,5 @@
 ---
-paths: "**/*.{ts,tsx,js,jsx,go,json}"
+paths: '**/*.{ts,tsx,js,jsx,go,json}'
 ---
 
 # Plugin Maintenance & Updates
@@ -11,6 +11,7 @@ This document covers keeping your Grafana plugin up-to-date, managing backwards 
 ### Overview
 
 The `@grafana/create-plugin` tool provides an **automated update command** that maintains plugins by:
+
 - Updating configuration files (webpack, eslint, prettier, tsconfig)
 - Managing dependency upgrades for major versions
 - Refactoring code to align with configuration changes
@@ -18,6 +19,7 @@ The `@grafana/create-plugin` tool provides an **automated update command** that 
 ### Running Updates
 
 **Command**:
+
 ```bash
 npx @grafana/create-plugin@latest update
 ```
@@ -25,13 +27,15 @@ npx @grafana/create-plugin@latest update
 **Supported package managers**: npm, Yarn, pnpm
 
 **Prerequisites**:
--  Clean Git repository (no uncommitted changes)
--  All changes committed or stashed
--  Working directory is plugin root
+
+- Clean Git repository (no uncommitted changes)
+- All changes committed or stashed
+- Working directory is plugin root
 
 **The update command will exit if**:
--  Git repository has uncommitted changes
--  Not running from plugin root directory
+
+- Git repository has uncommitted changes
+- Not running from plugin root directory
 
 ### Update Options
 
@@ -48,6 +52,7 @@ npx @grafana/create-plugin@latest update --force
 ### How Updates Work
 
 The update process:
+
 1. **Detects** current create-plugin version
 2. **Identifies** necessary migrations
 3. **Runs** migrations sequentially with progress output
@@ -55,6 +60,7 @@ The update process:
 5. **Reports** affected files and changes
 
 **Output example**:
+
 ```
 Running migration: Update ESLint config
 Description: Migrates from .eslintrc to eslint.config.mjs
@@ -73,6 +79,7 @@ Installing dependencies...
 Enable automated updates via GitHub Actions:
 
 **Workflow** (`.github/workflows/update-plugin.yml`):
+
 ```yaml
 name: Update Plugin
 
@@ -105,6 +112,7 @@ jobs:
 ```
 
 **Benefits**:
+
 - Runs automatically on schedule
 - Creates PRs for review
 - Tracks changes via Git history
@@ -115,37 +123,40 @@ jobs:
 Use Dependabot for ongoing dependency updates:
 
 **Configuration** (`.github/dependabot.yml`):
+
 ```yaml
 version: 2
 updates:
   # Frontend dependencies
-  - package-ecosystem: "npm"
-    directory: "/"
+  - package-ecosystem: 'npm'
+    directory: '/'
     schedule:
-      interval: "weekly"
+      interval: 'weekly'
     open-pull-requests-limit: 10
     versioning-strategy: increase-if-necessary
     groups:
       grafana-packages:
         patterns:
-          - "@grafana/*"
+          - '@grafana/*'
       dev-dependencies:
-        dependency-type: "development"
+        dependency-type: 'development'
 
   # Go dependencies (backend)
-  - package-ecosystem: "gomod"
-    directory: "/pkg"
+  - package-ecosystem: 'gomod'
+    directory: '/pkg'
     schedule:
-      interval: "weekly"
+      interval: 'weekly'
 ```
 
 **Complementary approach**:
+
 - `create-plugin update` → Configuration and tooling
 - Dependabot → Dependency versions between migrations
 
 ### Renovate Bot (Alternative)
 
 **Configuration** (`renovate.json`):
+
 ```json
 {
   "extends": ["config:base"],
@@ -176,6 +187,7 @@ updates:
 **Pattern**: Test if functions exist before using them.
 
 **Example** (createDataFrame introduced in Grafana 10.1.0):
+
 ```typescript
 import { createDataFrame, MutableDataFrame } from '@grafana/data';
 
@@ -191,6 +203,7 @@ function createFrame(data: any[]) {
 ```
 
 **When to use**:
+
 - New functions introduced in specific Grafana versions
 - Optional features that may not exist
 - Experimental APIs
@@ -200,16 +213,12 @@ function createFrame(data: any[]) {
 **Pattern**: Dynamically select API version based on availability.
 
 **Example** (usePluginLinks introduced in Grafana 11.1.0):
+
 ```typescript
-import {
-  getPluginLinkExtensions,
-  usePluginLinks as usePluginLinksOriginal
-} from '@grafana/runtime';
+import { getPluginLinkExtensions, usePluginLinks as usePluginLinksOriginal } from '@grafana/runtime';
 
 // Select implementation based on availability
-const usePluginLinks = usePluginLinksOriginal !== undefined
-  ? usePluginLinksOriginal
-  : useLegacyLinkExtensions;
+const usePluginLinks = usePluginLinksOriginal !== undefined ? usePluginLinksOriginal : useLegacyLinkExtensions;
 
 function MyComponent() {
   const links = usePluginLinks();
@@ -218,11 +227,14 @@ function MyComponent() {
 
 // Legacy implementation for older versions
 function useLegacyLinkExtensions() {
-  return getPluginLinkExtensions({ /* ... */ });
+  return getPluginLinkExtensions({
+    /* ... */
+  });
 }
 ```
 
 **When to use**:
+
 - Hook APIs replaced by newer implementations
 - Major API refactoring between versions
 - Deprecated but still functional APIs
@@ -232,6 +244,7 @@ function useLegacyLinkExtensions() {
 **Pattern**: Conditionally render components based on existence.
 
 **Example** (UserIcon introduced in Grafana 10.1.0):
+
 ```typescript
 import { UserIcon } from '@grafana/ui';
 
@@ -254,6 +267,7 @@ function UserProfile() {
 ```
 
 **When to use**:
+
 - New UI components added to @grafana/ui
 - Optional visual enhancements
 - Non-critical UI features
@@ -263,6 +277,7 @@ function UserProfile() {
 **Pattern**: Check Grafana version explicitly.
 
 **Example**:
+
 ```typescript
 import { config } from '@grafana/runtime';
 
@@ -285,6 +300,7 @@ if (isVersionAtLeast('10.1.0')) {
 ```
 
 **When to use**:
+
 - Multiple APIs changed in same version
 - Version-specific workarounds
 - Complex compatibility logic
@@ -294,6 +310,7 @@ if (isVersionAtLeast('10.1.0')) {
 **Pattern**: Test against multiple Grafana versions in CI.
 
 **GitHub Actions Matrix**:
+
 ```yaml
 jobs:
   e2e:
@@ -311,6 +328,7 @@ jobs:
 ```
 
 **Test implementation**:
+
 ```typescript
 import semver from 'semver';
 import { test, expect } from '@grafana/plugin-e2e';
@@ -327,6 +345,7 @@ test('feature works correctly', async ({ page, grafanaVersion }) => {
 ```
 
 **Benefits**:
+
 - Catches compatibility issues before release
 - Validates both new features and fallbacks
 - Ensures graceful degradation
@@ -335,42 +354,48 @@ test('feature works correctly', async ({ page, grafanaVersion }) => {
 ## Best Practices for Backwards Compatibility
 
 ### DO:
- **Test against multiple versions** - Use CI matrix testing
- **Set minimum Grafana version** - Document in plugin.json
- **Graceful degradation** - Provide fallbacks for missing features
- **Version checks at boundaries** - Check once, use everywhere
- **Log compatibility warnings** - Help users understand limitations
- **Document version requirements** - Clear in README and docs
+
+**Test against multiple versions** - Use CI matrix testing
+**Set minimum Grafana version** - Document in plugin.json
+**Graceful degradation** - Provide fallbacks for missing features
+**Version checks at boundaries** - Check once, use everywhere
+**Log compatibility warnings** - Help users understand limitations
+**Document version requirements** - Clear in README and docs
 
 ### DON'T:
- **Assume APIs exist** - Always check availability
- **Skip version testing** - Compatibility bugs are common
- **Ignore deprecated warnings** - Update code proactively
- **Hard-code version checks** - Use semantic versioning library
- **Fail silently** - Log when using fallback implementations
- **Support ancient versions** - Set reasonable minimum (e.g., Grafana 10.0+)
+
+**Assume APIs exist** - Always check availability
+**Skip version testing** - Compatibility bugs are common
+**Ignore deprecated warnings** - Update code proactively
+**Hard-code version checks** - Use semantic versioning library
+**Fail silently** - Log when using fallback implementations
+**Support ancient versions** - Set reasonable minimum (e.g., Grafana 10.0+)
 
 ## Maintenance Workflow
 
 ### Regular Maintenance Cadence
 
 **Weekly**:
+
 - Review Dependabot/Renovate PRs
 - Merge minor dependency updates
 - Monitor CI for compatibility issues
 
 **Monthly**:
+
 - Run `npx @grafana/create-plugin@latest update`
 - Review and test configuration changes
 - Update major dependencies if available
 
 **Quarterly**:
+
 - Review and update minimum Grafana version
 - Remove compatibility code for EOL versions
 - Audit and update documentation
 - Review and optimize bundle size
 
 **Yearly**:
+
 - Major refactoring if needed
 - Evaluate new Grafana APIs
 - Update CI matrix for version testing
@@ -379,6 +404,7 @@ test('feature works correctly', async ({ page, grafanaVersion }) => {
 ### Update Checklist
 
 Before merging updates:
+
 - [ ] Run `npm run typecheck` - No TypeScript errors
 - [ ] Run `npm run lint` - No linting issues
 - [ ] Run `npm run test:ci` - All tests pass
@@ -402,7 +428,8 @@ Before merging updates:
 6. **Consider deprecation period** - Give users time to migrate
 
 **Example CHANGELOG entry**:
-```markdown
+
+````markdown
 ## [2.0.0] - 2026-01-10
 
 ### Breaking Changes
@@ -413,10 +440,12 @@ Before merging updates:
 ### Migration Guide
 
 If you're using Grafana < 11.0:
+
 1. Upgrade Grafana to 11.0+, or
 2. Continue using plugin v1.x.x (legacy branch)
 
 To migrate custom code:
+
 ```typescript
 // Old (v1.x.x)
 const links = getPluginLinkExtensions({ extensionPointId: 'foo' });
@@ -424,7 +453,9 @@ const links = getPluginLinkExtensions({ extensionPointId: 'foo' });
 // New (v2.x.x)
 const links = usePluginLinks({ extensionPointId: 'foo' });
 ```
-```
+````
+
+````
 
 ## Dependency Management
 
@@ -450,13 +481,14 @@ const links = usePluginLinks({ extensionPointId: 'foo' });
     "@grafana/runtime": "~12.3.0"
   }
 }
-```
+````
 
 Use `~` (tilde) for patch updates only, or `^` (caret) for minor updates.
 
 ### Backend Dependencies (Go)
 
 **Update strategy**:
+
 ```bash
 # Check for updates
 go list -m -u all
@@ -472,6 +504,7 @@ go mod tidy
 ```
 
 **Critical Go dependencies**:
+
 - `grafana-plugin-sdk-go` - Must stay compatible
 - Security updates - Apply immediately
 
@@ -480,16 +513,19 @@ go mod tidy
 ### Recommended Policy
 
 **Support matrix**:
+
 - **Current version**: Full support
 - **Previous minor**: Bug fixes only
 - **2+ versions old**: No support
 
 **Example**:
+
 - Plugin 2.1.x: Full support
 - Plugin 2.0.x: Critical bug fixes
 - Plugin 1.x.x: End of life
 
 **Grafana version support**:
+
 - Minimum: Grafana 10.4.0 (this plugin)
 - Tested: 10.4.0, 11.0.0, 11.1.0, 12.0.0
 - Recommended: Latest stable
@@ -517,11 +553,13 @@ Security updates require immediate action:
 5. **Notify users** - Security advisory + changelog
 
 **Automated scanning**:
+
 - GitHub Dependabot - Security alerts
 - `npm audit` - Scan for vulnerabilities
 - Snyk / other tools - Additional scanning
 
 **Commands**:
+
 ```bash
 # Check for vulnerabilities
 npm audit
@@ -538,10 +576,13 @@ npm audit fix --force
 ### Common Issues
 
 **Issue**: Update command fails with uncommitted changes
+
 ```bash
 Error: Git working directory is not clean
 ```
+
 **Solution**: Commit or stash changes first
+
 ```bash
 git add .
 git commit -m "chore: prepare for update"
@@ -549,10 +590,13 @@ npx @grafana/create-plugin@latest update
 ```
 
 **Issue**: Dependency conflicts after update
+
 ```bash
 Error: ERESOLVE unable to resolve dependency tree
 ```
+
 **Solution**: Use legacy peer deps or update conflicting packages
+
 ```bash
 npm install --legacy-peer-deps
 # Or update conflicting package
@@ -560,10 +604,13 @@ npm install @grafana/ui@latest
 ```
 
 **Issue**: Build fails after configuration update
+
 ```bash
 Error: Cannot find module 'webpack'
 ```
+
 **Solution**: Reinstall dependencies
+
 ```bash
 rm -rf node_modules package-lock.json
 npm install
@@ -571,30 +618,34 @@ npm run build
 ```
 
 **Issue**: Tests fail after API changes
+
 ```bash
 TypeError: createDataFrame is not a function
 ```
+
 **Solution**: Implement runtime checks
+
 ```typescript
 // Add fallback for older versions
-const frame = typeof createDataFrame === 'function'
-  ? createDataFrame(data)
-  : new MutableDataFrame(data);
+const frame = typeof createDataFrame === 'function' ? createDataFrame(data) : new MutableDataFrame(data);
 ```
 
 ## Resources
 
 ### Official Documentation
+
 - **Update Guide**: https://grafana.com/developers/plugin-tools/how-to-guides/updating-a-plugin
 - **Runtime Checks**: https://grafana.com/developers/plugin-tools/how-to-guides/runtime-checks
 - **Migration Guides**: https://grafana.com/developers/plugin-tools/migration-guides/
 
 ### Tools
+
 - **create-plugin**: https://www.npmjs.com/package/@grafana/create-plugin
 - **Dependabot**: https://docs.github.com/en/code-security/dependabot
 - **Renovate**: https://docs.renovatebot.com/
 
 ### Community
+
 - **Forum**: https://community.grafana.com/c/plugin-development
 - **GitHub**: https://github.com/grafana/grafana-plugin-tools
 - **Slack**: #plugin-development channel

@@ -148,8 +148,7 @@ export function useRunState({ conversationId, onComplete, onError }: UseRunState
               onError(err.message);
             }
           },
-          complete: () => {
-          },
+          complete: () => {},
         });
       } catch (err: any) {
         setError(err.message);

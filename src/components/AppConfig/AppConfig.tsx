@@ -21,6 +21,7 @@ import { getBackendSrv } from '@grafana/runtime';
 import { ZagalinConfig, DEFAULT_CONFIG, PERSONALITY_PRESETS } from '../../types/zagalinConfig';
 import { checkZagalinHealth, type HealthStatus } from '../../services/llmHealthService';
 import { listDatasources, type DatasourceInfo } from '../../services/datasourceService';
+import { VersionWarning } from '../VersionWarning/VersionWarning';
 
 export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
   const s = useStyles2(getStyles);
@@ -40,13 +41,9 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
   const [allowedDatasources, setAllowedDatasources] = useState<string[]>(
     plugin.meta.jsonData?.allowedDatasources || []
   );
-  const [defaultDatasource, setDefaultDatasource] = useState<string>(
-    plugin.meta.jsonData?.defaultDatasource || ''
-  );
+  const [defaultDatasource, setDefaultDatasource] = useState<string>(plugin.meta.jsonData?.defaultDatasource || '');
 
-  const [otelEnabled, setOtelEnabled] = useState<boolean>(
-    plugin.meta.jsonData?.otelEnforcement?.enabled || false
-  );
+  const [otelEnabled, setOtelEnabled] = useState<boolean>(plugin.meta.jsonData?.otelEnforcement?.enabled || false);
   const [otelRequireService, setOtelRequireService] = useState<boolean>(
     plugin.meta.jsonData?.otelEnforcement?.requireServiceName !== false
   );
@@ -63,31 +60,18 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     plugin.meta.jsonData?.otelEnforcement?.rejectIfNoScope !== false
   );
 
-  const [llmBackend, setLlmBackend] = useState<string>(
-    plugin.meta.jsonData?.llmBackend || 'grafana-llm'
-  );
-  const [llmProvider, setLlmProvider] = useState<string>(
-    plugin.meta.jsonData?.llmProvider || 'openai'
-  );
-  const [llmModel, setLlmModel] = useState<string>(
-    plugin.meta.jsonData?.llmModel || 'gpt-4o-mini'
-  );
-  const [llmEndpoint, setLlmEndpoint] = useState<string>(
-    plugin.meta.jsonData?.llmEndpoint || ''
-  );
-  const [llmOrganization, setLlmOrganization] = useState<string>(
-    plugin.meta.jsonData?.llmOrganization || ''
-  );
-  const [llmApiKey, setLlmApiKey] = useState<string>(
-    plugin.meta.secureJsonData?.llmApiKey || ''
-  );
+  const [llmBackend, setLlmBackend] = useState<string>(plugin.meta.jsonData?.llmBackend || 'grafana-llm');
+  const [llmProvider, setLlmProvider] = useState<string>(plugin.meta.jsonData?.llmProvider || 'openai');
+  const [llmModel, setLlmModel] = useState<string>(plugin.meta.jsonData?.llmModel || 'gpt-4o-mini');
+  const [llmEndpoint, setLlmEndpoint] = useState<string>(plugin.meta.jsonData?.llmEndpoint || '');
+  const [llmOrganization, setLlmOrganization] = useState<string>(plugin.meta.jsonData?.llmOrganization || '');
+  const [llmApiKey, setLlmApiKey] = useState<string>(plugin.meta.secureJsonData?.llmApiKey || '');
   const [serviceAccountToken, setServiceAccountToken] = useState<string>(
     plugin.meta.secureJsonData?.serviceAccountToken || ''
   );
   const [hasServiceAccountToken, setHasServiceAccountToken] = useState<boolean>(
     plugin.meta.secureJsonFields?.serviceAccountToken || false
   );
-
 
   const [queryValidationEnabled, setQueryValidationEnabled] = useState<boolean>(
     plugin.meta.jsonData?.queryValidation?.enabled || false
@@ -117,6 +101,10 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     plugin.meta.jsonData?.queryValidation?.llmValidationMode || 'advisory'
   );
 
+  const [maxQueryTimeRangeHours, setMaxQueryTimeRangeHours] = useState<number>(
+    plugin.meta.jsonData?.maxQueryTimeRangeHours ?? 24
+  );
+
   const [referenceDashboards, setReferenceDashboards] = useState<string[]>(
     plugin.meta.jsonData?.referenceDashboards || []
   );
@@ -125,18 +113,16 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     if (plugin.meta.jsonData) {
       let migratedConfig = { ...DEFAULT_CONFIG, ...plugin.meta.jsonData };
 
-      const hasOldFormat = plugin.meta.jsonData.standardModeTemperature !== undefined ||
-                          plugin.meta.jsonData.temperature !== undefined;
+      const hasOldFormat =
+        plugin.meta.jsonData.standardModeTemperature !== undefined || plugin.meta.jsonData.temperature !== undefined;
       const hasNewFormat = plugin.meta.jsonData.standardMode !== undefined;
 
       if (hasOldFormat && !hasNewFormat) {
         migratedConfig = {
           ...migratedConfig,
           standardMode: {
-            temperature: plugin.meta.jsonData.standardModeTemperature ??
-                        plugin.meta.jsonData.temperature ?? 0.5,
-            maxTokens: plugin.meta.jsonData.standardModeMaxTokens ??
-                      plugin.meta.jsonData.maxTokens ?? 2000,
+            temperature: plugin.meta.jsonData.standardModeTemperature ?? plugin.meta.jsonData.temperature ?? 0.5,
+            maxTokens: plugin.meta.jsonData.standardModeMaxTokens ?? plugin.meta.jsonData.maxTokens ?? 2000,
           },
           designMode: {
             temperature: plugin.meta.jsonData.designModeTemperature ?? 0.8,
@@ -219,7 +205,9 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
       setError(null);
 
       if (llmBackend === 'backend-proxy' && !serviceAccountToken && !hasServiceAccountToken) {
-        setError('Service account token is required when using Backend Proxy mode. Please provide a token or switch to a different LLM backend.');
+        setError(
+          'Service account token is required when using Backend Proxy mode. Please provide a token or switch to a different LLM backend.'
+        );
         return;
       }
 
@@ -230,6 +218,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
           ...config,
           allowedDatasources,
           defaultDatasource,
+          maxQueryTimeRangeHours,
           llmBackend: llmBackend === 'disabled' ? '' : llmBackend,
           llmProvider,
           llmModel,
@@ -304,12 +293,13 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     setQueryValidationLogAttempts(true);
     setQueryValidationEnableLLM(false);
     setQueryValidationLLMMode('advisory');
+    setMaxQueryTimeRangeHours(24);
     setIsDirty(true);
   };
 
   const handleDatasourceToggle = (uid: string) => {
     const newAllowed = allowedDatasources.includes(uid)
-      ? allowedDatasources.filter(ds => ds !== uid)
+      ? allowedDatasources.filter((ds) => ds !== uid)
       : [...allowedDatasources, uid];
     setAllowedDatasources(newAllowed);
 
@@ -350,13 +340,16 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
 
   return (
     <div className={s.container}>
+      {/* Grafana Version Compatibility Warning */}
+      <VersionWarning />
+
       {/* Admin-Only Banner */}
       <Alert title="Admin Configuration" severity="info">
         <div>
           <strong>⚠️ Administrator Access Required</strong>
           <p style={{ marginTop: '8px', marginBottom: '0' }}>
-            This configuration page is only accessible to Organization Administrators.
-            All changes made here affect all users in this Grafana organization.
+            This configuration page is only accessible to Organization Administrators. All changes made here affect all
+            users in this Grafana organization.
           </p>
         </div>
       </Alert>
@@ -392,9 +385,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
       <div className={s.section}>
         <h3 className={s.sectionTitle}>System Status</h3>
         <div className={s.sectionContent}>
-          <p className={s.description}>
-            Current health status of Zagalin&apos;s backend services
-          </p>
+          <p className={s.description}>Current health status of Zagalin&apos;s backend services</p>
 
           {checkingHealth ? (
             <div className={s.statusRow}>
@@ -417,9 +408,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                 ) : (
                   <>
                     <Badge color="red" text="Unavailable" icon="exclamation-triangle" />
-                    {healthStatus?.llm.error && (
-                      <span className={s.statusError}>{healthStatus.llm.error}</span>
-                    )}
+                    {healthStatus?.llm.error && <span className={s.statusError}>{healthStatus.llm.error}</span>}
                   </>
                 )}
               </div>
@@ -445,7 +434,9 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                 <Alert title="LLM Service Not Available" severity="warning">
                   <p>Zagalin requires the Grafana LLM plugin to be installed and configured.</p>
                   <ol>
-                    <li>Install the <code>grafana-llm-app</code> plugin</li>
+                    <li>
+                      Install the <code>grafana-llm-app</code> plugin
+                    </li>
                     <li>Configure it with your LLM provider (OpenAI, Azure, Anthropic, or Grafana)</li>
                     <li>Enable the plugin and refresh this page</li>
                   </ol>
@@ -461,7 +452,8 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
         <h3 className={s.sectionTitle}>LLM Backend Configuration</h3>
         <div className={s.sectionContent}>
           <p className={s.description}>
-            Configure how Zagalin connects to LLM services. You can use grafana-llm-app for centralized configuration, bring your own API keys, or disable LLM features entirely.
+            Configure how Zagalin connects to LLM services. You can use grafana-llm-app for centralized configuration,
+            bring your own API keys, or disable LLM features entirely.
           </p>
 
           {/* LLM Backend Mode Selection - 3 Options */}
@@ -529,17 +521,9 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             </div>
 
             {/* Option 3: Direct LLM API - COMING SOON */}
-            <div
-              className={s.llmBackendCard}
-              style={{ opacity: 0.6, cursor: 'not-allowed' }}
-            >
+            <div className={s.llmBackendCard} style={{ opacity: 0.6, cursor: 'not-allowed' }}>
               <div className={s.llmBackendCardHeader}>
-                <input
-                  type="radio"
-                  checked={false}
-                  disabled={true}
-                  className={s.llmBackendCardRadio}
-                />
+                <input type="radio" checked={false} disabled={true} className={s.llmBackendCardRadio} />
                 <Icon name="key-skeleton-alt" size="xl" />
                 <h4>Direct LLM API</h4>
                 <Badge color="orange" text="Coming Soon" style={{ marginLeft: '8px' }} />
@@ -558,16 +542,25 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
           {llmBackend === 'grafana-llm' && (
             <Alert title="Official Grafana Mode (Default) - Hybrid Architecture" severity="success">
               <p>
-                <strong>Best of both worlds!</strong> Uses @grafana/llm for LLM calls (no service account needed) while keeping Zagalin backend for security features.
+                <strong>Best of both worlds!</strong> Uses @grafana/llm for LLM calls (no service account needed) while
+                keeping Zagalin backend for security features.
               </p>
               <p style={{ marginTop: '8px' }}>
                 <strong>What you get:</strong>
               </p>
               <ul>
-                <li>✅ <strong>No service account needed</strong> - Uses session-based authentication for LLM calls</li>
-                <li>✅ <strong>Backend security features</strong> - Rate limiting, query validation, audit logging</li>
-                <li>✅ <strong>Datasource governance</strong> - Allowlist enforcement, OTel scope checking</li>
-                <li>✅ <strong>Persistent storage</strong> - Conversations saved via Grafana User Storage API</li>
+                <li>
+                  ✅ <strong>No service account needed</strong> - Uses session-based authentication for LLM calls
+                </li>
+                <li>
+                  ✅ <strong>Backend security features</strong> - Rate limiting, query validation, audit logging
+                </li>
+                <li>
+                  ✅ <strong>Datasource governance</strong> - Allowlist enforcement, OTel scope checking
+                </li>
+                <li>
+                  ✅ <strong>Persistent storage</strong> - Conversations saved via Grafana User Storage API
+                </li>
               </ul>
               <p style={{ marginTop: '8px' }}>
                 <strong>Prerequisites:</strong>
@@ -585,7 +578,8 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             <>
               <Alert title="Backend Proxy Mode (Production Recommended)" severity="info">
                 <p>
-                  <strong>Full security pipeline.</strong> All requests go through Zagalin backend → grafana-llm-app with rate limiting, validation, and audit logging.
+                  <strong>Full security pipeline.</strong> All requests go through Zagalin backend → grafana-llm-app
+                  with rate limiting, validation, and audit logging.
                 </p>
                 <p style={{ marginTop: '8px' }}>
                   <strong>Prerequisites:</strong>
@@ -593,7 +587,10 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                 <ol>
                   <li>Install grafana-llm-app plugin from Grafana catalog</li>
                   <li>Configure it with your LLM provider (Administration → Plugins → LLM App)</li>
-                  <li><strong>Required:</strong> Create a service account with <code>Editor</code> role and provide the token below</li>
+                  <li>
+                    <strong>Required:</strong> Create a service account with <code>Editor</code> role and provide the
+                    token below
+                  </li>
                 </ol>
               </Alert>
 
@@ -601,11 +598,15 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                 label="Service Account Token (Mandatory)"
                 description={
                   hasServiceAccountToken && !serviceAccountToken
-                    ? "A service account token is currently configured (not shown for security). Leave empty to keep existing token, or enter a new token to replace it."
+                    ? 'A service account token is currently configured (not shown for security). Leave empty to keep existing token, or enter a new token to replace it.'
                     : "Grafana service account token for backend-to-backend authentication with grafana-llm-app. Required for Backend Proxy mode. Stored securely in Grafana's encrypted storage."
                 }
                 invalid={!serviceAccountToken && !hasServiceAccountToken}
-                error={!serviceAccountToken && !hasServiceAccountToken ? 'Service account token is required for Backend Proxy mode' : undefined}
+                error={
+                  !serviceAccountToken && !hasServiceAccountToken
+                    ? 'Service account token is required for Backend Proxy mode'
+                    : undefined
+                }
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <Input
@@ -615,7 +616,9 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                       setServiceAccountToken(e.currentTarget.value);
                       setIsDirty(true);
                     }}
-                    placeholder={hasServiceAccountToken ? "●●●●●●●● Configured - enter new token to replace" : "glsa_..."}
+                    placeholder={
+                      hasServiceAccountToken ? '●●●●●●●● Configured - enter new token to replace' : 'glsa_...'
+                    }
                     width={50}
                     invalid={!serviceAccountToken && !hasServiceAccountToken}
                   />
@@ -628,7 +631,8 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
               {!serviceAccountToken && !hasServiceAccountToken && (
                 <Alert title="Service Account Token Required" severity="error">
                   <p>
-                    A service account token is <strong>mandatory</strong> for Backend Proxy mode. It ensures secure backend-to-backend authentication with grafana-llm-app.
+                    A service account token is <strong>mandatory</strong> for Backend Proxy mode. It ensures secure
+                    backend-to-backend authentication with grafana-llm-app.
                   </p>
                   <p>
                     <strong>To create a service account token:</strong>
@@ -636,7 +640,9 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                   <ol>
                     <li>Go to Administration → Service Accounts</li>
                     <li>Create a new service account (e.g., &ldquo;Zagalin Plugin&rdquo;)</li>
-                    <li>Assign the <code>Editor</code> role</li>
+                    <li>
+                      Assign the <code>Editor</code> role
+                    </li>
                     <li>Generate a token and paste it above</li>
                   </ol>
                 </Alert>
@@ -861,12 +867,12 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             </>
           )} */}
 
-
           {/* Direct LLM Mode Info */}
           {llmBackend === 'direct' && (
             <Alert title="Direct LLM Mode" severity="info">
               <p>
-                <strong>Backend calls LLM API directly.</strong> Full security features without grafana-llm-app dependency.
+                <strong>Backend calls LLM API directly.</strong> Full security features without grafana-llm-app
+                dependency.
               </p>
               <p style={{ marginTop: '8px' }}>
                 <strong>Requirements:</strong> Provide LLM provider API key below.
@@ -897,7 +903,8 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                 <div className={s.datasourceList}>
                   {datasources.length === 0 ? (
                     <Alert title="No datasources found" severity="info">
-                      No datasources are configured in your Grafana instance. Add datasources to enable query governance.
+                      No datasources are configured in your Grafana instance. Add datasources to enable query
+                      governance.
                     </Alert>
                   ) : (
                     datasources.map((ds) => (
@@ -909,9 +916,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                         <div className={s.datasourceInfo}>
                           <span className={s.datasourceName}>{ds.name}</span>
                           <Badge text={ds.type} color="blue" />
-                          {defaultDatasource === ds.uid && (
-                            <Badge text="Default" color="green" icon="star" />
-                          )}
+                          {defaultDatasource === ds.uid && <Badge text="Default" color="green" icon="star" />}
                         </div>
                         {allowedDatasources.includes(ds.uid) && (
                           <Button
@@ -932,13 +937,11 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
               {allowedDatasources.length > 0 && (
                 <Alert title="Datasource Allowlist Active" severity="info">
                   <p>
-                    Zagalin will only be able to query the {allowedDatasources.length} selected datasource(s).
-                    Users will not be able to access data from other datasources through Zagalin.
+                    Zagalin will only be able to query the {allowedDatasources.length} selected datasource(s). Users
+                    will not be able to access data from other datasources through Zagalin.
                   </p>
                   {defaultDatasource && (
-                    <p>
-                      The default datasource will be used when no specific datasource is requested.
-                    </p>
+                    <p>The default datasource will be used when no specific datasource is requested.</p>
                   )}
                 </Alert>
               )}
@@ -972,7 +975,8 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             <>
               <Alert title="OTel Enforcement Active" severity="info">
                 <p>
-                  All queries will be validated and scoped with OpenTelemetry attributes. Queries without proper scoping will be rejected or have default values applied.
+                  All queries will be validated and scoped with OpenTelemetry attributes. Queries without proper scoping
+                  will be rejected or have default values applied.
                 </p>
               </Alert>
 
@@ -1047,11 +1051,17 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
 
               {(otelDefaultService || otelDefaultEnvironment) && !otelRejectIfNoScope && (
                 <Alert title="Fallback Mode Active" severity="warning">
-                  <p>
-                    Queries without explicit scope will use default values. Fallback usage is logged for auditing.
-                  </p>
-                  {otelDefaultService && <p>Default service: <strong>{otelDefaultService}</strong></p>}
-                  {otelDefaultEnvironment && <p>Default environment: <strong>{otelDefaultEnvironment}</strong></p>}
+                  <p>Queries without explicit scope will use default values. Fallback usage is logged for auditing.</p>
+                  {otelDefaultService && (
+                    <p>
+                      Default service: <strong>{otelDefaultService}</strong>
+                    </p>
+                  )}
+                  {otelDefaultEnvironment && (
+                    <p>
+                      Default environment: <strong>{otelDefaultEnvironment}</strong>
+                    </p>
+                  )}
                 </Alert>
               )}
             </>
@@ -1059,14 +1069,13 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
         </div>
       </div>
 
-
       {/* Query Injection Prevention */}
       <div className={s.section}>
         <h3 className={s.sectionTitle}>Query Injection Prevention</h3>
         <div className={s.sectionContent}>
           <p className={s.description}>
-            Validate and sanitize PromQL, LogQL, and TraceQL queries using official parsers to prevent injection attacks.
-            Hybrid validation combines parser-based syntax checking with optional LLM semantic analysis.
+            Validate and sanitize PromQL, LogQL, and TraceQL queries using official parsers to prevent injection
+            attacks. Hybrid validation combines parser-based syntax checking with optional LLM semantic analysis.
           </p>
 
           <Field
@@ -1086,7 +1095,8 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             <>
               <Alert title="Query Validation Active" severity="info">
                 <p>
-                  Master validation switch is ON. Enable specific query types below. Invalid queries will be rejected or sanitized based on strict mode.
+                  Master validation switch is ON. Enable specific query types below. Invalid queries will be rejected or
+                  sanitized based on strict mode.
                 </p>
               </Alert>
 
@@ -1129,10 +1139,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                 />
               </Field>
 
-              <Field
-                label="Strict Mode"
-                description="Reject invalid queries instead of attempting to sanitize them"
-              >
+              <Field label="Strict Mode" description="Reject invalid queries instead of attempting to sanitize them">
                 <Switch
                   value={queryValidationStrictMode}
                   onChange={(e) => {
@@ -1158,9 +1165,65 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                   width={20}
                 />
               </Field>
+            </>
+          )}
+        </div>
+      </div>
 
-              <Field
-                label="Log Validation Attempts"
+      {/* Query Governance */}
+      <div className={s.section}>
+        <h3 className={s.sectionTitle}>Query Governance</h3>
+        <div className={s.sectionContent}>
+          <p className={s.description}>
+            Control query execution to prevent expensive operations and resource exhaustion. Set limits on query
+            time ranges to balance data visibility with system performance.
+          </p>
+
+          <Field
+            label="Max Query Time Range (hours)"
+            description="Maximum time range allowed for queries. Set to 0 for unlimited. Prevents expensive long-range queries that could overwhelm your datasources."
+          >
+            <Input
+              type="number"
+              value={maxQueryTimeRangeHours}
+              onChange={(e) => {
+                setMaxQueryTimeRangeHours(parseInt(e.currentTarget.value, 10) || 24);
+                setIsDirty(true);
+              }}
+              min={0}
+              max={8760}
+              width={20}
+              placeholder="24"
+            />
+          </Field>
+
+          {maxQueryTimeRangeHours === 0 && (
+            <Alert title="Unlimited Time Range" severity="warning">
+              <p>
+                Time range clamping is disabled (0 = unlimited). Users can query any time range, which may cause
+                performance issues with very large time windows.
+              </p>
+            </Alert>
+          )}
+
+          {maxQueryTimeRangeHours > 0 && maxQueryTimeRangeHours < 24 && (
+            <Alert title="Short Time Range" severity="info">
+              <p>
+                Time range is limited to {maxQueryTimeRangeHours} hour{maxQueryTimeRangeHours !== 1 ? 's' : ''}. This provides
+                strong protection but may limit some legitimate use cases (e.g., weekly reports).
+              </p>
+            </Alert>
+          )}
+        </div>
+      </div>
+
+      {/* Query Injection Prevention */}
+      {queryValidationEnabled && (
+        <div className={s.section}>
+          <h3 className={s.sectionTitle}>Query Validation Options</h3>
+          <div className={s.sectionContent}>
+            <Field
+              label="Log Validation Attempts"
                 description="Audit log all validation failures and sanitizations for security monitoring"
               >
                 <Switch
@@ -1173,8 +1236,15 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
               </Field>
 
               <Field
-                label="Enable LLM Semantic Validation"
-                description="Use AI to check for expensive queries, best practices, and semantic issues"
+                label={
+                  <span>
+                    Enable LLM Semantic Validation{' '}
+                    <span style={{ color: '#ff9800', fontSize: '11px', fontWeight: 600, marginLeft: '8px' }}>
+                      EXPERIMENTAL
+                    </span>
+                  </span>
+                }
+                description="Use AI to analyze queries for performance issues, best practices, and semantic concerns"
               >
                 <Switch
                   value={queryValidationEnableLLM}
@@ -1186,23 +1256,79 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
               </Field>
 
               {queryValidationEnableLLM && (
-                <Field
-                  label="LLM Validation Mode"
-                  description="Advisory: warnings only. Strict: can block problematic queries."
-                >
-                  <Combobox
-                    options={[
-                      { label: 'Advisory (warnings only)', value: 'advisory' },
-                      { label: 'Strict (can block queries)', value: 'strict' },
-                    ]}
-                    value={queryValidationLLMMode}
-                    onChange={(option) => {
-                      setQueryValidationLLMMode(option.value as string);
-                      setIsDirty(true);
-                    }}
-                    width={40}
-                  />
-                </Field>
+                <>
+                  <Alert title="LLM Semantic Validation Enabled" severity="warning">
+                    <p>
+                      <strong>⚠️ Performance Impact:</strong> LLM validation adds 1-5 seconds of latency to every query execution.
+                    </p>
+                    <ul style={{ marginTop: '8px', marginBottom: '8px', paddingLeft: '20px' }}>
+                      <li>
+                        <strong>Timeout:</strong> Validation has a 5-second timeout; queries will proceed if timeout is exceeded
+                      </li>
+                      <li>
+                        <strong>Cost:</strong> Each validation costs ~$0.00015 (using gpt-4o-mini)
+                      </li>
+                      <li>
+                        <strong>Requirements:</strong> Service account token must be configured
+                      </li>
+                      <li>
+                        <strong>Fail-open:</strong> On error, queries are allowed but warnings are logged
+                      </li>
+                    </ul>
+                    <p style={{ marginTop: '12px' }}>
+                      <strong>💡 Tip:</strong> Start with Advisory mode to understand the impact before enabling Strict mode.
+                    </p>
+                  </Alert>
+
+                  {!hasServiceAccountToken && (
+                    <Alert title="Service Account Token Required" severity="error">
+                      <p>
+                        LLM semantic validation requires a service account token. Configure one in the Authentication section
+                        above.
+                      </p>
+                    </Alert>
+                  )}
+
+                  <Field
+                    label="LLM Validation Mode"
+                    description="Advisory: provides warnings but allows all queries. Strict: can block queries deemed unsafe."
+                  >
+                    <Combobox
+                      options={[
+                        { label: 'Advisory (warnings only, recommended)', value: 'advisory' },
+                        { label: 'Strict (can block queries)', value: 'strict' },
+                      ]}
+                      value={queryValidationLLMMode}
+                      onChange={(option) => {
+                        setQueryValidationLLMMode(option.value as string);
+                        setIsDirty(true);
+                      }}
+                      width={40}
+                    />
+                  </Field>
+
+                  <Field
+                    label="What LLM Validation Checks"
+                    description="Semantic analysis goes beyond syntax to evaluate query quality"
+                  >
+                    <Alert title="Validation Scope" severity="info">
+                      <ul style={{ marginBottom: 0, paddingLeft: '20px' }}>
+                        <li>
+                          <strong>Performance:</strong> Expensive operations, large time ranges, high cardinality
+                        </li>
+                        <li>
+                          <strong>Best Practices:</strong> Suboptimal rate windows, inefficient aggregations
+                        </li>
+                        <li>
+                          <strong>Security:</strong> Potential data exposure, overly broad selectors
+                        </li>
+                        <li>
+                          <strong>Improvements:</strong> Suggestions for more efficient alternatives
+                        </li>
+                      </ul>
+                    </Alert>
+                  </Field>
+                </>
               )}
 
               {!queryValidationStrictMode && (
@@ -1211,39 +1337,34 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                     Invalid queries will be sanitized when possible. All sanitization attempts are logged for audit.
                   </p>
                   <p>
-                    <strong>Warning:</strong> Sanitization may modify query semantics. Enable strict mode for production environments.
+                    <strong>Warning:</strong> Sanitization may modify query semantics. Enable strict mode for production
+                    environments.
                   </p>
                 </Alert>
               )}
 
               {queryValidationEnableLLM && queryValidationLLMMode === 'strict' && (
                 <Alert title="LLM Strict Mode Active" severity="warning">
-                  <p>
-                    Queries deemed problematic by the LLM (e.g., too expensive, security concerns) will be blocked.
-                  </p>
+                  <p>Queries deemed problematic by the LLM (e.g., too expensive, security concerns) will be blocked.</p>
                 </Alert>
               )}
-            </>
-          )}
-        </div>
-      </div>
-
+            </div>
+          </div>
+        )}
 
       <div className={s.section}>
         <h3 className={s.sectionTitle}>LLM Configuration</h3>
         <div className={s.sectionContent}>
           <p className={s.description}>
-            Configure how Zagalin communicates and processes requests. Different modes use different settings for optimal performance.
+            Configure how Zagalin communicates and processes requests. Different modes use different settings for
+            optimal performance.
           </p>
 
           <h4 style={{ marginTop: '24px', marginBottom: '16px', fontSize: '15px', fontWeight: 600 }}>
             Personality & Communication Style
           </h4>
 
-          <Field
-            label="Personality Preset"
-            description="Choose how Zagalin communicates with you"
-          >
+          <Field label="Personality Preset" description="Choose how Zagalin communicates with you">
             <Combobox
               options={personalityOptions}
               value={config.personality}
@@ -1252,10 +1373,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             />
           </Field>
 
-          <Field
-            label="Custom Instructions"
-            description="Additional instructions to customize Zagalin's behavior"
-          >
+          <Field label="Custom Instructions" description="Additional instructions to customize Zagalin's behavior">
             <TextArea
               value={config.customInstructions}
               onChange={(e) => updateConfig({ customInstructions: e.currentTarget.value })}
@@ -1273,10 +1391,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             Fast responses for everyday questions and troubleshooting
           </p>
 
-          <Field
-            label="Temperature"
-            description="Controls creativity vs. consistency (0.0 = factual, 1.0 = creative)"
-          >
+          <Field label="Temperature" description="Controls creativity vs. consistency (0.0 = factual, 1.0 = creative)">
             <div>
               <div className={s.sliderContainer}>
                 <Slider
@@ -1285,9 +1400,11 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                   max={1}
                   step={0.1}
                   value={config.standardMode.temperature}
-                  onChange={(value) => updateConfig({
-                    standardMode: { ...config.standardMode, temperature: value }
-                  })}
+                  onChange={(value) =>
+                    updateConfig({
+                      standardMode: { ...config.standardMode, temperature: value },
+                    })
+                  }
                 />
                 <span className={s.sliderValue}>{config.standardMode.temperature.toFixed(1)}</span>
               </div>
@@ -1299,10 +1416,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             </div>
           </Field>
 
-          <Field
-            label="Max Tokens"
-            description="Maximum length of responses (higher = longer, more expensive)"
-          >
+          <Field label="Max Tokens" description="Maximum length of responses (higher = longer, more expensive)">
             <Combobox
               options={[
                 { label: '1000 tokens (Short)', value: 1000 },
@@ -1311,9 +1425,11 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                 { label: '4000 tokens (Very Long)', value: 4000 },
               ]}
               value={config.standardMode.maxTokens}
-              onChange={(option) => updateConfig({
-                standardMode: { ...config.standardMode, maxTokens: option.value as number }
-              })}
+              onChange={(option) =>
+                updateConfig({
+                  standardMode: { ...config.standardMode, maxTokens: option.value as number },
+                })
+              }
               width={50}
             />
           </Field>
@@ -1325,10 +1441,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             Dashboard design with examples, suggestions, and reference patterns
           </p>
 
-          <Field
-            label="Temperature"
-            description="Higher temperature for creative design suggestions"
-          >
+          <Field label="Temperature" description="Higher temperature for creative design suggestions">
             <div>
               <div className={s.sliderContainer}>
                 <Slider
@@ -1337,9 +1450,11 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                   max={1}
                   step={0.1}
                   value={config.designMode.temperature}
-                  onChange={(value) => updateConfig({
-                    designMode: { ...config.designMode, temperature: value }
-                  })}
+                  onChange={(value) =>
+                    updateConfig({
+                      designMode: { ...config.designMode, temperature: value },
+                    })
+                  }
                 />
                 <span className={s.sliderValue}>{config.designMode.temperature.toFixed(1)}</span>
               </div>
@@ -1351,10 +1466,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             </div>
           </Field>
 
-          <Field
-            label="Max Tokens"
-            description="Longer responses for detailed design explanations"
-          >
+          <Field label="Max Tokens" description="Longer responses for detailed design explanations">
             <Combobox
               options={[
                 { label: '2000 tokens (Medium)', value: 2000 },
@@ -1363,25 +1475,24 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
                 { label: '5000 tokens (Maximum)', value: 5000 },
               ]}
               value={config.designMode.maxTokens}
-              onChange={(option) => updateConfig({
-                designMode: { ...config.designMode, maxTokens: option.value as number }
-              })}
+              onChange={(option) =>
+                updateConfig({
+                  designMode: { ...config.designMode, maxTokens: option.value as number },
+                })
+              }
               width={50}
             />
           </Field>
 
-          <Field
-            label="Reference Dashboards"
-            description="Dashboard UIDs to use as design examples (comma-separated)"
-          >
+          <Field label="Reference Dashboards" description="Dashboard UIDs to use as design examples (comma-separated)">
             <Input
               value={referenceDashboards.join(', ')}
               onChange={(e) => {
                 const value = e.currentTarget.value;
                 const uids = value
                   .split(',')
-                  .map(uid => uid.trim())
-                  .filter(uid => uid.length > 0);
+                  .map((uid) => uid.trim())
+                  .filter((uid) => uid.length > 0);
                 setReferenceDashboards(uids);
                 setIsDirty(true);
               }}
@@ -1407,14 +1518,11 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
         </div>
       </div>
 
-
       {/* Skills & Features */}
       <div className={s.section}>
         <h3 className={s.sectionTitle}>Skills & Features</h3>
         <div className={s.sectionContent}>
-          <p className={s.description}>
-            Enable or disable specific assistant capabilities
-          </p>
+          <p className={s.description}>Enable or disable specific assistant capabilities</p>
 
           <InlineFieldRow>
             <InlineField label="Explain Panel" labelWidth={24}>

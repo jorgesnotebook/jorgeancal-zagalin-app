@@ -4,7 +4,7 @@ import { LoadingPlaceholder, Alert } from '@grafana/ui';
 import { mountGlobalChat } from './globalChatMount';
 
 const LazyApp = lazy(() => import('./components/App/App'));
-const LazyAppConfig = lazy(() => import('./components/AppConfig/AppConfig').then(m => ({ default: m.AppConfig })));
+const LazyAppConfig = lazy(() => import('./components/AppConfig/AppConfig').then((m) => ({ default: m.AppConfig })));
 
 mountGlobalChat();
 
@@ -14,10 +14,7 @@ const App = (props: AppRootProps) => (
   </Suspense>
 );
 
-class ConfigErrorBoundary extends Component<
-  { children: ReactNode },
-  { hasError: boolean; error?: Error }
-> {
+class ConfigErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error?: Error }> {
   constructor(props: { children: ReactNode }) {
     super(props);
     this.state = { hasError: false };

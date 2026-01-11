@@ -227,8 +227,17 @@ export async function executeToolCall(toolCall: ToolCall): Promise<any> {
     case 'create_logql_query':
       return createLogQLQuery(args);
 
+    case 'create_traceql_query':
+      return createTraceQLQuery(args);
+
+    case 'get_trace_by_id':
+      return getTraceById(args);
+
     case 'get_panel_data':
       return { message: 'Panel data retrieval not yet implemented', args };
+
+    case 'get_logs':
+      return getLogs(args);
 
     case 'open_explore_view':
       return openExploreView(args);
@@ -241,10 +250,60 @@ export async function executeToolCall(toolCall: ToolCall): Promise<any> {
   }
 }
 
-
 const DASHBOARD_UID_REGEX = /^[a-zA-Z0-9_-]{1,40}$/;
 
-function navigateToDashboard(uid: string, panelId?: number): any {
+interface NavigationResult {
+  success: boolean;
+  url?: string;
+  error?: string;
+}
+
+interface QueryResult {
+  query: string;
+  description: string;
+  sanitized?: boolean;
+}
+
+interface PromQLParams {
+  _sanitized_query?: string;
+  metric?: string;
+  filters?: Record<string, string>;
+  aggregation?: string;
+  timeRange?: string;
+}
+
+interface LogQLParams {
+  _sanitized_query?: string;
+  logStream?: string;
+  filter?: string;
+  parser?: string;
+}
+
+interface TraceQLParams {
+  _sanitized_query?: string;
+  traceSelector?: string;
+  filters?: Record<string, string>;
+  duration?: string;
+}
+
+interface GetTraceParams {
+  traceId: string;
+  datasource: string;
+}
+
+interface ExploreParams {
+  datasource: string;
+  query: string;
+}
+
+interface GetLogsParams {
+  panelId?: number;
+  query?: string;
+  datasource?: string;
+  maxLines?: number;
+}
+
+function navigateToDashboard(uid: string, panelId?: number): NavigationResult {
   if (!DASHBOARD_UID_REGEX.test(uid)) {
     console.error('Invalid dashboard UID format:', uid);
     return { success: false, error: 'Invalid dashboard UID format' };
@@ -265,7 +324,7 @@ function navigateToDashboard(uid: string, panelId?: number): any {
   return { success: true, url };
 }
 
-function createPromQLQuery(params: any): any {
+function createPromQLQuery(params: PromQLParams): QueryResult {
   if (params._sanitized_query) {
     return {
       query: params._sanitized_query,
@@ -276,13 +335,13 @@ function createPromQLQuery(params: any): any {
 
   const { metric, filters, aggregation, timeRange } = params;
 
-  let query = metric;
+  let query = metric || '';
 
   if (filters && Object.keys(filters).length > 0) {
     const filterStr = Object.entries(filters)
       .map(([k, v]) => `${k}="${v}"`)
       .join(', ');
-    query = `${metric}{${filterStr}}`;
+    query = `${metric || ''}{${filterStr}}`;
   }
 
   if (aggregation) {
@@ -296,7 +355,7 @@ function createPromQLQuery(params: any): any {
   return { query, description: `PromQL query generated` };
 }
 
-function createLogQLQuery(params: any): any {
+function createLogQLQuery(params: LogQLParams): QueryResult {
   if (params._sanitized_query) {
     return {
       query: params._sanitized_query,
@@ -307,7 +366,7 @@ function createLogQLQuery(params: any): any {
 
   const { logStream, filter, parser } = params;
 
-  let query = logStream;
+  let query = logStream || '';
 
   if (filter) {
     query += ` |= "${filter}"`;
@@ -320,7 +379,286 @@ function createLogQLQuery(params: any): any {
   return { query, description: `LogQL query generated` };
 }
 
-function openExploreView(params: any): any {
+function createTraceQLQuery(params: TraceQLParams): QueryResult {
+  if (params._sanitized_query) {
+    return {
+      query: params._sanitized_query,
+      description: 'TraceQL query (sanitized)',
+      sanitized: true,
+    };
+  }
+
+  const { traceSelector, filters, duration } = params;
+
+  let query = traceSelector || '{}';
+
+  // Add attribute filters
+  if (filters && Object.keys(filters).length > 0) {
+    const filterParts = Object.entries(filters)
+      .map(([key, value]) => `${key}="${value}"`)
+      .join(' && ');
+
+    // Combine with trace selector
+    if (query === '{}') {
+      query = `{${filterParts}}`;
+    } else {
+      // Remove closing brace, add filters, re-add closing brace
+      query = query.slice(0, -1) + ` && ${filterParts}}`;
+    }
+  }
+
+  // Add duration filter
+  if (duration) {
+    query += ` && duration ${duration}`;
+  }
+
+  return { query, description: `TraceQL query generated` };
+}
+
+async function getTraceById(params: GetTraceParams): Promise<any> {
+  const { traceId, datasource } = params;
+
+  if (!traceId || !datasource) {
+    return { error: 'Missing required parameters: traceId and datasource' };
+  }
+
+  // Validate trace ID format (16-32 hex characters)
+  const traceIdPattern = /^[0-9a-f]{16,32}$/i;
+  if (!traceIdPattern.test(traceId)) {
+    return {
+      success: false,
+      error: `Invalid trace ID format: ${traceId}. Expected 16-32 hexadecimal characters.`,
+      traceId,
+      datasource,
+    };
+  }
+
+  try {
+    // Import query service
+    const { queryTempo } = await import('./queryService');
+
+    // Query for the specific trace ID
+    // TraceQL query to fetch trace by ID
+    const query = `{traceID="${traceId}"}`;
+
+    // Use a reasonable time range (last 24 hours)
+    const now = Date.now();
+    const from = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+    const to = new Date(now).toISOString();
+
+    const response = await queryTempo(datasource, query, from, to);
+
+    // Extract trace structure
+    if (response.results && response.results.A && response.results.A.frames) {
+      const frames = response.results.A.frames;
+
+      // Analyze trace structure
+      const analysis = analyzeTraceFrames(frames, traceId);
+
+      return {
+        success: true,
+        traceId,
+        datasource,
+        ...analysis,
+      };
+    } else {
+      return {
+        success: false,
+        error: 'Trace not found or no data returned',
+        traceId,
+        datasource,
+      };
+    }
+  } catch (error: any) {
+    console.error('Failed to fetch trace:', error);
+    return {
+      success: false,
+      error: `Failed to fetch trace: ${error.message || 'Unknown error'}`,
+      traceId,
+      datasource,
+    };
+  }
+}
+
+/**
+ * Get and analyze logs from Loki
+ */
+async function getLogs(params: GetLogsParams): Promise<any> {
+  try {
+    // Import services
+    const { ContextService } = await import('./contextService');
+    const { analyzeLogs } = await import('./logAnalysisService');
+
+    // Get context to find panel if panelId provided
+    const context = await ContextService.getContext();
+
+    // Find panel to analyze
+    let panel = null;
+    if (params.panelId && context.dashboard) {
+      panel = context.dashboard.panels?.find((p) => p.id === params.panelId);
+    } else if (context.panel) {
+      // Use current focused panel if no panelId specified
+      panel = context.panel;
+    }
+
+    // Get time range
+    const timeRange = context.timeRange || {
+      from: 'now-15m',
+      to: 'now',
+    };
+
+    // If panel found and it's a log panel, analyze it
+    if (panel && panel.type === 'logs') {
+      const maxLogLines = Math.min(params.maxLines || 1000, 5000); // Cap at 5000
+      const analysis = await analyzeLogs(panel, timeRange, maxLogLines);
+
+      return {
+        ...analysis,
+      };
+    }
+
+    // If no panel but query and datasource provided, construct synthetic panel
+    if (params.query && params.datasource) {
+      const syntheticPanel = {
+        id: 0,
+        title: 'Custom Log Query',
+        type: 'logs' as const,
+        targets: [
+          {
+            refId: 'A',
+            expr: params.query,
+            datasource: {
+              type: 'loki',
+              uid: params.datasource,
+            },
+          },
+        ],
+      };
+
+      const maxLogLines = Math.min(params.maxLines || 1000, 5000);
+      const analysis = await analyzeLogs(syntheticPanel, timeRange, maxLogLines);
+
+      return {
+        ...analysis,
+      };
+    }
+
+    // No valid log source found
+    return {
+      success: false,
+      error: 'No log panel found and no query/datasource provided',
+    };
+  } catch (error: any) {
+    console.error('Failed to analyze logs:', error);
+    return {
+      success: false,
+      error: `Failed to analyze logs: ${error.message || 'Unknown error'}`,
+    };
+  }
+}
+
+function analyzeTraceFrames(frames: any[], traceId: string): any {
+  // Extract span data from frames
+  const spans: any[] = [];
+  let rootSpan: any = null;
+  const services = new Set<string>();
+  const operations = new Set<string>();
+  const errors: any[] = [];
+
+  for (const frame of frames) {
+    if (!frame.fields) {
+      continue;
+    }
+
+    // Extract span information from frame fields
+    const spanCount = frame.fields[0]?.values?.length || 0;
+
+    for (let i = 0; i < spanCount; i++) {
+      const span: any = {};
+
+      for (const field of frame.fields) {
+        const fieldName = field.name;
+        const value = field.values[i];
+
+        if (fieldName === 'spanID') {
+          span.spanId = value;
+        }
+        if (fieldName === 'operationName') {
+          span.operation = value;
+        }
+        if (fieldName === 'serviceName') {
+          span.service = value;
+          services.add(value);
+        }
+        if (fieldName === 'duration') {
+          span.duration = value;
+        }
+        if (fieldName === 'startTime') {
+          span.startTime = value;
+        }
+        if (fieldName === 'parentSpanID') {
+          span.parentSpanId = value;
+        }
+        if (fieldName === 'statusCode' && value !== 0) {
+          span.status = value;
+          errors.push(span);
+        }
+      }
+
+      spans.push(span);
+
+      if (span.operation) {
+        operations.add(span.operation);
+      }
+
+      // Identify root span (no parent)
+      if (!span.parentSpanId || span.parentSpanId === '') {
+        rootSpan = span;
+      }
+    }
+  }
+
+  // Find slowest spans
+  const slowestSpans = [...spans]
+    .sort((a, b) => (b.duration || 0) - (a.duration || 0))
+    .slice(0, 5)
+    .map((s) => ({
+      service: s.service,
+      operation: s.operation,
+      duration: `${(s.duration / 1000).toFixed(2)}ms`,
+    }));
+
+  // Calculate total duration
+  const totalDuration = rootSpan?.duration || 0;
+
+  return {
+    traceStructure: {
+      totalSpans: spans.length,
+      services: Array.from(services),
+      operations: Array.from(operations),
+      rootService: rootSpan?.service,
+      rootOperation: rootSpan?.operation,
+      totalDuration: `${(totalDuration / 1000).toFixed(2)}ms`,
+      errorCount: errors.length,
+    },
+    slowestSpans,
+    errors:
+      errors.length > 0
+        ? errors.slice(0, 5).map((e) => ({
+            service: e.service,
+            operation: e.operation,
+            status: e.status,
+          }))
+        : [],
+    summary:
+      `Trace has ${spans.length} spans across ${services.size} services. ` +
+      `Root service: ${rootSpan?.service || 'unknown'}. ` +
+      `Total duration: ${(totalDuration / 1000).toFixed(2)}ms. ` +
+      `${errors.length > 0 ? `Found ${errors.length} error spans.` : 'No errors detected.'}`,
+  };
+}
+
+function openExploreView(params: ExploreParams): NavigationResult {
   const { datasource, query } = params;
 
   if (!datasource || typeof datasource !== 'string' || datasource.length > 100) {
@@ -335,7 +673,7 @@ function openExploreView(params: any): any {
 
   const exploreState = {
     datasource: datasource,
-    queries: [{ expr: query }]
+    queries: [{ expr: query }],
   };
 
   try {

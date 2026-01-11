@@ -7,18 +7,20 @@ This document outlines the design for implementing explainable, structured AI re
 ## Current State
 
 **What we have:**
--  Basic "thinking" mode that adjusts temperature/tokens
--  Enhanced system prompt for deeper reasoning
--  Streaming responses with markdown rendering
--  Artifact display system (evidence cards)
--  Tool calling with structured function execution
+
+- Basic "thinking" mode that adjusts temperature/tokens
+- Enhanced system prompt for deeper reasoning
+- Streaming responses with markdown rendering
+- Artifact display system (evidence cards)
+- Tool calling with structured function execution
 
 **What's missing:**
--  Structured reasoning steps visible to users
--  Confidence scores for answers
--  Source attribution (which data sources were used)
--  Step-by-step explanation of decision process
--  Visual reasoning pattern display
+
+- Structured reasoning steps visible to users
+- Confidence scores for answers
+- Source attribution (which data sources were used)
+- Step-by-step explanation of decision process
+- Visual reasoning pattern display
 
 ## Goals
 
@@ -73,6 +75,7 @@ export interface StreamChunkWithReasoning extends StreamChunk {
 #### A. Enhanced LLM Prompting Strategy
 
 **Option 1: Chain-of-Thought Prompting** (Immediate, no schema changes)
+
 ```go
 // pkg/plugin/assistant_prompts.go
 
@@ -113,6 +116,7 @@ Format your response with clear sections using markdown headers.
 ```
 
 **Option 2: Structured Output with JSON** (Better, requires schema)
+
 ```go
 // Use Claude/GPT's structured output feature
 func BuildStructuredReasoningRequest() string {
@@ -254,11 +258,16 @@ export function ReasoningSteps({ steps, collapsed = true }: ReasoningStepsProps)
 
   const getStepIcon = (type: string) => {
     switch (type) {
-      case 'observation': return '';
-      case 'hypothesis': return '';
-      case 'analysis': return '';
-      case 'conclusion': return '';
-      default: return '';
+      case 'observation':
+        return '';
+      case 'hypothesis':
+        return '';
+      case 'analysis':
+        return '';
+      case 'conclusion':
+        return '';
+      default:
+        return '';
     }
   };
 
@@ -270,10 +279,7 @@ export function ReasoningSteps({ steps, collapsed = true }: ReasoningStepsProps)
 
   return (
     <div className={s.reasoningSteps}>
-      <div
-        className={s.reasoningHeader}
-        onClick={() => setIsExpanded(!isExpanded)}
-      >
+      <div className={s.reasoningHeader} onClick={() => setIsExpanded(!isExpanded)}>
         <Icon name={isExpanded ? 'angle-down' : 'angle-right'} />
         <span>Reasoning Process ({steps.length} steps)</span>
       </div>
@@ -285,14 +291,9 @@ export function ReasoningSteps({ steps, collapsed = true }: ReasoningStepsProps)
               <div className={s.stepHeader}>
                 <span className={s.stepIcon}>{getStepIcon(step.type)}</span>
                 <span className={s.stepType}>{step.type}</span>
-                <Badge
-                  text={`${Math.round(step.confidence * 100)}%`}
-                  color={getConfidenceColor(step.confidence)}
-                />
+                <Badge text={`${Math.round(step.confidence * 100)}%`} color={getConfidenceColor(step.confidence)} />
               </div>
-              <div className={s.stepContent}>
-                {step.content}
-              </div>
+              <div className={s.stepContent}>{step.content}</div>
               {step.sources && step.sources.length > 0 && (
                 <div className={s.stepSources}>
                   <Icon name="link" size="sm" />
@@ -342,7 +343,7 @@ export function ConfidenceIndicator({ confidence, showLabel = true }: Confidence
           className={s.confidenceFill}
           style={{
             width: `${percentage}%`,
-            backgroundColor: `var(--${getColor()})`
+            backgroundColor: `var(--${getColor()})`,
           }}
         />
       </div>
@@ -368,12 +369,18 @@ interface SourceAttributionProps {
 export function SourceAttribution({ sources }: SourceAttributionProps) {
   const getSourceIcon = (type: string) => {
     switch (type) {
-      case 'dashboard': return 'apps';
-      case 'panel': return 'panel-add';
-      case 'metric': return 'graph-bar';
-      case 'log': return 'file-alt';
-      case 'trace': return 'process';
-      default: return 'link';
+      case 'dashboard':
+        return 'apps';
+      case 'panel':
+        return 'panel-add';
+      case 'metric':
+        return 'graph-bar';
+      case 'log':
+        return 'file-alt';
+      case 'trace':
+        return 'process';
+      default:
+        return 'link';
     }
   };
 
@@ -385,10 +392,7 @@ export function SourceAttribution({ sources }: SourceAttributionProps) {
           <div key={idx} className={s.sourceItem}>
             <Icon name={getSourceIcon(source.type)} />
             <span className={s.sourceName}>{source.name}</span>
-            <Badge
-              text={`${Math.round(source.relevance * 100)}%`}
-              color="blue"
-            />
+            <Badge text={`${Math.round(source.relevance * 100)}%`} color="blue" />
           </div>
         ))}
       </div>
@@ -404,70 +408,70 @@ Update ChatPanel to show reasoning components:
 ```typescript
 // src/components/FloatingChat/ChatPanel.tsx (update)
 
-{messages.map((message, idx) => (
-  <div key={idx} className={`${s.message} ${s.assistantMessage}`}>
-    {/* Main answer */}
-    <div
-      className={s.messageContent}
-      dangerouslySetInnerHTML={{ __html: sanitizeMarkdown(message.content) }}
-    />
+{
+  messages.map((message, idx) => (
+    <div key={idx} className={`${s.message} ${s.assistantMessage}`}>
+      {/* Main answer */}
+      <div className={s.messageContent} dangerouslySetInnerHTML={{ __html: sanitizeMarkdown(message.content) }} />
 
-    {/* Confidence indicator (if available) */}
-    {message.confidence !== undefined && (
-      <ConfidenceIndicator confidence={message.confidence} />
-    )}
+      {/* Confidence indicator (if available) */}
+      {message.confidence !== undefined && <ConfidenceIndicator confidence={message.confidence} />}
 
-    {/* Reasoning steps (collapsible) */}
-    {message.reasoning && message.reasoning.length > 0 && (
-      <ReasoningSteps steps={message.reasoning} collapsed={true} />
-    )}
+      {/* Reasoning steps (collapsible) */}
+      {message.reasoning && message.reasoning.length > 0 && (
+        <ReasoningSteps steps={message.reasoning} collapsed={true} />
+      )}
 
-    {/* Source attribution */}
-    {message.sources && message.sources.length > 0 && (
-      <SourceAttribution sources={message.sources} />
-    )}
+      {/* Source attribution */}
+      {message.sources && message.sources.length > 0 && <SourceAttribution sources={message.sources} />}
 
-    {/* Caveats/limitations */}
-    {message.caveats && message.caveats.length > 0 && (
-      <Alert severity="info" title="Important Considerations">
-        <ul>
-          {message.caveats.map((caveat, i) => (
-            <li key={i}>{caveat}</li>
-          ))}
-        </ul>
-      </Alert>
-    )}
-  </div>
-))}
+      {/* Caveats/limitations */}
+      {message.caveats && message.caveats.length > 0 && (
+        <Alert severity="info" title="Important Considerations">
+          <ul>
+            {message.caveats.map((caveat, i) => (
+              <li key={i}>{caveat}</li>
+            ))}
+          </ul>
+        </Alert>
+      )}
+    </div>
+  ));
+}
 ```
 
 ## Implementation Phases
 
 ### Phase 1: Foundation (Week 1)
--  Add new TypeScript types for explainable responses
--  Implement chain-of-thought prompting in backend
--  Add confidence estimator
--  Create basic ReasoningSteps component
+
+- Add new TypeScript types for explainable responses
+- Implement chain-of-thought prompting in backend
+- Add confidence estimator
+- Create basic ReasoningSteps component
 
 ### Phase 2: Source Tracking (Week 2)
+
 - Implement source tracker in backend
 - Add source attribution to LLM requests
 - Create SourceAttribution component
 - Update message storage to include sources
 
 ### Phase 3: Structured Output (Week 3)
+
 - Implement JSON schema-based structured output
 - Parse reasoning steps from LLM response
 - Handle streaming of structured data
 - Add confidence calculation to responses
 
 ### Phase 4: UI Polish (Week 4)
+
 - Design and implement visual reasoning display
 - Add collapsible reasoning sections
 - Implement confidence indicators
 - Add user preference for showing/hiding reasoning
 
 ### Phase 5: Advanced Features (Future)
+
 - Alternative approach suggestions
 - Interactive reasoning (users can query specific steps)
 - Reasoning export for documentation
@@ -532,21 +536,25 @@ The primary cause is missing indexes on the users table.
 ## Technical Considerations
 
 ### Performance
+
 - Structured output adds ~10-20% to response time
 - Implement caching for confidence calculations
 - Use streaming to show reasoning as it's generated
 
 ### Token Usage
+
 - Structured prompts use 200-300 more tokens
 - Monitor and adjust based on cost/benefit
 - Consider making it optional per-request
 
 ### Model Compatibility
+
 - Claude: Excellent at chain-of-thought
 - GPT-4: Good with structured output
 - Smaller models: May need simplified reasoning
 
 ### Storage
+
 - Reasoning steps increase message size by ~2-3x
 - Consider separate storage for reasoning data
 - Implement TTL for old reasoning data

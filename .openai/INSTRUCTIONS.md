@@ -9,12 +9,14 @@
 I'm working on **Zagalin**, a Grafana plugin that's an AI assistant for observability. It's a hybrid React/TypeScript frontend + Go backend plugin.
 
 ## Tech Stack
+
 - **Frontend**: React 18, TypeScript, Grafana UI components, RxJS for LLM streaming
 - **Backend**: Go 1.21+, grafana-plugin-sdk-go, Mage build system
 - **Testing**: Jest (unit), Playwright (E2E)
 - **LLM**: Integrates with grafana-llm-app (provider-agnostic)
 
 ## Quick Commands
+
 ```bash
 npm run dev              # Frontend watch mode
 npm run server           # Start Grafana + plugin
@@ -29,6 +31,7 @@ npm run test:ci          # Run tests
 **Always keep code simple. Don't over-engineer.**
 
 Rules:
+
 - Wait for 3+ similar uses before creating abstractions
 - Delete unused code immediately
 - No commented code or "just in case" features
@@ -53,6 +56,7 @@ function buildPromQLQuery(expr: string, range: TimeRange): Query {
 **All code must be secure by default.**
 
 ### Must Follow:
+
 1. ✅ All datasource queries go through backend proxy (`pkg/plugin/query_proxy.go`)
 2. ✅ Backend forwards user's auth cookies to Grafana (preserves permissions)
 3. ✅ Rate limiting per user (60 req/min default, token bucket algorithm)
@@ -61,6 +65,7 @@ function buildPromQLQuery(expr: string, range: TimeRange): Query {
 6. ✅ Audit log all queries with user identity
 
 ### Never Do:
+
 - ❌ Never bypass Grafana's permission system
 - ❌ Never store API keys in frontend or localStorage
 - ❌ Never trust frontend validation alone
@@ -69,6 +74,7 @@ function buildPromQLQuery(expr: string, range: TimeRange): Query {
 - ❌ Never allow direct datasource access from frontend
 
 ### Security Pattern:
+
 ```typescript
 // ❌ BAD: Direct datasource access
 datasource.query(query);
@@ -102,24 +108,28 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 ## Architecture Patterns
 
 ### 1. Dual Storage System
+
 - **Primary**: Backend Go file storage (`pkg/plugin/storage.go`)
 - **Fallback**: Browser localStorage
 - **Migration**: Automatic when backend becomes available
 - Frontend: `src/services/conversationStorage.ts`
 
 ### 2. Context Manager (Backend)
+
 - Caches Prometheus/Loki/Tempo metadata
 - Refreshes every N minutes (configurable)
 - Reduces LLM token usage
 - Files: `pkg/plugin/context/*.go`
 
 ### 3. Global Chat Mounting
+
 - Portal pattern for floating chat button
 - Mounts once, persists across Grafana navigation
 - Only displays on dashboard pages
 - Files: `src/globalChatMount.tsx`, `src/components/FloatingChat/`
 
 ### 4. LLM Streaming
+
 - RxJS observables for streaming responses
 - Backend proxy adds guardrails (rate limiting, validation)
 - Supports function calling
@@ -128,6 +138,7 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 ## Code Style
 
 ### TypeScript
+
 ```typescript
 // ✅ Explicit types for public APIs
 export interface QueryRequest {
@@ -143,6 +154,7 @@ const response = await queryService.query(request);
 ```
 
 ### React
+
 ```typescript
 // ✅ Functional components with hooks
 export const ChatPanel: React.FC<Props> = ({ conversation }) => {
@@ -157,6 +169,7 @@ export const ChatPanel: React.FC<Props> = ({ conversation }) => {
 ```
 
 ### Go
+
 ```go
 // ✅ Return errors, don't panic
 func executeQuery(ctx context.Context, query Query) (*Result, error) {
@@ -203,6 +216,7 @@ pkg/
 ## Common Tasks
 
 ### Adding a Frontend Service
+
 ```typescript
 // src/services/myService.ts
 export class MyService {
@@ -213,15 +227,13 @@ export class MyService {
     }
 
     // Call backend (never call datasources directly)
-    return await getBackendSrv().post(
-      '/api/plugins/jorgeancal-zagalin-app/resources/my-endpoint',
-      { data: param }
-    );
+    return await getBackendSrv().post('/api/plugins/jorgeancal-zagalin-app/resources/my-endpoint', { data: param });
   }
 }
 ```
 
 ### Adding a Backend Endpoint
+
 ```go
 // pkg/plugin/resources.go
 func (a *App) registerRoutes(mux *http.ServeMux) {
@@ -243,6 +255,7 @@ func (a *App) handleMyEndpoint(w http.ResponseWriter, req *http.Request) {
 ```
 
 ### Writing Tests
+
 ```typescript
 // Frontend test
 describe('MyService', () => {
@@ -285,6 +298,7 @@ func TestMyEndpoint(t *testing.T) {
 ## Documentation
 
 Detailed docs in repo:
+
 - Architecture: `docs/development/architecture.md`
 - API Reference: `docs/api/`
 - Testing: `docs/testing/overview.md`
@@ -293,6 +307,7 @@ Detailed docs in repo:
 ## Recent Major Changes
 
 **Issue #16 (CRITICAL)**: Backend Plugin & Identity Context
+
 - All queries now route through backend with user identity
 - User auth forwarded to Grafana (preserves permissions)
 - Rate limiting per user
@@ -302,6 +317,7 @@ Detailed docs in repo:
 ---
 
 **When helping me code, please:**
+
 1. Keep it simple (KISS)
 2. Be security-first (never bypass auth)
 3. Follow the patterns above

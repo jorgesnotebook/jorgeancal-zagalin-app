@@ -27,8 +27,9 @@ type Manager struct {
 	enableLogs      bool
 	enableTraces bool
 
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 }
 
 func NewManager() *Manager {
@@ -65,7 +66,9 @@ func (m *Manager) Start(ctx context.Context) {
 }
 
 func (m *Manager) Stop() {
-	close(m.stopCh)
+	m.stopOnce.Do(func() {
+		close(m.stopCh)
+	})
 	m.wg.Wait()
 }
 

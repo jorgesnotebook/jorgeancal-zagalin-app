@@ -104,6 +104,52 @@ var ZAGALIN_TOOLS = []Tool{
 	{
 		Type: "function",
 		Function: Function{
+			Name:        "create_traceql_query",
+			Description: "Generate a TraceQL query for Tempo traces. Use this to search traces by attributes, duration, or status. CRITICAL: Only use service names from the datasource metadata. If service is not listed, ask user for clarification.",
+			Parameters: ToolParameters{
+				Type: "object",
+				Properties: map[string]PropertyDefinition{
+					"traceSelector": {
+						Type:        "string",
+						Description: "Trace selector expression (e.g., {service.name=\"api-gateway\"})",
+					},
+					"filters": {
+						Type:        "object",
+						Description: "Additional attribute filters (e.g., {status: \"error\", \"http.status_code\": \"500\"})",
+					},
+					"duration": {
+						Type:        "string",
+						Description: "Duration filter (e.g., \"> 1s\", \"< 100ms\")",
+					},
+				},
+				Required: []string{"traceSelector"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: Function{
+			Name:        "get_trace_by_id",
+			Description: "Fetch and analyze a specific trace by its trace ID. Use this when the user provides a trace ID. Returns trace structure with spans, services, durations, and errors.",
+			Parameters: ToolParameters{
+				Type: "object",
+				Properties: map[string]PropertyDefinition{
+					"traceId": {
+						Type:        "string",
+						Description: "The trace ID to fetch (e.g., \"abc123def456\")",
+					},
+					"datasource": {
+						Type:        "string",
+						Description: "Tempo datasource UID or name",
+					},
+				},
+				Required: []string{"traceId", "datasource"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: Function{
 			Name:        "get_panel_data",
 			Description: "Retrieve current data from a dashboard panel",
 			Parameters: ToolParameters{
@@ -119,6 +165,35 @@ var ZAGALIN_TOOLS = []Tool{
 					},
 				},
 				Required: []string{"dashboardUid", "panelId"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: Function{
+			Name:        "get_logs",
+			Description: "Fetch and analyze logs from a Loki datasource. Use this when the user asks about logs they are viewing or when you need to investigate log patterns, errors, or volume. Returns log analysis with trends, error rates, and notable messages.",
+			Parameters: ToolParameters{
+				Type: "object",
+				Properties: map[string]PropertyDefinition{
+					"panelId": {
+						Type:        "number",
+						Description: "Panel ID to analyze (if user is viewing a specific log panel)",
+					},
+					"query": {
+						Type:        "string",
+						Description: "LogQL query to execute (e.g., \"{namespace=\\\"production\\\"} |= \\\"error\\\"\")",
+					},
+					"datasource": {
+						Type:        "string",
+						Description: "Loki datasource UID or name",
+					},
+					"maxLines": {
+						Type:        "number",
+						Description: "Maximum number of log lines to fetch (default: 1000, max: 5000)",
+					},
+				},
+				Required: []string{},
 			},
 		},
 	},
@@ -183,6 +258,8 @@ func GetTools(functionCallingEnabled bool, settings *Settings) []Tool {
 			tools = append(tools, buildPromQLTool(settings))
 		} else if tool.Function.Name == "create_logql_query" {
 			tools = append(tools, buildLogQLTool(settings))
+		} else if tool.Function.Name == "create_traceql_query" {
+			tools = append(tools, buildTraceQLTool(settings))
 		} else {
 			tools = append(tools, tool)
 		}
@@ -280,6 +357,50 @@ func buildLogQLTool(settings *Settings) Tool {
 				Type:       "object",
 				Properties: props,
 				Required:   []string{"logStream"},
+			},
+		},
+	}
+}
+
+func buildTraceQLTool(settings *Settings) Tool {
+	props := map[string]PropertyDefinition{
+		"traceSelector": {
+			Type:        "string",
+			Description: "Trace selector expression (e.g., {service.name=\"api-gateway\"})",
+		},
+		"filters": {
+			Type:        "object",
+			Description: "Additional attribute filters (e.g., {status: \"error\", \"http.status_code\": \"500\"})",
+		},
+		"duration": {
+			Type:        "string",
+			Description: "Duration filter (e.g., \"> 1s\", \"< 100ms\")",
+		},
+	}
+
+	description := "Generate a TraceQL query for Tempo traces"
+
+	if settings != nil && settings.OtelEnforcement.Enabled {
+		props["serviceName"] = PropertyDefinition{
+			Type:        "string",
+			Description: "OpenTelemetry service.name for multi-tenant scoping (e.g., \"api-gateway\", \"payment-service\"). Extract from dashboard context if available.",
+		}
+		props["environmentName"] = PropertyDefinition{
+			Type:        "string",
+			Description: "OpenTelemetry deployment.environment.name (e.g., \"production\", \"staging\", \"development\"). Extract from dashboard context if available.",
+		}
+		description += ". IMPORTANT: Include serviceName and environmentName for proper OTel scoping."
+	}
+
+	return Tool{
+		Type: "function",
+		Function: Function{
+			Name:        "create_traceql_query",
+			Description: description,
+			Parameters: ToolParameters{
+				Type:       "object",
+				Properties: props,
+				Required:   []string{"traceSelector"},
 			},
 		},
 	}

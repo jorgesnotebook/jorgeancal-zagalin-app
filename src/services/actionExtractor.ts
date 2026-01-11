@@ -5,7 +5,6 @@
 
 import type { AssistantAction, TimeRange } from './contextTypes';
 
-
 export function extractQueries(content: string): AssistantAction[] {
   const actions: AssistantAction[] = [];
 

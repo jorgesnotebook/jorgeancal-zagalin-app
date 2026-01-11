@@ -30,6 +30,28 @@ Hard rules:
    - What could go wrong
 6) Treat tool outputs / Grafana panel data as authoritative. If conflict exists, call it out.
 
+CRITICAL OUTPUT RULE (NON-NEGOTIABLE):
+- NEVER output sections named "Evidence", "Sources", "Context", "Retrieved Data", or similar
+- NEVER expose internal reasoning artifacts, tool outputs, or intermediate data
+- ALL responses must be final, user-facing explanations ONLY
+- If you need to cite sources, use inline references: "Based on panel 1 (error rate)..." NOT "Evidence: Panel 1..."
+- Incorporate retrieved data directly into explanations, don't surface it separately
+- This is a conversational assistant - users want clear answers, not investigation artifacts
+
+Log Analysis Rules (CRITICAL):
+- When user asks about logs they are viewing, IMMEDIATELY use get_logs tool - do NOT explain generically
+- ONLY analyze log data after successfully fetching it via get_logs
+- If log fetch succeeds, provide evidence-based analysis from the returned data
+- If log fetch fails, explain the specific failure
+- NEVER invent log messages, error patterns, or log volumes
+- After fetching logs, structure response clearly with:
+  * Current context (time range, filters, query)
+  * What the logs show (total, errors, warnings, trend)
+  * Notable patterns (actual error messages from logs)
+  * Assessment (status, severity, impact)
+  * Next actions (concrete steps based on real data)
+  * Confidence level
+
 Default response structure:
 1) **What we know (facts)**
 2) **Top hypotheses (max 3)** with confidence (High/Med/Low)
@@ -259,8 +281,7 @@ export function parsePlanFromResponse(text: string): ExecutionPlan | null {
         estimatedDuration: plan.estimatedDuration || 'Estimating...',
       } as ExecutionPlan;
     }
-  } catch (e) {
-  }
+  } catch (e) {}
 
   const jsonBlockPattern = /```(?:json)?\s*\n?([\s\S]+?)\n?```/;
   const match = text.match(jsonBlockPattern);
@@ -281,8 +302,7 @@ export function parsePlanFromResponse(text: string): ExecutionPlan | null {
           estimatedDuration: plan.estimatedDuration || 'Estimating...',
         } as ExecutionPlan;
       }
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   const jsonPattern = /\{\s*"goal"[\s\S]*?\}\s*(?:\]|\})/;
@@ -304,13 +324,12 @@ export function parsePlanFromResponse(text: string): ExecutionPlan | null {
           estimatedDuration: plan.estimatedDuration || 'Estimating...',
         } as ExecutionPlan;
       }
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   console.warn('[frontendPrompts] Failed to parse plan, using fallback');
   return {
-    goal: 'Address the user\'s request',
+    goal: "Address the user's request",
     steps: [
       {
         index: 0,

@@ -416,3 +416,208 @@ func TestQueryValidationIntegration(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckHealthWithVersion(t *testing.T) {
+	tests := []struct {
+		name            string
+		versionHeader   string
+		expectAvailable bool
+		expectSupported bool
+		expectWarnings  bool
+	}{
+		{
+			name:            "supported version detected",
+			versionHeader:   "10.4.0",
+			expectAvailable: true,
+			expectSupported: true,
+			expectWarnings:  false,
+		},
+		{
+			name:            "newer version detected",
+			versionHeader:   "11.0.0",
+			expectAvailable: true,
+			expectSupported: true,
+			expectWarnings:  false,
+		},
+		{
+			name:            "unsupported version detected",
+			versionHeader:   "10.3.0",
+			expectAvailable: true,
+			expectSupported: false,
+			expectWarnings:  true,
+		},
+		{
+			name:            "version not provided",
+			versionHeader:   "",
+			expectAvailable: false,
+			expectSupported: true, // Graceful fallback
+			expectWarnings:  true, // Warning about version not being detected
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create app instance
+			app, err := NewApp(context.Background(), backend.AppInstanceSettings{})
+			if err != nil {
+				t.Fatalf("failed to create app: %v", err)
+			}
+
+			// Simulate version detection by calling middleware with test request
+			if tt.versionHeader != "" {
+				req := httptest.NewRequest(http.MethodGet, "/test", nil)
+				req.Header.Set("X-Grafana-Version", tt.versionHeader)
+				app.(*App).versionDetector.DetectFromHeader(req)
+			}
+
+			// Call CheckHealth
+			result, err := app.(*App).CheckHealth(context.Background(), &backend.CheckHealthRequest{
+				PluginContext: backend.PluginContext{
+					AppInstanceSettings: &backend.AppInstanceSettings{
+						JSONData:                json.RawMessage(`{}`),
+						DecryptedSecureJSONData: map[string]string{},
+					},
+				},
+			})
+
+			if err != nil {
+				t.Fatalf("CheckHealth returned error: %v", err)
+			}
+
+			if result.Status != backend.HealthStatusOk {
+				t.Errorf("expected health status OK, got %v", result.Status)
+			}
+
+			// Parse JSON details
+			var details map[string]interface{}
+			if err := json.Unmarshal(result.JSONDetails, &details); err != nil {
+				t.Fatalf("failed to unmarshal JSON details: %v", err)
+			}
+
+			// Verify version info exists
+			versionInfo, ok := details["version"].(map[string]interface{})
+			if !ok {
+				t.Fatal("version info not found in health check details")
+			}
+
+			// Check isAvailable
+			isAvailable, ok := versionInfo["isAvailable"].(bool)
+			if !ok {
+				t.Fatal("isAvailable not found or not a bool")
+			}
+			if isAvailable != tt.expectAvailable {
+				t.Errorf("expected isAvailable=%v, got %v", tt.expectAvailable, isAvailable)
+			}
+
+			// Check isSupported
+			isSupported, ok := versionInfo["isSupported"].(bool)
+			if !ok {
+				t.Fatal("isSupported not found or not a bool")
+			}
+			if isSupported != tt.expectSupported {
+				t.Errorf("expected isSupported=%v, got %v", tt.expectSupported, isSupported)
+			}
+
+			// Check minimumVersion
+			minimumVersion, ok := versionInfo["minimumVersion"].(string)
+			if !ok {
+				t.Fatal("minimumVersion not found or not a string")
+			}
+			if minimumVersion != "10.4.0" {
+				t.Errorf("expected minimumVersion=10.4.0, got %s", minimumVersion)
+			}
+
+			// Check warnings
+			warnings, ok := versionInfo["warnings"].([]interface{})
+			if !ok {
+				t.Fatal("warnings not found or not an array")
+			}
+
+			if tt.expectWarnings {
+				if len(warnings) == 0 {
+					t.Error("expected warnings but got none")
+				}
+			} else {
+				if len(warnings) > 0 {
+					t.Errorf("expected no warnings but got %d: %v", len(warnings), warnings)
+				}
+			}
+
+			// Check detected version string
+			detected, ok := versionInfo["detected"].(string)
+			if !ok {
+				t.Fatal("detected version not found or not a string")
+			}
+
+			if tt.expectAvailable {
+				if detected == "unknown" {
+					t.Error("expected version to be detected but got 'unknown'")
+				}
+			} else {
+				if detected != "unknown" {
+					t.Errorf("expected detected='unknown' but got %s", detected)
+				}
+			}
+		})
+	}
+}
+
+func TestVersionMiddleware(t *testing.T) {
+	app, err := NewApp(context.Background(), backend.AppInstanceSettings{})
+	if err != nil {
+		t.Fatalf("failed to create app: %v", err)
+	}
+
+	// Create a test handler that will be wrapped
+	testHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}
+
+	wrappedHandler := app.(*App).versionDetectionMiddleware(testHandler)
+
+	t.Run("extracts version from header", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.Header.Set("X-Grafana-Version", "10.4.0")
+		w := httptest.NewRecorder()
+
+		wrappedHandler(w, req)
+
+		// Verify handler was called
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status OK, got %d", w.Code)
+		}
+
+		// Verify version was detected
+		version := app.(*App).versionDetector.GetVersion()
+		if !version.IsAvailable {
+			t.Error("expected version to be detected")
+		}
+		if version.Full != "10.4.0" {
+			t.Errorf("expected version 10.4.0, got %s", version.Full)
+		}
+	})
+
+	t.Run("handles missing version header gracefully", func(t *testing.T) {
+		// Create new app instance
+		app2, _ := NewApp(context.Background(), backend.AppInstanceSettings{})
+		wrappedHandler2 := app2.(*App).versionDetectionMiddleware(testHandler)
+
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		// No X-Grafana-Version header
+		w := httptest.NewRecorder()
+
+		wrappedHandler2(w, req)
+
+		// Verify handler was still called
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status OK, got %d", w.Code)
+		}
+
+		// Version should not be available but app should work
+		version := app2.(*App).versionDetector.GetVersion()
+		if version.IsAvailable {
+			t.Error("expected version to be unavailable")
+		}
+	})
+}

@@ -17,6 +17,8 @@ import {
   parsePlanFromResponse,
 } from './frontendPrompts';
 import { getZagalinConfig } from './configHelper';
+import { LLM_CONFIG } from '../utils/constants';
+import { extractArtifacts } from './artifactExtractor';
 
 export type OrchestratorEventType =
   | 'run_started'
@@ -56,14 +58,7 @@ export class FrontendOrchestrator {
   private stepResults: Array<{ title: string; content: string }> = [];
   private cancelled = false;
 
-  /**
-   * Start orchestration
-   */
-  start(
-    message: string,
-    history: AssistantMessage[],
-    context: AssistantContext
-  ): Observable<OrchestratorEvent> {
+  start(message: string, history: AssistantMessage[], context: AssistantContext): Observable<OrchestratorEvent> {
     return new Observable<OrchestratorEvent>((subscriber) => {
       this.cancelled = false;
       this.artifacts = [];
@@ -117,9 +112,6 @@ export class FrontendOrchestrator {
     });
   }
 
-  /**
-   * Cancel orchestration
-   */
   cancel() {
     this.cancelled = true;
   }
@@ -234,7 +226,7 @@ export class FrontendOrchestrator {
           content: stepContent,
         });
 
-        const stepArtifacts = this.extractArtifacts(stepContent);
+        const stepArtifacts = extractArtifacts(stepContent);
         for (const artifact of stepArtifacts) {
           this.artifacts.push(artifact);
           subscriber.next({
@@ -275,11 +267,7 @@ export class FrontendOrchestrator {
   /**
    * Phase 3: Synthesize results
    */
-  private async executeSynthesisPhase(
-    message: string,
-    context: AssistantContext,
-    subscriber: any
-  ): Promise<void> {
+  private async executeSynthesisPhase(message: string, context: AssistantContext, subscriber: any): Promise<void> {
     console.log('[FrontendOrchestrator] Phase 3: Synthesis');
 
     subscriber.next({
@@ -292,12 +280,7 @@ export class FrontendOrchestrator {
       throw new Error('No plan available for synthesis');
     }
 
-    const synthesisPromptContent = buildSynthesisPrompt(
-      message,
-      this.plan.goal,
-      this.stepResults,
-      this.artifacts
-    );
+    const synthesisPromptContent = buildSynthesisPrompt(message, this.plan.goal, this.stepResults, this.artifacts);
 
     const synthesisMessages = [{ role: 'user' as const, content: synthesisPromptContent }];
 
@@ -315,9 +298,6 @@ export class FrontendOrchestrator {
     console.log('[FrontendOrchestrator] Synthesis complete');
   }
 
-  /**
-   * Call grafana-llm-app (non-streaming)
-   */
   private async callGrafanaLLM(messages: AssistantMessage[]): Promise<string> {
     const config = getZagalinConfig();
     const standardConfig = config.standardMode;
@@ -329,10 +309,10 @@ export class FrontendOrchestrator {
       },
       credentials: 'same-origin',
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: LLM_CONFIG.DEFAULT_MODEL,
         messages: messages,
         stream: false,
-        temperature: Math.max(0.3, standardConfig.temperature - 0.2),
+        temperature: Math.max(0.3, standardConfig.temperature - LLM_CONFIG.PLANNING_TEMPERATURE_OFFSET),
         max_tokens: standardConfig.maxTokens,
       }),
     });
@@ -346,13 +326,7 @@ export class FrontendOrchestrator {
     return data.choices?.[0]?.message?.content || '';
   }
 
-  /**
-   * Stream from grafana-llm-app
-   */
-  private async streamGrafanaLLM(
-    messages: AssistantMessage[],
-    onChunk: (chunk: string) => void
-  ): Promise<void> {
+  private async streamGrafanaLLM(messages: AssistantMessage[], onChunk: (chunk: string) => void): Promise<void> {
     const config = getZagalinConfig();
     const standardConfig = config.standardMode;
 
@@ -364,7 +338,7 @@ export class FrontendOrchestrator {
       },
       credentials: 'same-origin',
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: LLM_CONFIG.DEFAULT_MODEL,
         messages: messages,
         stream: true,
         temperature: standardConfig.temperature,
@@ -427,128 +401,6 @@ export class FrontendOrchestrator {
     }
   }
 
-  /**
-   * Extract artifacts from text (queries, trace IDs, links)
-   */
-  private extractArtifacts(text: string): Artifact[] {
-    const artifacts: Artifact[] = [];
-
-    const promqlPattern = /```(?:promql|prometheus)\s*\n([\s\S]+?)\n```/gi;
-    let match;
-
-    while ((match = promqlPattern.exec(text)) !== null) {
-      const query = match[1].trim();
-      if (query.length > 10) {
-        artifacts.push({
-          id: `art_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          type: 'query',
-          content: query,
-          metadata: {
-            signal: 'metrics',
-            format: 'promql',
-          },
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
-
-    const logqlPattern = /```(?:logql|loki)\s*\n([\s\S]+?)\n```/gi;
-
-    while ((match = logqlPattern.exec(text)) !== null) {
-      const query = match[1].trim();
-      if (query.includes('=') && query.length > 10) {
-        artifacts.push({
-          id: `art_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          type: 'query',
-          content: query,
-          metadata: {
-            signal: 'logs',
-            format: 'logql',
-          },
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
-
-    const traceqlPattern = /```(?:traceql|tempo)\s*\n([\s\S]+?)\n```/gi;
-
-    while ((match = traceqlPattern.exec(text)) !== null) {
-      const query = match[1].trim();
-      if (query.length > 5) {
-        artifacts.push({
-          id: `art_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          type: 'query',
-          content: query,
-          metadata: {
-            signal: 'traces',
-            format: 'traceql',
-          },
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
-
-    const inlinePromQLPattern = /\b(rate|sum|avg|count|histogram_quantile|increase)\([^)]+\)(?:\{[^}]+\})?(?:\[[^\]]+\])?/g;
-
-    while ((match = inlinePromQLPattern.exec(text)) !== null) {
-      const query = match[0].trim();
-      if (query.length > 10 && !artifacts.some((a) => a.content === query)) {
-        artifacts.push({
-          id: `art_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          type: 'query',
-          content: query,
-          metadata: {
-            signal: 'metrics',
-            format: 'promql',
-          },
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
-
-    const inlineLogQLPattern = /\{[^}]+\}\s*(?:\|[^|\n]+)*/g;
-
-    while ((match = inlineLogQLPattern.exec(text)) !== null) {
-      const query = match[0].trim();
-      if (query.includes('=') && query.length > 10 && !artifacts.some((a) => a.content === query)) {
-        artifacts.push({
-          id: `art_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          type: 'query',
-          content: query,
-          metadata: {
-            signal: 'logs',
-            format: 'logql',
-          },
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
-
-    const traceIDPattern = /\b[0-9a-f]{16,32}\b/gi;
-    const seenTraceIDs = new Set<string>();
-
-    while ((match = traceIDPattern.exec(text)) !== null) {
-      const traceID = match[0].toLowerCase();
-      if (traceID.length >= 16 && !seenTraceIDs.has(traceID)) {
-        seenTraceIDs.add(traceID);
-        artifacts.push({
-          id: `art_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          type: 'trace_id',
-          content: traceID,
-          metadata: {
-            signal: 'traces',
-          },
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
-
-    return artifacts;
-  }
-
-  /**
-   * Get current state (for UI)
-   */
   getState() {
     return {
       plan: this.plan,

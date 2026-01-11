@@ -19,16 +19,19 @@ Zagalin now **automatically discovers** which OTel label names are used by each 
 ### How It Works
 
 1. **First Query to Datasource**
+
    - When OTel enforcement is enabled and a datasource is queried for the first time
    - Zagalin checks the context manager for available labels
    - Tries to find labels that match OTel conventions
 
 2. **Discovery Process**
+
    - **Prometheus/Loki**: Checks labels like `service_name`, `service.name`, `service`, `app`, `job`
    - **Tempo**: Checks `span.service.name`, `resource.service.name`, `service.name`, `service`
    - **Environment**: Checks `deployment_environment_name`, `deployment.environment.name`, `environment`, `env`, `namespace`, `cluster`
 
 3. **Caching**
+
    - Discovered label format is cached per datasource
    - No need to re-discover on subsequent queries
    - Format stored in memory (OTelLabelRegistry)
@@ -45,6 +48,7 @@ Zagalin now **automatically discovers** which OTel label names are used by each 
 ### Service Name Labels (Tried in Order)
 
 **Prometheus/Loki:**
+
 1. `service_name` - OpenTelemetry standard with underscore
 2. `service.name` - OpenTelemetry standard with dot
 3. `service` - Short form
@@ -52,6 +56,7 @@ Zagalin now **automatically discovers** which OTel label names are used by each 
 5. `job` - Prometheus convention
 
 **Tempo/TraceQL:**
+
 1. `span.service.name` - Most common in Tempo
 2. `resource.service.name` - Alternative in Tempo
 3. `service.name` - Generic form
@@ -60,6 +65,7 @@ Zagalin now **automatically discovers** which OTel label names are used by each 
 ### Environment Labels (Tried in Order)
 
 **Prometheus/Loki:**
+
 1. `deployment_environment_name` - OpenTelemetry standard with underscore
 2. `deployment.environment.name` - OpenTelemetry standard with dot
 3. `environment` - Short form
@@ -68,6 +74,7 @@ Zagalin now **automatically discovers** which OTel label names are used by each 
 6. `cluster` - Multi-cluster setups
 
 **Tempo/TraceQL:**
+
 1. `deployment.environment.name` - OpenTelemetry standard
 2. `deployment_environment_name` - Underscore variant
 3. `environment` - Short form
@@ -80,9 +87,11 @@ Zagalin now **automatically discovers** which OTel label names are used by each 
 ### Scenario 1: Standard OTel Setup
 
 **Prometheus has labels:**
+
 - `service_name`, `deployment_environment_name`, `instance`, `job`
 
 **Discovery Result:**
+
 ```
  Service label: service_name
  Environment label: deployment_environment_name
@@ -90,6 +99,7 @@ Zagalin now **automatically discovers** which OTel label names are used by each 
 ```
 
 **Generated Query:**
+
 ```promql
 rate(http_requests_total{service_name="api-gateway",deployment_environment_name="production"}[5m])
 ```
@@ -99,9 +109,11 @@ rate(http_requests_total{service_name="api-gateway",deployment_environment_name=
 ### Scenario 2: Tempo with Dot Notation
 
 **Tempo has attributes:**
+
 - `span.service.name`, `span.http.method`, `deployment.environment.name`
 
 **Discovery Result:**
+
 ```
  Service label: span.service.name
  Environment label: deployment.environment.name
@@ -109,6 +121,7 @@ rate(http_requests_total{service_name="api-gateway",deployment_environment_name=
 ```
 
 **Generated Query:**
+
 ```traceql
 {span.service.name="payment-service" && deployment.environment.name="production"}
 ```
@@ -118,9 +131,11 @@ rate(http_requests_total{service_name="api-gateway",deployment_environment_name=
 ### Scenario 3: Custom Setup with Different Names
 
 **Prometheus has labels:**
+
 - `app`, `env`, `instance`, `pod`
 
 **Discovery Result:**
+
 ```
  Service label: app
  Environment label: env
@@ -128,6 +143,7 @@ rate(http_requests_total{service_name="api-gateway",deployment_environment_name=
 ```
 
 **Generated Query:**
+
 ```promql
 rate(http_requests_total{app="api-gateway",env="production"}[5m])
 ```
@@ -137,9 +153,11 @@ rate(http_requests_total{app="api-gateway",env="production"}[5m])
 ### Scenario 4: Mixed Notation (Underscore + Dot)
 
 **Loki has labels:**
+
 - `service.name`, `deployment_environment_name`, `namespace`
 
 **Discovery Result:**
+
 ```
  Service label: service.name
  Environment label: deployment_environment_name
@@ -147,6 +165,7 @@ rate(http_requests_total{app="api-gateway",env="production"}[5m])
 ```
 
 **Generated Query:**
+
 ```logql
 {service.name="payment-service",deployment_environment_name="production"} |= "error"
 ```
@@ -158,6 +177,7 @@ rate(http_requests_total{app="api-gateway",env="production"}[5m])
 ### Files
 
 **`pkg/plugin/otel_label_discovery.go` (NEW)**
+
 - `OTelLabelFormat` - Stores discovered label names per datasource
 - `OTelLabelRegistry` - Caches discovered formats
 - `DiscoverOTelLabels()` - Main discovery function
@@ -167,14 +187,17 @@ rate(http_requests_total{app="api-gateway",env="production"}[5m])
 - `BuildOTelLabels()` - Creates label strings based on discovered format
 
 **`pkg/plugin/app.go` (MODIFIED)**
+
 - Added `otelRegistry *OTelLabelRegistry` field
 - Initialized in `NewApp()`
 
 **`pkg/plugin/otel_enforcement.go` (MODIFIED)**
+
 - `injectOtelScope()` now discovers label format before injection
 - Uses `BuildOtelLabels()` instead of hardcoded names
 
 **`pkg/plugin/assistant.go` (MODIFIED)**
+
 - `extractPromQLFromToolArgs()` uses discovered labels
 - `extractLogQLFromToolArgs()` uses discovered labels
 
@@ -206,17 +229,17 @@ Discovery events are logged for debugging:
 
 ## Benefits
 
- **Works with any label naming convention** - No hardcoded assumptions
+**Works with any label naming convention** - No hardcoded assumptions
 
- **Automatic adaptation** - Discovers what's actually in your datasources
+**Automatic adaptation** - Discovers what's actually in your datasources
 
- **Performance** - Discovery happens once per datasource, then cached
+**Performance** - Discovery happens once per datasource, then cached
 
- **Fallback safe** - Uses sensible defaults if discovery fails
+**Fallback safe** - Uses sensible defaults if discovery fails
 
- **Multi-datasource support** - Each datasource can use different conventions
+**Multi-datasource support** - Each datasource can use different conventions
 
- **Zero configuration** - Works out of the box
+**Zero configuration** - Works out of the box
 
 ---
 
@@ -274,6 +297,7 @@ Use sample queries to detect which labels actually exist:
 **Cause:** Discovery found the wrong labels or used defaults
 
 **Fix:**
+
 1. Check what labels actually exist in your datasource
 2. Verify context manager is running: `/api/plugins/jorgeancal-zagalin-app/resources/context/status`
 3. Check logs for discovery results
@@ -286,6 +310,7 @@ Use sample queries to detect which labels actually exist:
 **Cause:** Context manager not populated with labels
 
 **Fix:**
+
 1. Ensure context manager has refreshed: `/api/plugins/jorgeancal-zagalin-app/resources/context/refresh`
 2. Check context contains labels: `/api/plugins/jorgeancal-zagalin-app/resources/context/status`
 3. Wait for automatic context refresh (every N minutes)
@@ -299,6 +324,7 @@ Use sample queries to detect which labels actually exist:
 **Expected Behavior:** This is normal! Discovery adapts per-datasource
 
 **Verify:**
+
 ```
 # Check logs for each datasource discovery:
 [INFO] Discovered OTel label format datasource=prometheus-uid serviceLabel=service_name
@@ -309,19 +335,19 @@ Use sample queries to detect which labels actually exist:
 
 ## Summary
 
- **Automatic discovery** - No hardcoded label names
+**Automatic discovery** - No hardcoded label names
 
- **Supports both underscore and dot notation** - Prometheus, Loki, Tempo all work
+**Supports both underscore and dot notation** - Prometheus, Loki, Tempo all work
 
- **Tries multiple variations** - Finds what actually exists in your datasources
+**Tries multiple variations** - Finds what actually exists in your datasources
 
- **Caches per datasource** - Efficient, no re-discovery overhead
+**Caches per datasource** - Efficient, no re-discovery overhead
 
- **Graceful fallback** - Uses sensible defaults if discovery fails
+**Graceful fallback** - Uses sensible defaults if discovery fails
 
 The discovery system makes Zagalin **work with any OTel setup** without manual configuration!
 
 ---
 
 **Last Updated:** 2026-01-03
-**Status:**  Implemented and Tested
+**Status:** Implemented and Tested

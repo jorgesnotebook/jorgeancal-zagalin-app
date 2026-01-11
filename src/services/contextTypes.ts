@@ -20,6 +20,12 @@ export interface TemplateVariable {
   };
 }
 
+export interface AdhocFilter {
+  key: string;
+  operator: string;
+  value: string;
+}
+
 export interface PanelQuery {
   refId: string;
   datasource?: {
@@ -59,6 +65,7 @@ export interface GrafanaContext {
   panel?: PanelContext;
   timeRange?: TimeRange;
   templateVariables?: TemplateVariable[];
+  adhocFilters?: AdhocFilter[];
   user?: {
     id: number;
     login: string;

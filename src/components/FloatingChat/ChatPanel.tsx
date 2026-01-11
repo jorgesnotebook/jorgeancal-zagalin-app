@@ -36,6 +36,9 @@ import { FrontendOrchestrator, type OrchestratorEvent } from '../../services/fro
 import type { ExecutionPlan } from '../../services/frontendPrompts';
 import { needsOrchestration } from '../../services/orchestrationDetector';
 import { isDashboardQuestion, readDashboardPanels, buildDashboardSummaryPrompt } from '../../services/dashboardReader';
+import { ContextService } from '../../services/contextService';
+import { generateMessageId } from '../../utils/idGenerator';
+import { STREAMING_ANIMATION } from '../../utils/constants';
 
 interface Message extends ConversationMessage {
   actions?: AssistantAction[];
@@ -44,17 +47,20 @@ interface Message extends ConversationMessage {
 }
 
 function wrapEvidenceSections(content: string): string {
-  const evidenceCheckPattern = /(Evidence Check:|0\.\s*\*\*Evidence Check\*\*[^\n]*\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
+  const evidenceCheckPattern =
+    /(Evidence Check:|0\.\s*\*\*Evidence Check\*\*[^\n]*\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
 
   const availableContextPattern = /(---\s*AVAILABLE CONTEXT\s*---)((?:[\s\S]*?)(?=---\s*UNKNOWN CONTEXT|$))/gi;
 
   const unknownContextPattern = /(---\s*UNKNOWN CONTEXT\s*---)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
 
-  const investigationMemoryPattern = /(Investigation Memory:|2\.\s*\*\*Investigation Memory\*\*[^\n]*\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
+  const investigationMemoryPattern =
+    /(Investigation Memory:|2\.\s*\*\*Investigation Memory\*\*[^\n]*\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
 
   const metadataPattern = /(\*\*Metadata\*\*:?\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
 
-  const technicalDetailsPattern = /(\*\*Technical Details\*\*:?\n|\*\*How the query works\*\*:?\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
+  const technicalDetailsPattern =
+    /(\*\*Technical Details\*\*:?\n|\*\*How the query works\*\*:?\n)((?:[\s\S]*?)(?=\n\n(?:\d+\.|\*\*|#{1,3}\s|\z)|$))/gi;
 
   let processed = content;
 
@@ -146,7 +152,28 @@ function sanitizeMarkdown(content: string): string {
     const rawHtml = marked.parse(contentWithCollapsible) as string;
 
     return DOMPurify.sanitize(rawHtml, {
-      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'details', 'summary', 'div'],
+      ALLOWED_TAGS: [
+        'p',
+        'br',
+        'strong',
+        'em',
+        'code',
+        'pre',
+        'ul',
+        'ol',
+        'li',
+        'a',
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'h5',
+        'h6',
+        'blockquote',
+        'details',
+        'summary',
+        'div',
+      ],
       ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'class'],
     });
   } catch (error) {
@@ -204,14 +231,16 @@ export function ChatPanel() {
     currentId,
   } = useConversation();
 
-
   const handleNewChat = () => {
     clearCurrent();
     setOptimisticMessages([]);
     createNew(context);
   };
 
-  const messages: Message[] = useMemo(() => [...conversationMessages, ...optimisticMessages], [conversationMessages, optimisticMessages]);
+  const messages: Message[] = useMemo(
+    () => [...conversationMessages, ...optimisticMessages],
+    [conversationMessages, optimisticMessages]
+  );
 
   useEffect(() => {
     const checkHealth = async () => {
@@ -264,18 +293,14 @@ export function ChatPanel() {
     }
 
     let lastTime = performance.now();
-    const charsPerSecond = 100;
-    const msPerChar = 1000 / charsPerSecond;
+    const msPerChar = STREAMING_ANIMATION.MS_PER_CHAR;
 
     const animate = (currentTime: number) => {
       const elapsed = currentTime - lastTime;
 
       if (displayedLengthRef.current < streamingContent.length) {
         const charsToAdd = Math.max(1, Math.floor(elapsed / msPerChar));
-        const newLength = Math.min(
-          displayedLengthRef.current + charsToAdd,
-          streamingContent.length
-        );
+        const newLength = Math.min(displayedLengthRef.current + charsToAdd, streamingContent.length);
         displayedLengthRef.current = newLength;
         setDisplayedContent(streamingContent.substring(0, newLength));
         lastTime = currentTime;
@@ -301,21 +326,22 @@ export function ChatPanel() {
     };
   }, [frontendStreamingText, simpleStreamingContent, isFrontendOrchestrating, isSimpleStreaming]);
 
-  const handleSend = async () => {
+  const validateSendConditions = (): boolean => {
     if (!input.trim() || isFrontendOrchestrating || isSimpleStreaming) {
-      return;
+      return false;
     }
 
     if (llmReady === false) {
       setError('LLM service is not available. Please check your configuration.');
-      return;
+      return false;
     }
 
-    console.log('[ChatPanel] Current conversation before send:', conversation?.id);
-    console.log('[ChatPanel] Conversation message count:', conversationMessages.length);
+    return true;
+  };
 
+  const prepareUserMessage = async (): Promise<ConversationMessage> => {
     const userMessage: ConversationMessage = {
-      id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+      id: generateMessageId(),
       role: 'user',
       content: input.trim(),
       timestamp: new Date(),
@@ -326,238 +352,231 @@ export function ChatPanel() {
     setError(null);
     setDisplayedContent('');
 
-    try {
-      await addMessage(userMessage, context);
+    await addMessage(userMessage, context);
+    setOptimisticMessages([]);
 
-      console.log('[ChatPanel] Message saved, current conversation:', conversation?.id);
+    return userMessage;
+  };
 
-      setOptimisticMessages([]);
+  const enhanceQueryWithVectorSearch = async (query: string): Promise<string> => {
+    if (!zagalinConfig.enabledSkills.searchContext) {
+      return query;
+    }
 
-      let enhancedQuery = userMessage.content;
-      if (zagalinConfig.enabledSkills.searchContext) {
-        const vectorContext = await vectorSearchRef.current.enhanceQueryWithContext(userMessage.content);
-        if (vectorContext) {
-          enhancedQuery = userMessage.content + vectorContext;
+    const vectorContext = await vectorSearchRef.current.enhanceQueryWithContext(query);
+    return vectorContext ? query + vectorContext : query;
+  };
+
+  const createAssistantMessage = (content: string): ConversationMessage => {
+    const explainableResponse = parseReasoningResponse(content);
+
+    if (explainableResponse) {
+      return {
+        id: generateMessageId(),
+        role: 'assistant',
+        content: explainableResponse.answer,
+        timestamp: new Date(),
+        reasoning: explainableResponse.reasoning,
+        sources: explainableResponse.sources,
+        confidence: explainableResponse.confidence,
+        caveats: explainableResponse.caveats,
+      };
+    }
+
+    return {
+      id: generateMessageId(),
+      role: 'assistant',
+      content,
+      timestamp: new Date(),
+    };
+  };
+
+  const cleanupStreamingState = () => {
+    setIsSimpleStreaming(false);
+    setSimpleStreamingContent('');
+    simpleStreamingContentRef.current = '';
+  };
+
+  const handleDashboardQuestionFlow = async (userMessage: ConversationMessage, enrichedPrompt: string) => {
+    setIsSimpleStreaming(true);
+    simpleStreamingContentRef.current = '';
+
+    streamAssistantChat({
+      message: userMessage.content,
+      enrichedMessage: enrichedPrompt,
+      history: messages.map((m) => ({ role: m.role, content: m.content })),
+      context: {
+        dashboard: context.dashboard,
+        panel: context.panel,
+        timeRange: context.timeRange,
+        templateVars: context.templateVariables,
+      },
+      attachedContexts: conversation?.contexts,
+    }).subscribe({
+      next: (chunk) => {
+        if (chunk.chunk) {
+          simpleStreamingContentRef.current += chunk.chunk;
+          setSimpleStreamingContent(simpleStreamingContentRef.current);
         }
+      },
+      complete: async () => {
+        const assistantMessage = createAssistantMessage(simpleStreamingContentRef.current);
+        await addMessage(assistantMessage);
+        cleanupStreamingState();
+      },
+      error: (err) => {
+        setError(err instanceof Error ? err.message : 'Streaming failed');
+        cleanupStreamingState();
+      },
+    });
+  };
+
+  const handleOrchestrationFlow = (userMessage: ConversationMessage, enhancedQuery: string) => {
+    setIsFrontendOrchestrating(true);
+    setFrontendPlan(null);
+    setFrontendCurrentStepIndex(0);
+    setFrontendArtifacts([]);
+    setFrontendStreamingText('');
+
+    const orchestrator = new FrontendOrchestrator();
+    frontendOrchestratorRef.current = orchestrator;
+
+    orchestrator
+      .start(
+        enhancedQuery,
+        messages.map((m) => ({ role: m.role, content: m.content })),
+        {
+          dashboard: context.dashboard,
+          panel: context.panel,
+          timeRange: context.timeRange,
+          templateVars: context.templateVariables,
+        }
+      )
+      .subscribe({
+        next: (event: OrchestratorEvent) => {
+          switch (event.type) {
+            case 'plan':
+              setFrontendPlan({
+                goal: event.data.goal,
+                steps: event.data.steps,
+                estimatedDuration: event.data.estimatedDuration || 'Estimating...',
+              });
+              break;
+            case 'step_started':
+              setFrontendCurrentStepIndex(event.data.stepIndex);
+              setFrontendStreamingText('');
+              break;
+            case 'artifact':
+              setFrontendArtifacts((prev) => [...prev, event.data]);
+              break;
+            case 'assistant_delta':
+              setFrontendStreamingText((prev) => prev + event.data.delta);
+              break;
+            case 'assistant_message':
+              const assistantMessage: ConversationMessage = {
+                id: generateMessageId(),
+                role: 'assistant',
+                content: event.data.text,
+                timestamp: new Date(),
+                artifacts: event.data.artifacts,
+              };
+              addMessage(assistantMessage);
+              break;
+            case 'error':
+              setError(event.data.message);
+              break;
+          }
+        },
+        complete: () => {
+          setIsFrontendOrchestrating(false);
+          setOptimisticMessages([]);
+        },
+        error: (err) => {
+          setError(err instanceof Error ? err.message : 'Orchestration failed');
+          setIsFrontendOrchestrating(false);
+          setOptimisticMessages([]);
+        },
+      });
+  };
+
+  const handleSimpleStreamingFlow = async (enhancedQuery: string) => {
+    setIsSimpleStreaming(true);
+    simpleStreamingContentRef.current = '';
+
+    streamAssistantChat({
+      message: enhancedQuery,
+      history: messages.map((m) => ({ role: m.role, content: m.content })),
+      context: {
+        dashboard: context.dashboard,
+        panel: context.panel,
+        timeRange: context.timeRange,
+        templateVars: context.templateVariables,
+      },
+      attachedContexts: conversation?.contexts,
+      mode,
+    }).subscribe({
+      next: (chunk) => {
+        if (chunk.chunk) {
+          simpleStreamingContentRef.current += chunk.chunk;
+          setSimpleStreamingContent(simpleStreamingContentRef.current);
+        }
+      },
+      complete: async () => {
+        const assistantMessage = createAssistantMessage(simpleStreamingContentRef.current);
+        await addMessage(assistantMessage);
+        cleanupStreamingState();
+      },
+      error: (err) => {
+        setError(err instanceof Error ? err.message : 'Streaming failed');
+        cleanupStreamingState();
+      },
+    });
+  };
+
+  const handleSend = async () => {
+    if (!validateSendConditions()) {
+      return;
+    }
+
+    try {
+      const userMessage = await prepareUserMessage();
+      const enhancedQuery = await enhanceQueryWithVectorSearch(userMessage.content);
+
+      if (isDashboardQuestion(userMessage.content, context)) {
+        // NEW: Fetch REAL panel data to prevent hallucinations
+        try {
+          const { context: fullContext, panelData } = await ContextService.getContextWithPanelData();
+
+          // Build enriched prompt with REAL panel data
+          let enrichedPrompt = `${userMessage.content}\n\n`;
+          enrichedPrompt += ContextService.formatContextPrompt(fullContext);
+
+          if (panelData.length > 0) {
+            enrichedPrompt += '\n\n';
+            enrichedPrompt += ContextService.formatPanelDataPrompt(panelData);
+          } else {
+            enrichedPrompt +=
+              '\n\n**Note**: Unable to fetch panel data. Explanation will be based on panel queries only.';
+          }
+
+          await handleDashboardQuestionFlow(userMessage, enrichedPrompt);
+        } catch (err) {
+          console.error('Failed to fetch panel data:', err);
+          // Fallback to old method without panel data
+          const panels = await readDashboardPanels(context);
+          const enrichedPrompt = buildDashboardSummaryPrompt(userMessage.content, context, panels);
+          await handleDashboardQuestionFlow(userMessage, enrichedPrompt);
+        }
+        return;
       }
 
-        if (isDashboardQuestion(userMessage.content, context)) {
-          console.log('[ChatPanel] Dashboard question detected - using enriched context');
+      if (needsOrchestration(userMessage.content)) {
+        handleOrchestrationFlow(userMessage, enhancedQuery);
+        return;
+      }
 
-          const panels = await readDashboardPanels(context);
-          console.log(`[ChatPanel] Extracted ${panels.length} panels from dashboard`);
-
-          const enrichedPrompt = buildDashboardSummaryPrompt(userMessage.content, context, panels);
-
-          console.log('[ChatPanel] Starting simple streaming with dashboard context');
-          setIsSimpleStreaming(true);
-          simpleStreamingContentRef.current = '';
-
-          streamAssistantChat({
-            message: userMessage.content,
-            enrichedMessage: enrichedPrompt,
-            history: messages.map(m => ({
-              role: m.role,
-              content: m.content,
-            })),
-            context: {
-              dashboard: context.dashboard,
-              panel: context.panel,
-              timeRange: context.timeRange,
-              templateVars: context.templateVariables,
-            },
-            attachedContexts: conversation?.contexts,
-          }).subscribe({
-            next: (chunk) => {
-              if (chunk.chunk) {
-                simpleStreamingContentRef.current += chunk.chunk;
-                setSimpleStreamingContent(simpleStreamingContentRef.current);
-              }
-            },
-            complete: async () => {
-              console.log('[ChatPanel] Dashboard question streaming complete');
-              const finalContent = simpleStreamingContentRef.current;
-
-              const explainableResponse = parseReasoningResponse(finalContent);
-
-              const assistantMessage: ConversationMessage = explainableResponse ? {
-                id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-                role: 'assistant',
-                content: explainableResponse.answer,
-                timestamp: new Date(),
-                reasoning: explainableResponse.reasoning,
-                sources: explainableResponse.sources,
-                confidence: explainableResponse.confidence,
-                caveats: explainableResponse.caveats,
-              } : {
-                id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-                role: 'assistant',
-                content: finalContent,
-                timestamp: new Date(),
-              };
-
-              await addMessage(assistantMessage);
-              setIsSimpleStreaming(false);
-              setSimpleStreamingContent('');
-              simpleStreamingContentRef.current = '';
-            },
-            error: (err) => {
-              console.error('[ChatPanel] Dashboard question streaming error:', err);
-              setError(err instanceof Error ? err.message : 'Streaming failed');
-              setIsSimpleStreaming(false);
-              setSimpleStreamingContent('');
-              simpleStreamingContentRef.current = '';
-            },
-          });
-
-          return;
-        }
-
-        const shouldOrchestrate = needsOrchestration(userMessage.content);
-
-        if (shouldOrchestrate) {
-          console.log('[ChatPanel] Using frontend orchestration mode (complex query)');
-
-          setIsFrontendOrchestrating(true);
-          setFrontendPlan(null);
-          setFrontendCurrentStepIndex(0);
-          setFrontendArtifacts([]);
-          setFrontendStreamingText('');
-
-          const orchestrator = new FrontendOrchestrator();
-          frontendOrchestratorRef.current = orchestrator;
-
-          orchestrator.start(
-            enhancedQuery || userMessage.content,
-            messages.map(m => ({
-              role: m.role,
-              content: m.content,
-            })),
-            {
-              dashboard: context.dashboard,
-              panel: context.panel,
-              timeRange: context.timeRange,
-              templateVars: context.templateVariables,
-            }
-          ).subscribe({
-            next: (event: OrchestratorEvent) => {
-              console.log('[ChatPanel] Frontend orchestrator event:', event.type);
-
-              switch (event.type) {
-                case 'plan':
-                  setFrontendPlan({
-                    goal: event.data.goal,
-                    steps: event.data.steps,
-                    estimatedDuration: event.data.estimatedDuration || 'Estimating...',
-                  });
-                  break;
-
-                case 'step_started':
-                  setFrontendCurrentStepIndex(event.data.stepIndex);
-                  setFrontendStreamingText('');
-                  break;
-
-                case 'artifact':
-                  setFrontendArtifacts(prev => [...prev, event.data]);
-                  break;
-
-                case 'assistant_delta':
-                  setFrontendStreamingText(prev => prev + event.data.delta);
-                  break;
-
-                case 'assistant_message':
-                  const assistantMessage: ConversationMessage = {
-                    id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-                    role: 'assistant',
-                    content: event.data.text,
-                    timestamp: new Date(),
-                    artifacts: event.data.artifacts,
-                  };
-                  addMessage(assistantMessage);
-                  break;
-
-                case 'error':
-                  setError(event.data.message);
-                  break;
-              }
-            },
-            complete: () => {
-              console.log('[ChatPanel] Frontend orchestration complete');
-              setIsFrontendOrchestrating(false);
-              setOptimisticMessages([]);
-            },
-            error: (err) => {
-              console.error('[ChatPanel] Frontend orchestration error:', err);
-              setError(err instanceof Error ? err.message : 'Orchestration failed');
-              setIsFrontendOrchestrating(false);
-              setOptimisticMessages([]);
-            },
-          });
-        } else {
-          console.log('[ChatPanel] Using simple streaming mode (greeting/simple query)');
-          setIsSimpleStreaming(true);
-          setSimpleStreamingContent('');
-          simpleStreamingContentRef.current = '';
-
-          streamAssistantChat({
-            message: enhancedQuery || userMessage.content,
-            history: messages.map(m => ({
-              role: m.role,
-              content: m.content,
-            })),
-            context: {
-              dashboard: context.dashboard,
-              panel: context.panel,
-              timeRange: context.timeRange,
-              templateVars: context.templateVariables,
-            },
-            attachedContexts: conversation?.contexts,
-            mode,
-          }).subscribe({
-            next: (chunk) => {
-              if (chunk.chunk) {
-                simpleStreamingContentRef.current += chunk.chunk;
-                setSimpleStreamingContent(simpleStreamingContentRef.current);
-              }
-            },
-            complete: async () => {
-              console.log('[ChatPanel] Simple streaming complete');
-              const finalContent = simpleStreamingContentRef.current;
-
-              const explainableResponse = parseReasoningResponse(finalContent);
-
-              const assistantMessage: ConversationMessage = explainableResponse ? {
-                id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-                role: 'assistant',
-                content: explainableResponse.answer,
-                timestamp: new Date(),
-                reasoning: explainableResponse.reasoning,
-                sources: explainableResponse.sources,
-                confidence: explainableResponse.confidence,
-                caveats: explainableResponse.caveats,
-              } : {
-                id: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-                role: 'assistant',
-                content: finalContent,
-                timestamp: new Date(),
-              };
-
-              await addMessage(assistantMessage);
-              setIsSimpleStreaming(false);
-              setSimpleStreamingContent('');
-              simpleStreamingContentRef.current = '';
-            },
-            error: (err) => {
-              console.error('[ChatPanel] Simple streaming error:', err);
-              setError(err instanceof Error ? err.message : 'Streaming failed');
-              setIsSimpleStreaming(false);
-              setSimpleStreamingContent('');
-              simpleStreamingContentRef.current = '';
-            },
-          });
-        }
+      await handleSimpleStreamingFlow(enhancedQuery);
     } catch (err) {
-      console.error('Zagalin: Send error', err);
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
       setOptimisticMessages([]);
     }
@@ -623,7 +642,13 @@ export function ChatPanel() {
             key={idx}
             size="sm"
             variant="secondary"
-            icon={action.type === 'explore' || action.type === 'query' ? 'compass' : action.type === 'copy' ? 'copy' : 'link'}
+            icon={
+              action.type === 'explore' || action.type === 'query'
+                ? 'compass'
+                : action.type === 'copy'
+                ? 'copy'
+                : 'link'
+            }
             onClick={() => handleAction(action)}
           >
             {action.label}
@@ -649,205 +674,196 @@ export function ChatPanel() {
       )}
       <div className={s.container}>
         <div className={s.contextBar}>
-        <div className={s.contextInfo}>
-          <Tooltip content={showSidebar ? 'Hide conversation history' : 'Show conversation history'}>
-            <IconButton
-              name={showSidebar ? 'arrow-left' : 'bars'}
-              size="sm"
-              variant="secondary"
-              onClick={() => setShowSidebar(!showSidebar)}
-              aria-label="Toggle history"
-            />
-          </Tooltip>
-          {llmReady === null ? (
-            <Badge color="blue" text="Checking LLM..." icon="sync" />
-          ) : llmReady ? (
-            <>
-              {hasContext ? (
-                <Tooltip content={getContextTooltip()}>
-                  <Badge color="green" text={context.dashboard ? `📊 ${context.dashboard.title}` : "Context Active"} icon="info-circle" />
-                </Tooltip>
-              ) : (
-                <Tooltip content="Navigate to a dashboard to enable context-aware assistance">
-                  <Badge color="orange" text="No Dashboard Context" icon="info-circle" />
-                </Tooltip>
-              )}
-              {contextLoading && <Spinner inline size={14} />}
-            </>
-          ) : (
-            <Badge color="red" text="LLM Unavailable" icon="exclamation-triangle" />
-          )}
-        </div>
-      </div>
-
-      {error && (
-        <Alert title="Error" severity="error" onRemove={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
-
-      {/* Context Management Section */}
-      {conversation && (
-        <div className={s.contextSection}>
-          {conversation.contexts && conversation.contexts.length > 0 && (
-            <ContextBadges
-              contexts={conversation.contexts}
-              onRemove={removeContext}
-            />
-          )}
-          {hasContext && (
-            <div className={s.addContextButton}>
-              <Button
+          <div className={s.contextInfo}>
+            <Tooltip content={showSidebar ? 'Hide conversation history' : 'Show conversation history'}>
+              <IconButton
+                name={showSidebar ? 'arrow-left' : 'bars'}
                 size="sm"
                 variant="secondary"
-                icon="plus"
-                onClick={() => addContext(context)}
-                tooltip="Attach current dashboard to this conversation"
-              >
-                Add Current Dashboard
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className={s.messagesContainer}>
-        {messages.map((message, idx) => (
-          <div
-            key={idx}
-            className={`${s.message} ${
-              message.role === 'user' ? s.userMessage : s.assistantMessage
-            }`}
-          >
-            <div
-              className={s.messageContent}
-              dangerouslySetInnerHTML={{
-                __html: sanitizeMarkdown(message.content)
-              }}
-            />
-            {message.actions && message.actions.length > 0 && renderActions(message.actions)}
-            {message.artifacts && message.artifacts.length > 0 && (
-              <div className={s.artifactsSection}>
-                {message.artifacts.map(artifact => (
-                  <ArtifactCard key={artifact.id} artifact={artifact} />
-                ))}
-              </div>
-            )}
-            {message.role === 'assistant' && (
-              <ReasoningDisplay
-                reasoning={message.reasoning}
-                sources={message.sources}
-                confidence={message.confidence}
-                caveats={message.caveats}
-                collapsed={true}
+                onClick={() => setShowSidebar(!showSidebar)}
+                aria-label="Toggle history"
               />
+            </Tooltip>
+            {llmReady === null ? (
+              <Badge color="blue" text="Checking LLM..." icon="sync" />
+            ) : llmReady ? (
+              <>
+                {hasContext ? (
+                  <Tooltip content={getContextTooltip()}>
+                    <Badge
+                      color="green"
+                      text={context.dashboard ? `📊 ${context.dashboard.title}` : 'Context Active'}
+                      icon="info-circle"
+                    />
+                  </Tooltip>
+                ) : (
+                  <Tooltip content="Navigate to a dashboard to enable context-aware assistance">
+                    <Badge color="orange" text="No Dashboard Context" icon="info-circle" />
+                  </Tooltip>
+                )}
+                {contextLoading && <Spinner inline size={14} />}
+              </>
+            ) : (
+              <Badge color="red" text="LLM Unavailable" icon="exclamation-triangle" />
             )}
-            {message.role === 'assistant' && (
-              <div className={s.messageActions}>
-                <IconButton
-                  name="copy"
+          </div>
+        </div>
+
+        {error && (
+          <Alert title="Error" severity="error" onRemove={() => setError(null)}>
+            {error}
+          </Alert>
+        )}
+
+        {/* Context Management Section */}
+        {conversation && (
+          <div className={s.contextSection}>
+            {conversation.contexts && conversation.contexts.length > 0 && (
+              <ContextBadges contexts={conversation.contexts} onRemove={removeContext} />
+            )}
+            {hasContext && (
+              <div className={s.addContextButton}>
+                <Button
                   size="sm"
-                  tooltip="Copy to clipboard"
-                  onClick={() => copyToClipboard(message.content)}
-                />
+                  variant="secondary"
+                  icon="plus"
+                  onClick={() => addContext(context)}
+                  tooltip="Attach current dashboard to this conversation"
+                >
+                  Add Current Dashboard
+                </Button>
               </div>
             )}
           </div>
-        ))}
-
-        {/* Plan visualization */}
-        {frontendPlan && isFrontendOrchestrating && (
-          <PlanVisualization
-            plan={frontendPlan}
-            currentStepIndex={frontendCurrentStepIndex}
-          />
         )}
 
-        {/* Artifacts */}
-        {frontendArtifacts.length > 0 && isFrontendOrchestrating && (
-          <div className={s.artifactsSection}>
-            <h4 className={s.artifactsHeading}>Evidence</h4>
-            {frontendArtifacts.map(artifact => (
-              <ArtifactCard key={artifact.id} artifact={artifact} />
-            ))}
-          </div>
-        )}
-
-        {/* Thinking indicator */}
-        {(isFrontendOrchestrating || isSimpleStreaming) && !displayedContent && (
-          <div className={`${s.message} ${s.assistantMessage}`}>
-            <div className={s.thinkingIndicator}>
-              <span className={s.thinkingDot}></span>
-              <span className={s.thinkingDot}></span>
-              <span className={s.thinkingDot}></span>
-            </div>
-          </div>
-        )}
-
-        {/* Streaming content display */}
-        {displayedContent && (
-          <div className={`${s.message} ${s.assistantMessage} ${s.streamingMessage}`}>
-            <div className={s.messageContent}>
-              <span
+        <div className={s.messagesContainer}>
+          {messages.map((message, idx) => (
+            <div key={idx} className={`${s.message} ${message.role === 'user' ? s.userMessage : s.assistantMessage}`}>
+              <div
+                className={s.messageContent}
                 dangerouslySetInnerHTML={{
-                  __html: sanitizeMarkdown(displayedContent)
+                  __html: sanitizeMarkdown(message.content),
                 }}
               />
-              {(isSimpleStreaming || isFrontendOrchestrating) && (
-                <span className={s.cursor}>▊</span>
+              {message.actions && message.actions.length > 0 && renderActions(message.actions)}
+              {message.artifacts && message.artifacts.length > 0 && (
+                <div className={s.artifactsSection}>
+                  {message.artifacts.map((artifact) => (
+                    <ArtifactCard key={artifact.id} artifact={artifact} />
+                  ))}
+                </div>
+              )}
+              {message.role === 'assistant' && (
+                <ReasoningDisplay
+                  reasoning={message.reasoning}
+                  sources={message.sources}
+                  confidence={message.confidence}
+                  caveats={message.caveats}
+                  collapsed={true}
+                />
+              )}
+              {message.role === 'assistant' && (
+                <div className={s.messageActions}>
+                  <IconButton
+                    name="copy"
+                    size="sm"
+                    tooltip="Copy to clipboard"
+                    onClick={() => copyToClipboard(message.content)}
+                  />
+                </div>
               )}
             </div>
-          </div>
-        )}
+          ))}
 
-        <div ref={messagesEndRef} />
-      </div>
+          {/* Plan visualization */}
+          {frontendPlan && isFrontendOrchestrating && (
+            <PlanVisualization plan={frontendPlan} currentStepIndex={frontendCurrentStepIndex} />
+          )}
 
-      <div className={s.inputContainer}>
-        <div className={s.modeSelector}>
-          <RadioButtonGroup
-            options={[
-              { label: '⚡ Standard', value: 'standard', description: 'Fast responses' },
-              { label: '🎨 Design', value: 'design', description: 'Dashboard design with examples and suggestions' },
-            ]}
-            value={mode}
-            onChange={(value) => setMode(value as ChatMode)}
-            size="sm"
-          />
+          {/* Artifacts */}
+          {frontendArtifacts.length > 0 && isFrontendOrchestrating && (
+            <div className={s.artifactsSection}>
+              <h4 className={s.artifactsHeading}>Evidence</h4>
+              {frontendArtifacts.map((artifact) => (
+                <ArtifactCard key={artifact.id} artifact={artifact} />
+              ))}
+            </div>
+          )}
+
+          {/* Thinking indicator */}
+          {(isFrontendOrchestrating || isSimpleStreaming) && !displayedContent && (
+            <div className={`${s.message} ${s.assistantMessage}`}>
+              <div className={s.thinkingIndicator}>
+                <span className={s.thinkingDot}></span>
+                <span className={s.thinkingDot}></span>
+                <span className={s.thinkingDot}></span>
+              </div>
+            </div>
+          )}
+
+          {/* Streaming content display */}
+          {displayedContent && (
+            <div className={`${s.message} ${s.assistantMessage} ${s.streamingMessage}`}>
+              <div className={s.messageContent}>
+                <span
+                  dangerouslySetInnerHTML={{
+                    __html: sanitizeMarkdown(displayedContent),
+                  }}
+                />
+                {(isSimpleStreaming || isFrontendOrchestrating) && <span className={s.cursor}>▊</span>}
+              </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
         </div>
-        <div className={s.inputArea}>
-          <TextArea
-            value={input}
-            onChange={e => setInput(e.currentTarget.value)}
-            onKeyDown={handleKeyPress}
-            placeholder={mode === 'design' ? 'Design a dashboard or suggest improvements...' : 'Ask anything...'}
-            rows={2}
-            className={s.input}
-            disabled={isFrontendOrchestrating || isSimpleStreaming}
-            style={{
-              height: 'auto',
-              minHeight: '44px',
-            }}
-            onInput={(e) => {
-              const target = e.target as HTMLTextAreaElement;
-              target.style.height = 'auto';
-              target.style.height = Math.min(target.scrollHeight, 200) + 'px';
-            }}
-          />
-          <div className={s.inputActions}>
-            <Button
-              icon="comment-alt"
-              onClick={handleSend}
-              disabled={!input.trim() || isFrontendOrchestrating || isSimpleStreaming}
+
+        <div className={s.inputContainer}>
+          <div className={s.modeSelector}>
+            <RadioButtonGroup
+              options={[
+                { label: '⚡ Standard', value: 'standard', description: 'Fast responses' },
+                { label: '🎨 Design', value: 'design', description: 'Dashboard design with examples and suggestions' },
+              ]}
+              value={mode}
+              onChange={(value) => setMode(value as ChatMode)}
               size="sm"
-              className={s.sendButton}
-            >
-              {(isFrontendOrchestrating || isSimpleStreaming) ? 'Running...' : 'Send'}
-            </Button>
+            />
+          </div>
+          <div className={s.inputArea}>
+            <TextArea
+              value={input}
+              onChange={(e) => setInput(e.currentTarget.value)}
+              onKeyDown={handleKeyPress}
+              placeholder={mode === 'design' ? 'Design a dashboard or suggest improvements...' : 'Ask anything...'}
+              rows={2}
+              className={s.input}
+              disabled={isFrontendOrchestrating || isSimpleStreaming}
+              style={{
+                height: 'auto',
+                minHeight: '44px',
+              }}
+              onInput={(e) => {
+                const target = e.target as HTMLTextAreaElement;
+                target.style.height = 'auto';
+                target.style.height = Math.min(target.scrollHeight, 200) + 'px';
+              }}
+            />
+            <div className={s.inputActions}>
+              <Button
+                icon="comment-alt"
+                onClick={handleSend}
+                disabled={!input.trim() || isFrontendOrchestrating || isSimpleStreaming}
+                size="sm"
+                className={s.sendButton}
+              >
+                {isFrontendOrchestrating || isSimpleStreaming ? 'Running...' : 'Send'}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
     </div>
   );
 }
@@ -924,8 +940,13 @@ const getStyles = (theme: GrafanaTheme2) => ({
   streamingMessage: css`
     animation: pulse 1.5s ease-in-out infinite;
     @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.8; }
+      0%,
+      100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.8;
+      }
     }
   `,
   thinkingIndicator: css`
@@ -952,7 +973,9 @@ const getStyles = (theme: GrafanaTheme2) => ({
     }
 
     @keyframes thinking {
-      0%, 60%, 100% {
+      0%,
+      60%,
+      100% {
         opacity: 0.3;
         transform: scale(1) translateY(0);
       }
@@ -972,8 +995,14 @@ const getStyles = (theme: GrafanaTheme2) => ({
     animation: blink 0.9s ease-in-out infinite;
 
     @keyframes blink {
-      0%, 49% { opacity: 1; }
-      50%, 100% { opacity: 0; }
+      0%,
+      49% {
+        opacity: 1;
+      }
+      50%,
+      100% {
+        opacity: 0;
+      }
     }
   `,
   messageContent: css`
@@ -1025,7 +1054,12 @@ const getStyles = (theme: GrafanaTheme2) => ({
     }
 
     /* Headers */
-    h1, h2, h3, h4, h5, h6 {
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
       margin: ${theme.spacing(2, 0, 1, 0)};
       line-height: 1.3;
       font-weight: ${theme.typography.fontWeightMedium};
@@ -1049,7 +1083,9 @@ const getStyles = (theme: GrafanaTheme2) => ({
       color: ${theme.colors.text.primary};
     }
 
-    h4, h5, h6 {
+    h4,
+    h5,
+    h6 {
       font-size: ${theme.typography.body.fontSize};
       font-weight: ${theme.typography.fontWeightMedium};
     }
@@ -1061,7 +1097,8 @@ const getStyles = (theme: GrafanaTheme2) => ({
     }
 
     /* Lists */
-    ul, ol {
+    ul,
+    ol {
       margin: ${theme.spacing(1, 0)};
       padding-left: ${theme.spacing(3)};
       line-height: 1.6;
@@ -1080,12 +1117,13 @@ const getStyles = (theme: GrafanaTheme2) => ({
       padding-left: ${theme.spacing(0.5)};
     }
 
-    li > ul, li > ol {
+    li > ul,
+    li > ol {
       margin-top: ${theme.spacing(0.5)};
     }
 
     /* Task lists */
-    li input[type="checkbox"] {
+    li input[type='checkbox'] {
       margin-right: ${theme.spacing(1)};
     }
 
@@ -1158,7 +1196,8 @@ const getStyles = (theme: GrafanaTheme2) => ({
       width: 100%;
     }
 
-    th, td {
+    th,
+    td {
       border: 1px solid ${theme.colors.border.weak};
       padding: ${theme.spacing(1)};
       text-align: left;

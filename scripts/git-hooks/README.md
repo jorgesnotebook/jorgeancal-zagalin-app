@@ -5,12 +5,16 @@ This directory contains git hooks that automatically run checks to catch issues 
 ## Installed Hooks
 
 ### pre-commit (Fast)
+
 Runs on every commit:
+
 - ✅ Type checking
 - ✅ Linting
 
 ### pre-push (Full CI)
+
 Runs before pushing:
+
 - ✅ Type checking
 - ✅ Linting
 - ✅ Unit tests
@@ -21,6 +25,7 @@ Runs before pushing:
 Hooks are automatically installed when you run `npm install`.
 
 To manually install/reinstall:
+
 ```bash
 npm run install-hooks
 ```
@@ -42,6 +47,6 @@ git push --no-verify
 ## Benefits
 
 - 🚀 Catch issues before CI runs
-- ⏱️  Save time - fix issues locally instead of waiting for CI
-- 🛡️  No surprises - know your code will pass CI before pushing
+- ⏱️ Save time - fix issues locally instead of waiting for CI
+- 🛡️ No surprises - know your code will pass CI before pushing
 - 👥 Team consistency - everyone runs the same checks

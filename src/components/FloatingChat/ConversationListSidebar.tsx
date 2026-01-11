@@ -1,15 +1,7 @@
 import React, { useState } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
-import {
-  Button,
-  IconButton,
-  Input,
-  useStyles2,
-  Tooltip,
-  Dropdown,
-  Menu,
-} from '@grafana/ui';
+import { Button, IconButton, Input, useStyles2, Tooltip, Dropdown, Menu } from '@grafana/ui';
 import type { ConversationMetadata } from '../../services/conversationStorage';
 import { ZagalinColors } from '../../theme/colors';
 import { exportConversation, type ExportFormat } from '../../services/conversationExport';
@@ -83,16 +75,22 @@ function ConversationItem({
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
 
-    if (minutes < 1) {return 'Just now';}
-    if (minutes < 60) {return `${minutes}m ago`;}
-    if (hours < 24) {return `${hours}h ago`;}
-    if (days < 7) {return `${days}d ago`;}
+    if (minutes < 1) {
+      return 'Just now';
+    }
+    if (minutes < 60) {
+      return `${minutes}m ago`;
+    }
+    if (hours < 24) {
+      return `${hours}h ago`;
+    }
+    if (days < 7) {
+      return `${days}d ago`;
+    }
     return dateObj.toLocaleDateString();
   };
 
-  const className = `${s.item} ${isActive ? s.activeItem : ''} ${
-    conversation.isPinned ? s.pinnedItem : ''
-  }`;
+  const className = `${s.item} ${isActive ? s.activeItem : ''} ${conversation.isPinned ? s.pinnedItem : ''}`;
 
   return (
     <div className={className}>
@@ -110,9 +108,7 @@ function ConversationItem({
           <Tooltip content={conversation.lastMessagePreview || 'No messages yet'} placement="right">
             <div className={s.itemContent} onClick={onSelect}>
               <div className={s.itemTitle}>{conversation.title}</div>
-              <div className={s.itemMeta}>
-                {formatTime(conversation.updatedAt)}
-              </div>
+              <div className={s.itemMeta}>{formatTime(conversation.updatedAt)}</div>
             </div>
           </Tooltip>
           <div className={s.itemActions}>
@@ -126,12 +122,7 @@ function ConversationItem({
               tooltip={conversation.isPinned ? 'Unpin' : 'Pin'}
               className={conversation.isPinned ? s.pinnedStar : s.unpinnedStar}
             />
-            <IconButton
-              name="edit"
-              size="sm"
-              onClick={handleStartEdit}
-              tooltip="Rename"
-            />
+            <IconButton name="edit" size="sm" onClick={handleStartEdit} tooltip="Rename" />
             <Dropdown
               overlay={
                 <Menu>
@@ -247,12 +238,13 @@ export function ConversationListSidebar({
         updatedAt: new Date(fullConversation.updatedAt),
         messages: fullConversation.messages.map((m: any) => ({
           ...m,
-          timestamp: new Date(m.timestamp)
+          timestamp: new Date(m.timestamp),
         })),
-        contexts: fullConversation.contexts?.map((ctx: any) => ({
-          ...ctx,
-          addedAt: new Date(ctx.addedAt)
-        })) || []
+        contexts:
+          fullConversation.contexts?.map((ctx: any) => ({
+            ...ctx,
+            addedAt: new Date(ctx.addedAt),
+          })) || [],
       };
 
       await exportConversation(conversation, format);
@@ -266,14 +258,7 @@ export function ConversationListSidebar({
   return (
     <div className={s.container}>
       <div className={s.header}>
-        <Button
-          icon="plus"
-          onClick={onCreateNew}
-          size="sm"
-          fullWidth
-          variant="secondary"
-          className={s.newChatButton}
-        >
+        <Button icon="plus" onClick={onCreateNew} size="sm" fullWidth variant="secondary" className={s.newChatButton}>
           New Chat
         </Button>
         {conversations.length > 0 && (
@@ -304,9 +289,7 @@ export function ConversationListSidebar({
 
       <div className={s.listContainer}>
         {filteredConversations.length === 0 ? (
-          <div className={s.emptyState}>
-            {searchTerm ? 'No conversations found' : 'No conversations yet'}
-          </div>
+          <div className={s.emptyState}>{searchTerm ? 'No conversations found' : 'No conversations yet'}</div>
         ) : (
           filteredConversations.map((conversation) => (
             <ConversationItem
@@ -352,8 +335,9 @@ export function ConversationListSidebar({
             <div className={s.deleteModalContent}>
               <h4 className={s.deleteModalTitle}>Delete All Conversations?</h4>
               <p className={s.deleteModalText}>
-                Are you sure you want to delete ALL {conversations.length} conversation{conversations.length !== 1 ? 's' : ''}?
-                This will permanently remove all your chat history. This action cannot be undone.
+                Are you sure you want to delete ALL {conversations.length} conversation
+                {conversations.length !== 1 ? 's' : ''}? This will permanently remove all your chat history. This action
+                cannot be undone.
               </p>
               <div className={s.deleteButtons}>
                 <Button variant="destructive" size="md" onClick={confirmDeleteAll} icon="trash-alt">

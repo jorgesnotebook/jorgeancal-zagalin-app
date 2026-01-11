@@ -12,13 +12,17 @@ func sendErrorResponse(w http.ResponseWriter, logMsg string, err error, statusCo
 	var clientMsg string
 	switch statusCode {
 	case http.StatusBadRequest:
-		clientMsg = "invalid request"
+		clientMsg = logMsg // Use specific message for bad requests
 	case http.StatusUnauthorized:
 		clientMsg = "authentication required"
 	case http.StatusForbidden:
-		clientMsg = "access denied"
+		clientMsg = logMsg // Use specific message for forbidden
 	case http.StatusNotFound:
-		clientMsg = "resource not found"
+		clientMsg = logMsg // Use specific message for not found
+	case http.StatusTooManyRequests:
+		clientMsg = logMsg // Use specific message for rate limits
+	case http.StatusNotImplemented:
+		clientMsg = logMsg // Use specific message for not implemented
 	case http.StatusInternalServerError:
 		clientMsg = "internal server error"
 	default:

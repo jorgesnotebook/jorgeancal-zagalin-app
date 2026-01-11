@@ -1,12 +1,12 @@
 ---
-paths: "**/*.{ts,tsx,go}"
+paths: '**/*.{ts,tsx,go}'
 ---
 
 # Common Tasks - Step-by-Step Guides
 
 Practical, copy-paste guides for common development tasks in this plugin.
 
-##  Task Index
+## Task Index
 
 1. [Add a New Page](#1-add-a-new-page)
 2. [Add a Backend Endpoint](#2-add-a-backend-endpoint)
@@ -83,7 +83,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
 import { AnalyticsPage } from 'pages/AnalyticsPage';
 
 // In Routes:
-<Route path="/analytics" element={<AnalyticsPage />} />
+<Route path="/analytics" element={<AnalyticsPage />} />;
 ```
 
 ### Step 4: Add to constants
@@ -104,7 +104,7 @@ npm run dev
 # Visit: http://localhost:3000/a/jorgeancal-zagalin-app/analytics
 ```
 
- **Done!** Your page is now accessible.
+**Done!** Your page is now accessible.
 
 ---
 
@@ -257,7 +257,7 @@ docker restart jorgeancal-zagalin-app
 npm run dev
 ```
 
- **Done!** Your endpoint is working.
+**Done!** Your endpoint is working.
 
 ---
 
@@ -305,10 +305,7 @@ func getAvailableTools(ctx context.Context, settings *Settings) []Tool {
 **File**: `src/services/zagalinTools.ts`
 
 ```typescript
-export const executeTool = async (
-  toolName: string,
-  args: any
-): Promise<any> => {
+export const executeTool = async (toolName: string, args: any): Promise<any> => {
   switch (toolName) {
     // ... existing tools
 
@@ -322,9 +319,7 @@ export const executeTool = async (
 
 async function getDashboardList(search?: string): Promise<any> {
   const query = search ? `?query=${encodeURIComponent(search)}` : '';
-  const response = await getBackendSrv().get(
-    `/api/search${query}`
-  );
+  const response = await getBackendSrv().get(`/api/search${query}`);
   return {
     dashboards: response.map((d: any) => ({
       title: d.title,
@@ -347,7 +342,7 @@ npm run dev
 # "List all dashboards with 'metrics' in the name"
 ```
 
- **Done!** LLM can now call your tool.
+**Done!** LLM can now call your tool.
 
 ---
 
@@ -477,7 +472,7 @@ func TestValidateMyQueryType(t *testing.T) {
 </Field>
 ```
 
- **Done!** Your validation is active.
+**Done!** Your validation is active.
 
 ---
 
@@ -545,6 +540,7 @@ export interface AppJsonData {
 ### Step 4: Use the setting
 
 **Backend**:
+
 ```go
 func (a *App) someHandler(ctx context.Context) error {
     maxRetries := a.settings.MaxRetries
@@ -555,6 +551,7 @@ func (a *App) someHandler(ctx context.Context) error {
 ```
 
 **Frontend** (if needed):
+
 ```typescript
 import { getAppEvents } from '@grafana/runtime';
 
@@ -563,7 +560,7 @@ const pluginMeta = getAppEvents().config.apps['jorgeancal-zagalin-app'];
 const maxRetries = pluginMeta.jsonData.maxRetries || 3;
 ```
 
- **Done!** Setting is configurable.
+**Done!** Setting is configurable.
 
 ---
 
@@ -620,7 +617,7 @@ function MyComponent() {
 }
 ```
 
- **Done!** Preferences are stored per-user.
+**Done!** Preferences are stored per-user.
 
 ---
 
@@ -705,7 +702,7 @@ func (a *App) handleMyFeature(ctx context.Context, req *backend.CallResourceRequ
 }
 ```
 
- **Done!** Endpoint is rate-limited.
+**Done!** Endpoint is rate-limited.
 
 ---
 
@@ -792,34 +789,36 @@ mage -v coverage
 npm run e2e
 ```
 
- **Done!** Tests are passing.
+**Done!** Tests are passing.
 
 ---
 
-##  Quick Reference
+## Quick Reference
 
-| Task | Files to Modify | Key Command |
-|------|----------------|-------------|
-| New page | `plugin.json`, `src/pages/`, `App.tsx` | `npm run dev` |
-| New endpoint | `resources.go`, `pkg/plugin/my_feature.go` | `mage -v buildAll` |
-| Chat tool | `assistant_tools.go`, `zagalinTools.ts` | Rebuild + restart |
-| Validation | `query_validation.go` | Add + test |
-| Config option | `settings.go`, `types.ts`, `AppConfig.tsx` | Save config |
-| User storage | Component with `usePluginUserStorage` | Test in UI |
-| Rate limiting | New limiter, add to handler | Rebuild backend |
-| Tests | `*.test.tsx`, `*_test.go`, `*.spec.ts` | `npm test` |
+| Task          | Files to Modify                            | Key Command        |
+| ------------- | ------------------------------------------ | ------------------ |
+| New page      | `plugin.json`, `src/pages/`, `App.tsx`     | `npm run dev`      |
+| New endpoint  | `resources.go`, `pkg/plugin/my_feature.go` | `mage -v buildAll` |
+| Chat tool     | `assistant_tools.go`, `zagalinTools.ts`    | Rebuild + restart  |
+| Validation    | `query_validation.go`                      | Add + test         |
+| Config option | `settings.go`, `types.ts`, `AppConfig.tsx` | Save config        |
+| User storage  | Component with `usePluginUserStorage`      | Test in UI         |
+| Rate limiting | New limiter, add to handler                | Rebuild backend    |
+| Tests         | `*.test.tsx`, `*_test.go`, `*.spec.ts`     | `npm test`         |
 
 ---
 
-##  Next Steps
+## Next Steps
 
 **Learn more**:
+
 - Architecture: `.claude/rules/00-getting-started/architecture-tour.md`
 - Frontend patterns: `.claude/rules/00-getting-started/frontend-tour.md`
 - Backend patterns: `.claude/rules/00-getting-started/backend-tour.md`
 - Decision trees: `.claude/DECISION_TREES.md`
 
 **Get help**:
+
 - Check troubleshooting: `.claude/QUICK_START.md`
 - Review code examples in existing files
 - Ask your team!

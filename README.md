@@ -1,4 +1,5 @@
 # Zagalin
+
 Zagalin - AI Assistant for Grafana
 
 **Zagalin** is a context-aware AI assistant that brings the power of Large Language Models (LLMs) directly into your Grafana experience. Chat with your metrics, generate queries, and troubleshoot issues using natural language.
@@ -8,37 +9,44 @@ Zagalin - AI Assistant for Grafana
 ## Features
 
 ### Context-Aware Chat
+
 - **Dashboard Context**: Zagalin automatically understands which dashboard and panels you're viewing
 - **Time Range Awareness**: Queries are aware of your current time range selection
 - **Floating Chat**: Access Zagalin from any dashboard with the floating chat button
 - **Full Chat Page**: Dedicated chat interface for longer conversations
 
 ### Query Generation
+
 - **Natural Language to PromQL**: "Show me CPU usage over the last hour"
 - **Natural Language to LogQL**: "Find errors in my application logs"
 - **Query Explanation**: Get detailed explanations of complex queries
 - **Best Practices**: Suggestions for query optimization and improvements
 
 ### Troubleshooting Assistant
+
 - **Guided Troubleshooting**: Step-by-step guidance for common issues
 - **Pattern Recognition**: Identifies common patterns in metrics and logs
 - **Root Cause Analysis**: Helps identify the source of problems
 - **Actionable Insights**: Provides specific recommendations and next steps
 
 ### Panel Analysis
+
 - **Panel Explanation**: Understand what each panel shows and why it matters
 - **Data Interpretation**: Get insights from your metrics
 - **Trend Analysis**: Identify patterns and anomalies
 - **Alert Suggestions**: Recommendations for setting up alerts
 
 ### Customization
+
 - **Personality Presets**: Choose from helpful, technical, beginner-friendly, or concise modes
 - **Custom Instructions**: Add your own instructions to tailor Zagalin's behavior
 - **Temperature Control**: Adjust creativity vs. consistency
 - **Token Limits**: Control response length
 
 ### Provider-Agnostic LLM Support
+
 Zagalin works with multiple LLM providers through the [Grafana LLM App](https://grafana.com/grafana/plugins/grafana-llm-app/):
+
 - **OpenAI** (GPT-4, GPT-3.5)
 - **Azure OpenAI**
 - **Anthropic Claude**
@@ -47,17 +55,20 @@ Zagalin works with multiple LLM providers through the [Grafana LLM App](https://
 ## Installation
 
 ### Prerequisites
+
 1. Grafana 10.4.0 or later
 2. [Grafana LLM App plugin](https://grafana.com/grafana/plugins/grafana-llm-app/) installed and configured
 
 ### Install Zagalin
 
 #### Option 1: Grafana CLI
+
 ```bash
 grafana-cli plugins install jorgeancal-zagalin-app
 ```
 
 #### Option 2: Docker
+
 ```bash
 docker run -d \
   -p 3000:3000 \
@@ -67,6 +78,7 @@ docker run -d \
 ```
 
 #### Option 3: Manual Installation
+
 1. Download the latest release from [GitHub Releases](https://github.com/jorgesnotebook/jorgeancal-zagalin-app/releases)
 2. Extract to your Grafana plugins directory
 3. Restart Grafana
@@ -74,6 +86,7 @@ docker run -d \
 ## Getting Started
 
 ### 1. Configure LLM Provider
+
 Before using Zagalin, you need to set up the Grafana LLM App:
 
 1. Navigate to **Configuration → Plugins → LLM App**
@@ -84,6 +97,7 @@ Before using Zagalin, you need to set up the Grafana LLM App:
    - Or use Grafana's managed LLM service
 
 ### 2. Enable Zagalin
+
 1. Go to **Apps → Zagalin**
 2. Click **Enable**
 3. Configure your preferences in the Configuration tab
@@ -91,14 +105,17 @@ Before using Zagalin, you need to set up the Grafana LLM App:
 ### 3. Start Chatting
 
 #### Floating Chat Button
+
 The floating chat button appears automatically when you're viewing a **dashboard** (not on the home page or other Grafana pages).
 
 **When it appears:**
+
 - When viewing any dashboard
 - Automatically positioned in the bottom-right corner
 - Shows context badge when dashboard context is available
 
 **How to use it:**
+
 1. Click the floating orange chat button
 2. A chat panel slides up from the bottom
 3. Type your question and press Cmd/Ctrl+Enter or click Send
@@ -106,12 +123,14 @@ The floating chat button appears automatically when you're viewing a **dashboard
 5. Click the X button or press Escape to close
 
 **Pro Tips:**
+
 - The button turns green when dashboard context is active
 - You can drag and reposition the chat panel
 - Chat history persists during your session
 - Use natural language - no special commands needed
 
 #### Other Access Methods
+
 - **Full Chat Page**: Navigate to **Apps → Zagalin → Chat** for a dedicated full-screen experience
 - **Ask Panel**: Add the "Ask AI" panel to any dashboard for inline queries
 
@@ -121,24 +140,26 @@ Zagalin offers three different ways to connect to LLM services, each optimized f
 
 ### Mode Comparison
 
-| Feature | Official Grafana<br>(Default) | Zagalin Backend<br>(Production) | Direct LLM API<br>(Advanced) |
-|---------|:---:|:---:|:---:|
-| **Service Account Required** | No | Yes | No |
-| **Setup Complexity** | Easy | Moderate | Advanced |
-| **Rate Limiting** | Yes | Yes | Yes |
-| **Query Validation** | Yes | Yes | Yes |
-| **Datasource Governance** | Yes | Yes | Yes |
-| **Audit Logging** | Yes | Yes | Yes |
-| **Requires grafana-llm-app** | Yes | Yes | No |
-| **Best For** | Getting started<br>Single user | Production<br>Multiple users | Custom setups<br>No grafana-llm-app |
+| Feature                      | Official Grafana<br>(Default)  | Zagalin Backend<br>(Production) |    Direct LLM API<br>(Advanced)     |
+| ---------------------------- | :----------------------------: | :-----------------------------: | :---------------------------------: |
+| **Service Account Required** |               No               |               Yes               |                 No                  |
+| **Setup Complexity**         |              Easy              |            Moderate             |              Advanced               |
+| **Rate Limiting**            |              Yes               |               Yes               |                 Yes                 |
+| **Query Validation**         |              Yes               |               Yes               |                 Yes                 |
+| **Datasource Governance**    |              Yes               |               Yes               |                 Yes                 |
+| **Audit Logging**            |              Yes               |               Yes               |                 Yes                 |
+| **Requires grafana-llm-app** |              Yes               |               Yes               |                 No                  |
+| **Best For**                 | Getting started<br>Single user |  Production<br>Multiple users   | Custom setups<br>No grafana-llm-app |
 
 ### 1. Official Grafana (Default)
 
 **Hybrid architecture** that combines the best of both worlds:
+
 - Uses **@grafana/llm** package for LLM calls (no service account needed)
 - Uses **Zagalin backend** for queries, security, and storage
 
 **Key Features**:
+
 - **No service account needed** - Works immediately after install
 - **Session-based authentication** - Uses your Grafana login automatically
 - **Backend security features** - Rate limiting, query validation, audit logging
@@ -146,11 +167,13 @@ Zagalin offers three different ways to connect to LLM services, each optimized f
 - **Persistent storage** - Conversations saved via Grafana User Storage API
 
 **Prerequisites**:
+
 1. Install **grafana-llm-app** plugin from Grafana catalog
 2. Configure it with your LLM provider (Administration → Plugins → LLM App)
 3. Zagalin backend must be running
 
 **Configuration**:
+
 1. Go to **Apps → Zagalin → Configuration**
 2. Select **"Official Grafana (Default)"** card
 3. Click **Save**
@@ -161,10 +184,12 @@ Zagalin offers three different ways to connect to LLM services, each optimized f
 ### 2. Zagalin Backend (Production)
 
 **Full backend proxy** mode with complete security pipeline:
+
 - All LLM requests go through **Zagalin backend → grafana-llm-app**
 - Requires **service account token** for backend-to-backend authentication
 
 **Key Features**:
+
 - **Complete audit trail** - All LLM calls logged with user context
 - **Service account authentication** - Backend-to-backend security
 - **Full security pipeline** - Rate limiting, validation, governance
@@ -172,6 +197,7 @@ Zagalin offers three different ways to connect to LLM services, each optimized f
 - **Centralized control** - Single point for LLM access management
 
 **Prerequisites**:
+
 1. Install **grafana-llm-app** plugin from Grafana catalog
 2. Configure it with your LLM provider
 3. **Create a Grafana service account** with Admin or Editor role
@@ -179,6 +205,7 @@ Zagalin offers three different ways to connect to LLM services, each optimized f
 5. Provide the token in Zagalin configuration
 
 **Configuration**:
+
 1. Go to **Administration → Service Accounts**
 2. Create new service account (e.g., "Zagalin Plugin")
 3. Assign **Admin** or **Editor** role
@@ -193,11 +220,13 @@ Zagalin offers three different ways to connect to LLM services, each optimized f
 ### 3. Direct LLM API (Advanced)
 
 **Direct API integration** where Zagalin backend calls LLM providers directly:
+
 - **No grafana-llm-app required** - Direct OpenAI/Anthropic/Azure integration
 - Requires **your own API keys** from LLM providers
 - Full security features still enabled (rate limiting, validation, governance)
 
 **Key Features**:
+
 - **No grafana-llm-app dependency** - One less plugin to manage
 - **Direct API control** - Full control over API parameters
 - **Multiple providers** - OpenAI, Anthropic, Azure, custom endpoints
@@ -205,6 +234,7 @@ Zagalin offers three different ways to connect to LLM services, each optimized f
 - **Custom configurations** - Advanced endpoint and model settings
 
 **Prerequisites**:
+
 1. Obtain API keys from your LLM provider:
    - **OpenAI**: https://platform.openai.com/api-keys (+ Organization ID if your key belongs to multiple orgs)
    - **Anthropic**: https://console.anthropic.com/settings/keys
@@ -212,6 +242,7 @@ Zagalin offers three different ways to connect to LLM services, each optimized f
 2. Know your model name (e.g., `gpt-4o-mini`, `claude-3-5-sonnet-20241022`)
 
 **Configuration**:
+
 1. Go to **Apps → Zagalin → Configuration**
 2. Select **"Direct LLM API"** card
 3. Choose your **LLM Provider**:
@@ -226,11 +257,11 @@ Zagalin offers three different ways to connect to LLM services, each optimized f
 
 **Supported Providers**:
 
-| Provider | Model Examples | API Key Format | Additional Fields |
-|----------|---------------|----------------|-------------------|
-| **OpenAI** | `gpt-4o`, `gpt-4o-mini`, `gpt-3.5-turbo` | `sk-...` | Organization ID (optional) |
-| **Anthropic** | `claude-3-5-sonnet-20241022`, `claude-3-opus-20240229` | `sk-ant-...` | - |
-| **Azure OpenAI** | Your deployment name | Azure API key + endpoint | Custom endpoint required |
+| Provider         | Model Examples                                         | API Key Format           | Additional Fields          |
+| ---------------- | ------------------------------------------------------ | ------------------------ | -------------------------- |
+| **OpenAI**       | `gpt-4o`, `gpt-4o-mini`, `gpt-3.5-turbo`               | `sk-...`                 | Organization ID (optional) |
+| **Anthropic**    | `claude-3-5-sonnet-20241022`, `claude-3-opus-20240229` | `sk-ant-...`             | -                          |
+| **Azure OpenAI** | Your deployment name                                   | Azure API key + endpoint | Custom endpoint required   |
 
 ---
 
@@ -251,6 +282,7 @@ You can change LLM backend modes at any time without losing data:
 ## Usage Examples
 
 ### Generate a PromQL Query
+
 ```
 User: Show me memory usage above 80% in the last 24 hours
 Zagalin: Here's the PromQL query:
@@ -260,6 +292,7 @@ Zagalin: Here's the PromQL query:
 ```
 
 ### Explain a Dashboard
+
 ```
 User: What does this dashboard show?
 Zagalin: This dashboard monitors Kubernetes cluster health.
@@ -271,6 +304,7 @@ around 14:30.
 ```
 
 ### Troubleshoot an Issue
+
 ```
 User: My application is throwing 500 errors
 Zagalin: Let's investigate:
@@ -286,6 +320,7 @@ starting at 15:00. This correlates with...
 ## Configuration
 
 ### Personality & Behavior
+
 - **Personality Preset**: Choose how Zagalin communicates
   - Helpful (Recommended): Balanced and practical
   - Technical: For experienced SREs
@@ -294,7 +329,9 @@ starting at 15:00. This correlates with...
   - Custom: Write your own instructions
 
 ### Skills & Features
+
 Enable or disable specific capabilities:
+
 - **Explain Panel**: Analyze and explain dashboard panels
 - **Generate Queries**: Create PromQL/LogQL queries from natural language
 - **Troubleshooting**: Structured troubleshooting guidance
@@ -302,10 +339,12 @@ Enable or disable specific capabilities:
 - **Function Calling**: Structured tool execution
 
 ### LLM Parameters
+
 - **Temperature**: 0.0 (factual) to 1.0 (creative)
 - **Max Tokens**: Control response length (1000-4000 tokens)
 
 ### UI Preferences
+
 - Show/hide context badge
 - Display token count and cost estimates
 - Auto-open chat on dashboard view
@@ -313,18 +352,21 @@ Enable or disable specific capabilities:
 ## Architecture
 
 ### Frontend
+
 - Built with React and TypeScript
 - Uses Grafana UI components
 - Streaming responses with RxJS
 - Context-aware message handling
 
 ### Backend
+
 - Go plugin for Grafana
 - Integrates with Grafana LLM App
 - Secure API key management
 - Context extraction from Grafana
 
 ### LLM Integration
+
 - Provider-agnostic through Grafana LLM App
 - Streaming completions for responsive UX
 - Function calling for structured actions
@@ -333,15 +375,19 @@ Enable or disable specific capabilities:
 ## Screenshots
 
 ### Floating Chat Interface
+
 ![Floating Chat](https://raw.githubusercontent.com/jorgesnotebook/jorgeancal-zagalin-app/main/src/img/screenshots/floating-chat.png)
 
 ### Dashboard Context Awareness
+
 ![Dashboard Context](https://raw.githubusercontent.com/jorgesnotebook/jorgeancal-zagalin-app/main/src/img/screenshots/dashboard-context.png)
 
 ### Query Generation
+
 ![Query Generation](https://raw.githubusercontent.com/jorgesnotebook/jorgeancal-zagalin-app/main/src/img/screenshots/query-generation.png)
 
 ### Configuration
+
 ![Configuration](https://raw.githubusercontent.com/jorgesnotebook/jorgeancal-zagalin-app/main/src/img/screenshots/configuration.png)
 
 ## Privacy & Security
@@ -349,6 +395,7 @@ Enable or disable specific capabilities:
 Zagalin implements multiple layers of security to protect your data and infrastructure:
 
 ### Data Privacy
+
 - **No Data Storage**: Zagalin doesn't store your queries or responses
 - **API Keys**: Managed securely through Grafana's secrets management
 - **Context Optimization**: Only sends relevant context to minimize data exposure
@@ -356,6 +403,7 @@ Zagalin implements multiple layers of security to protect your data and infrastr
 - **User Isolation**: Conversations are stored per-user with access control
 
 ### Query Security
+
 - **Query Validation**: Parser-based validation for PromQL, LogQL, and TraceQL queries
   - Prevents injection attacks using official parsers
   - Configurable complexity limits and function allowlists
@@ -366,7 +414,9 @@ Zagalin implements multiple layers of security to protect your data and infrastr
 - **OTel Enforcement**: Automatic scope injection for multi-tenant observability
 
 ### Defense in Depth
+
 The plugin implements multiple security layers that work together:
+
 1. User authentication and identity extraction
 2. Per-user rate limiting
 3. Datasource allowlist validation
@@ -384,6 +434,7 @@ For detailed security documentation, see [`.claude/CLAUDE.md`](https://github.co
 This release transforms Zagalin into a production-ready observability assistant with enterprise-grade security controls.
 
 **Highlights**:
+
 - **Query Validation System** - Pattern-based validation for PromQL, LogQL, TraceQL
 - **OpenTelemetry Scope Enforcement** - Automatic service/environment labeling
 - **Datasource Governance** - Allowlist system for approved datasources
@@ -396,6 +447,7 @@ This release transforms Zagalin into a production-ready observability assistant 
 **Breaking Changes**: None
 
 **Documentation**:
+
 - [Release Notes](docs/releases/v0.0.2.md)
 - [Detailed Changelog](CHANGELOG.md#002---2025-12-27)
 - [Upgrade Guide](CHANGELOG.md#upgrading-to-002-from-001)
@@ -403,9 +455,11 @@ This release transforms Zagalin into a production-ready observability assistant 
 ### Previous Versions
 
 #### Version 0.0.1 - "Foundation" (December 24, 2025)
+
 Initial release with core AI assistant capabilities.
 
 **Highlights**:
+
 - Context-aware chat with dashboard, panel, and time range awareness
 - Floating chat interface on every dashboard
 - Query generation for PromQL, LogQL, TraceQL
@@ -414,11 +468,13 @@ Initial release with core AI assistant capabilities.
 - Function calling for structured tool execution
 
 **Documentation**:
+
 - [Changelog](CHANGELOG.md#001---2025-12-24)
 
 ### Coming Soon: v0.0.3 - "Intelligence & Orchestration" (Expected: January 2026)
 
 Next release will focus on structured investigation workflows:
+
 - Frontend orchestration with planning and step execution
 - Artifact management with syntax highlighting
 - Smart routing between dashboard questions and investigations
@@ -434,10 +490,10 @@ Next release will focus on structured investigation workflows:
 
 ### Version Comparison
 
-| Version | Release Date | Theme | Major Features | Breaking Changes |
-|---------|-------------|-------|----------------|------------------|
-| **0.0.2** | Dec 27, 2025 | Security & Governance | Query validation, OTel enforcement, datasource governance, conversation history | None |
-| 0.0.1 | Dec 24, 2025 | Foundation | Context-aware chat, floating UI, query generation, skills system | N/A |
+| Version   | Release Date | Theme                 | Major Features                                                                  | Breaking Changes |
+| --------- | ------------ | --------------------- | ------------------------------------------------------------------------------- | ---------------- |
+| **0.0.2** | Dec 27, 2025 | Security & Governance | Query validation, OTel enforcement, datasource governance, conversation history | None             |
+| 0.0.1     | Dec 24, 2025 | Foundation            | Context-aware chat, floating UI, query generation, skills system                | N/A              |
 
 ## License
 

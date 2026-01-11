@@ -9,6 +9,7 @@ Zagalin uses an intelligent scoring-based system to automatically detect which s
 ### Scoring System
 
 Each skill gets scored based on:
+
 1. **Keywords** - Specific phrases and terms
 2. **Context** - Dashboard/panel availability
 3. **Intent signals** - Action verbs, question patterns
@@ -34,26 +35,31 @@ Only matches with **50+ confidence** are logged for debugging.
 **Requirements**: Dashboard context must be available
 
 **High Confidence (80+ points):**
+
 - "what do i see"
 - "what am i looking at"
 - "describe this dashboard"
 - "what is this dashboard"
 
 **Medium Confidence (50+ points):**
+
 - "analyze this"
 - "overview"
 - "understand this"
 - "explain this dashboard"
 
 **Boosts:**
+
 - +30 for "dashboard" keyword
 - +20 for "this dashboard"
 
 **Penalties:**
+
 - -40 for "query" / "promql" / "logql"
 - -30 for "panel" / "graph" / "chart"
 
 **Example Queries:**
+
 ```
  "What am I looking at here?" (Score: 80+)
  "Give me an overview of this dashboard" (Score: 80+)
@@ -68,6 +74,7 @@ Only matches with **50+ confidence** are logged for debugging.
 **Requirements**: Panel context must be available
 
 **High Confidence (80+ points):**
+
 - "this panel"
 - "this graph"
 - "this chart"
@@ -75,16 +82,20 @@ Only matches with **50+ confidence** are logged for debugging.
 - "what does this display"
 
 **Medium Confidence (60+ points):**
+
 - "explain" + ("panel" OR "graph" OR "chart")
 
 **Boosts:**
+
 - +20 per panel keyword (panel, graph, chart, visualization, metric)
 - +15 if panel is in focus
 
 **Penalties:**
+
 - -40 if asking about "dashboard" without "panel"
 
 **Example Queries:**
+
 ```
  "What does this panel show?" (Score: 80+)
  "Explain this graph" (Score: 80+)
@@ -99,6 +110,7 @@ Only matches with **50+ confidence** are logged for debugging.
 **Requirements**: None (works everywhere)
 
 **High Confidence (80+ points):**
+
 - "create a query"
 - "write a query"
 - "generate a query"
@@ -106,24 +118,29 @@ Only matches with **50+ confidence** are logged for debugging.
 - "give me a query"
 
 **Very High Confidence (70+ points):**
+
 - "promql"
 - "logql"
 - "traceql"
 
 **Medium Confidence (40-50 points):**
+
 - "how do i query"
 - "how to query"
 - "how can i get"
 - Multiple function names: rate, sum, avg, count, histogram, etc.
 
 **Boosts:**
+
 - +15 per function keyword (accumulates)
 - +10 per data keyword (metrics, logs, traces, errors, latency)
 
 **Penalties:**
+
 - -30 for "explain" or "what does"
 
 **Example Queries:**
+
 ```
  "Create a query for CPU usage" (Score: 80+)
  "How do I write a PromQL query for errors?" (Score: 110+)
@@ -139,6 +156,7 @@ Only matches with **50+ confidence** are logged for debugging.
 **Requirements**: None (works everywhere)
 
 **High Confidence (80+ points):**
+
 - "not working"
 - "doesn't work"
 - "failing"
@@ -148,14 +166,17 @@ Only matches with **50+ confidence** are logged for debugging.
 - "investigate"
 
 **Medium Confidence (30-40 points per match, accumulates):**
+
 - Problem keywords: error, issue, problem, wrong, failed, down, outage
 - Question patterns: "why is", "what's wrong", "how do i fix"
 - Symptom keywords: slow, spike, drop, timeout, latency
 
 **Boosts:**
+
 - +15 if dashboard title contains "error" or "debug"
 
 **Example Queries:**
+
 ```
  "Why is my API not working?" (Score: 120+)
  "Debug this error" (Score: 110+)
@@ -171,21 +192,24 @@ Only matches with **50+ confidence** are logged for debugging.
 The scoring system naturally handles ambiguous queries by picking the highest-scoring skill:
 
 **Example 1**: "Explain the errors on this dashboard"
+
 - `analyze_dashboard`: 50 (dashboard keyword) - 30 (error penalty) = 20
 - `troubleshoot`: 30 (error keyword) + 50 (explain pattern) = 80
-- **Winner**: `troubleshoot` 
+- **Winner**: `troubleshoot`
 
 **Example 2**: "Show me a query for errors on this panel"
+
 - `explain_panel`: 80 (this panel) - 30 (query penalty) = 50
 - `generate_query`: 80 (query for) + 10 (errors keyword) = 90
-- **Winner**: `generate_query` 
+- **Winner**: `generate_query`
 
 **Example 3**: "What's this?"
+
 - `analyze_dashboard`: 0 (no clear signals)
 - `explain_panel`: 0 (no clear signals)
 - `generate_query`: 0 (no clear signals)
 - `troubleshoot`: 0 (no clear signals)
-- **Winner**: None (general chat) 
+- **Winner**: None (general chat)
 
 ---
 
@@ -294,10 +318,11 @@ if newSkillScore > 0 {
 ### Testing
 
 Always test with:
--  Happy path (clear triggers)
--  Edge cases (ambiguous queries)
--  Conflicting signals (multiple skills match)
--  No match (general chat fallback)
+
+- Happy path (clear triggers)
+- Edge cases (ambiguous queries)
+- Conflicting signals (multiple skills match)
+- No match (general chat fallback)
 
 ---
 
@@ -354,11 +379,11 @@ Reason: No matching patterns, uses general chat
 
 ## Summary
 
- **Scoring-based** system replaces first-match
- **Context-aware** detection uses dashboard/panel state
- **Confidence logging** for debugging and tuning
- **Penalty system** prevents false positives
- **Easy to extend** with new skills
- **Fast and lightweight** performance
+**Scoring-based** system replaces first-match
+**Context-aware** detection uses dashboard/panel state
+**Confidence logging** for debugging and tuning
+**Penalty system** prevents false positives
+**Easy to extend** with new skills
+**Fast and lightweight** performance
 
 The improved auto-detection makes Zagalin smarter at understanding user intent and activating the right skill automatically!

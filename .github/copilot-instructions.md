@@ -1,4 +1,3 @@
-
 # GitHub Copilot Instructions
 
 This file provides guidance to GitHub Copilot when generating code in this repository.
@@ -55,6 +54,7 @@ function buildPromQLQuery(expr: string, range: TimeRange): Query {
 ```
 
 **Core Principles:**
+
 - Don't create abstractions until you have 3+ similar uses
 - Delete unused code immediately
 - No commented code or "just in case" features
@@ -75,10 +75,10 @@ export interface QueryRequest {
 const response = await queryService.query(request);
 
 // ❌ Don't use 'any'
-function processData(data: any) { }  // Bad
+function processData(data: any) {} // Bad
 
 // ✅ Use proper types
-function processData(data: QueryResponse) { }  // Good
+function processData(data: QueryResponse) {} // Good
 ```
 
 ### React Patterns
@@ -131,18 +131,21 @@ backend.Logger.Info("Query executed",
 ### Critical Security Rules
 
 1. **Authentication & Authorization**
+
    - ✅ Always use user's security context for backend queries
    - ✅ Forward user auth cookies/headers to Grafana API
    - ❌ Never bypass Grafana's permission system
    - ❌ Never store API keys in frontend or localStorage
 
 2. **Input Validation**
+
    - ✅ Validate all user input on the backend
    - ✅ Sanitize LLM output before rendering (use DOMPurify)
    - ✅ Limit message sizes (max 50KB)
    - ❌ Don't trust frontend validation alone
 
 3. **Query Execution**
+
    - ✅ All datasource queries go through backend proxy
    - ✅ Backend forwards user identity to Grafana
    - ✅ Apply rate limiting per user (60 req/min default)
@@ -157,6 +160,7 @@ backend.Logger.Info("Query executed",
 ### Security Checklist
 
 When generating code that:
+
 - **Accepts user input** → Add validation
 - **Accesses data** → Check user permissions
 - **Makes external calls** → Use proper auth
@@ -170,7 +174,7 @@ When generating code that:
 
 ```typescript
 // ❌ Never hardcode credentials
-const apiKey = "sk-proj-...";
+const apiKey = 'sk-proj-...';
 
 // ✅ Use secure storage
 const apiKey = secureJsonData.apiKey;
@@ -187,6 +191,7 @@ backendProxy.query(userContext, query);
 ### Dual Storage System
 
 Conversations use fallback pattern:
+
 - **Primary**: Backend Go storage (file-based)
 - **Fallback**: Browser localStorage
 - **Migration**: Automatic on backend availability
@@ -196,6 +201,7 @@ Files: `src/services/conversationStorage.ts`, `pkg/plugin/storage.go`
 ### Context Manager
 
 Backend caches Prometheus/Loki/Tempo metadata:
+
 - Refreshes every N minutes (configurable)
 - Provides `/context/status` and `/context/refresh` endpoints
 - Reduces LLM token usage
@@ -205,6 +211,7 @@ Files: `pkg/plugin/context/*.go`
 ### Global Chat Mounting
 
 Floating chat uses portal pattern:
+
 - Mounts once in `globalChatMount.tsx`
 - Persists across Grafana navigation
 - Only displays on dashboard pages
@@ -214,6 +221,7 @@ Files: `src/globalChatMount.tsx`, `src/components/FloatingChat/`
 ### LLM Streaming
 
 Uses RxJS for streaming responses:
+
 - Frontend calls backend /llm/chat, backend calls grafana-llm-app streaming API
 - Backend proxies with guardrails
 - Supports function calling
@@ -261,7 +269,7 @@ export class MyService {
 
     // Call backend
     const response = await getBackendSrv().post('/api/plugins/.../resources/my-endpoint', {
-      data: param
+      data: param,
     });
 
     return response;
@@ -327,6 +335,7 @@ func TestMyEndpoint(t *testing.T) {
 ## Documentation
 
 All documentation is in `docs/`:
+
 - Architecture: `docs/development/architecture.md`
 - API Reference: `docs/api/`
 - Testing: `docs/testing/overview.md`

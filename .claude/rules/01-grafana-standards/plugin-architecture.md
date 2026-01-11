@@ -1,5 +1,5 @@
 ---
-paths: "**/*.{ts,tsx,go}"
+paths: '**/*.{ts,tsx,go}'
 ---
 
 # Grafana Plugin Development Standards
@@ -9,6 +9,7 @@ This document defines the official Grafana plugin development standards based on
 ## Plugin Architecture Requirements
 
 ### System Requirements
+
 - **Node.js**: >=22 (LTS version)
 - **Go**: >=1.21
 - **Grafana Version**: Target v10.0+ (minimum: 10.4.0 for this plugin)
@@ -16,7 +17,9 @@ This document defines the official Grafana plugin development standards based on
 - **Operating Systems**: Linux, macOS, Windows 10+ with WSL
 
 ### Plugin Types
+
 Grafana supports three primary plugin types:
+
 1. **Panel plugins**: Custom data visualization methods
 2. **Data source plugins**: Connections to databases/data sources
 3. **App plugins**: Integrated experiences combining multiple components
@@ -26,6 +29,7 @@ Grafana supports three primary plugin types:
 ## Project Structure Standards
 
 ### Frontend Structure
+
 ```
 src/
  components/          # React components (organized by feature)
@@ -37,6 +41,7 @@ src/
 ```
 
 ### Backend Structure
+
 ```
 pkg/
  main.go             # Binary entry point
@@ -47,6 +52,7 @@ pkg/
 ```
 
 ### Configuration Files
+
 ```
 .config/                # Build and tool configurations
  webpack/            # Webpack configuration
@@ -58,6 +64,7 @@ pkg/
 ## Build System Standards
 
 ### Frontend Build Commands
+
 - **Development**: `npm run dev` (watch mode with hot reload)
 - **Production**: `npm run build` (optimized bundle)
 - **Type checking**: `npm run typecheck`
@@ -66,12 +73,14 @@ pkg/
 - **E2E**: `npm run e2e` (Playwright tests)
 
 ### Backend Build Commands
+
 - **Build all targets**: `mage -v buildAll` (Linux, Darwin, Windows)
 - **Build single target**: `mage -v build`
 - **Run tests**: `mage -v coverage`
 - **List targets**: `mage -l`
 
 ### Development Workflow
+
 1. Start frontend watcher: `npm run dev`
 2. Start Grafana server: `npm run server` (Docker)
 3. Make changes (frontend hot-reloads automatically)
@@ -80,12 +89,14 @@ pkg/
 ## Backend Plugin Architecture
 
 ### Communication Pattern
+
 - Uses **HashiCorp Go Plugin System over gRPC**
 - Grafana launches plugins as isolated subprocesses
 - Provides stability (crashes don't affect Grafana)
 - Enforces security (sandboxed access)
 
 ### Core Backend Capabilities
+
 1. **Query data**: Handle dashboard/alerting queries, return data frames
 2. **Resources**: Custom HTTP endpoints for flexible integrations
 3. **Health checks**: Report plugin status (auto-invoked on data source test)
@@ -93,7 +104,9 @@ pkg/
 5. **Streaming**: Real-time data source queries
 
 ### Resource Handler Patterns
+
 Custom HTTP resources enable:
+
 - Authentication proxies
 - Auto-complete functionality
 - IoT device communication
@@ -101,6 +114,7 @@ Custom HTTP resources enable:
 - Server-Sent Events (SSE) for streaming
 
 **This plugin uses resource handlers extensively** for:
+
 - LLM chat endpoint (`/llm/chat`)
 - Conversation storage (`/storage/*`)
 - Query proxy with security pipeline (`/query`)
@@ -109,6 +123,7 @@ Custom HTTP resources enable:
 ## Data Frame Standards
 
 Grafana's data frame is the **universal data structure** for all data:
+
 - Columnar format (similar to Apache Arrow)
 - Type-safe with schema
 - Supports time series, tables, and logs
@@ -119,6 +134,7 @@ Grafana's data frame is the **universal data structure** for all data:
 ## Plugin Metadata (plugin.json)
 
 ### Required Fields
+
 ```json
 {
   "id": "your-org-plugin-name",
@@ -135,6 +151,7 @@ Grafana's data frame is the **universal data structure** for all data:
 ```
 
 ### Best Practices
+
 - Use semantic versioning (x.y.z)
 - Set minimum Grafana version in dependencies
 - Include clear description and screenshots
@@ -143,18 +160,21 @@ Grafana's data frame is the **universal data structure** for all data:
 ## Security Standards
 
 ### Plugin Signing
+
 - **Development**: Unsigned plugins work in development mode
 - **Production**: Plugins must be signed for distribution
 - **Tool**: Use `@grafana/sign-plugin` CLI
 - **Requirement**: `GRAFANA_ACCESS_POLICY_TOKEN` from Grafana Cloud
 
 ### Security Isolation
+
 - Plugins run in isolated subprocesses
 - Cannot access Grafana process memory
 - Limited to provided interfaces only
 - All configuration provided per request (stateless pattern)
 
 ### Backend Security Requirements
+
 - All queries use user's security context
 - Never store credentials in frontend
 - Use Grafana's secure storage for secrets
@@ -164,18 +184,21 @@ Grafana's data frame is the **universal data structure** for all data:
 ## Testing Standards
 
 ### Frontend Testing
+
 - **Unit tests**: Jest with React Testing Library
 - **Component coverage**: Test all public components
 - **E2E tests**: Playwright for critical user flows
 - **Run before commit**: `npm run test:ci`
 
 ### Backend Testing
+
 - **Unit tests**: Go testing package
 - **Coverage target**: >80% code coverage
 - **Integration tests**: Test HTTP handlers end-to-end
 - **Run before commit**: `mage -v coverage`
 
 ### E2E Testing Requirements
+
 - Test against multiple Grafana versions (CI matrix)
 - Use `@grafana/plugin-e2e` for Grafana-specific helpers
 - Mock external dependencies (LLM providers, data sources)
@@ -184,12 +207,14 @@ Grafana's data frame is the **universal data structure** for all data:
 ## Configuration Management
 
 ### Plugin Settings
+
 - Store in `plugin.json` or backend settings API
 - Use secure storage for API keys/tokens
 - Provide sensible defaults
 - Validate on backend (never trust frontend)
 
 ### User Preferences
+
 - Store per-user data with access control
 - Use backend storage for cross-device sync
 - Fallback to localStorage if backend unavailable
@@ -200,6 +225,7 @@ Grafana's data frame is the **universal data structure** for all data:
 ## Grafana SDK Integration
 
 ### Required Frontend Dependencies
+
 ```json
 {
   "@grafana/data": "^12.3.0",
@@ -210,6 +236,7 @@ Grafana's data frame is the **universal data structure** for all data:
 ```
 
 ### Required Backend Dependencies
+
 ```go
 import (
     "github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -217,6 +244,7 @@ import (
 ```
 
 ### Version Compatibility
+
 - Keep SDK versions aligned with target Grafana version
 - Test against minimum supported Grafana version
 - Use CI matrix to test multiple versions
@@ -224,6 +252,7 @@ import (
 ## Development Tools
 
 ### Recommended Tools
+
 - **@grafana/create-plugin**: Scaffold new plugins
 - **@grafana/sign-plugin**: Sign plugins for distribution
 - **grafana-toolkit**: Legacy tool (migrate to create-plugin)
@@ -231,6 +260,7 @@ import (
 - **Docker**: Local development environment
 
 ### IDE Setup
+
 - TypeScript language server
 - ESLint integration
 - Prettier integration
@@ -239,6 +269,7 @@ import (
 ## Distribution Standards
 
 ### Plugin Catalog Requirements
+
 - Signed plugin binary
 - Complete metadata in plugin.json
 - Screenshots and documentation
@@ -246,6 +277,7 @@ import (
 - README.md with setup instructions
 
 ### Versioning Strategy
+
 - Semantic versioning (major.minor.patch)
 - Breaking changes → major version bump
 - New features → minor version bump
@@ -254,28 +286,30 @@ import (
 ## Best Practices Summary
 
 ### DO:
- Use official Grafana SDK packages
- Follow Grafana's project structure
- Test against multiple Grafana versions
- Sign plugins before distribution
- Use data frames for all data
- Implement proper error handling
- Write comprehensive tests
- Use backend for sensitive operations
- Follow security best practices
- Keep dependencies up to date
+
+Use official Grafana SDK packages
+Follow Grafana's project structure
+Test against multiple Grafana versions
+Sign plugins before distribution
+Use data frames for all data
+Implement proper error handling
+Write comprehensive tests
+Use backend for sensitive operations
+Follow security best practices
+Keep dependencies up to date
 
 ### DON'T:
- Store credentials in frontend code
- Bypass Grafana's security context
- Use deprecated @grafana/toolkit
- Ship unsigned plugins to production
- Skip backend validation
- Trust client-side input
- Hardcode Grafana versions
- Ignore TypeScript errors
- Skip E2E tests
- Use non-standard project structure
+
+Store credentials in frontend code
+Bypass Grafana's security context
+Use deprecated @grafana/toolkit
+Ship unsigned plugins to production
+Skip backend validation
+Trust client-side input
+Hardcode Grafana versions
+Ignore TypeScript errors
+Skip E2E tests
+Use non-standard project structure
 
 ## Resources
 

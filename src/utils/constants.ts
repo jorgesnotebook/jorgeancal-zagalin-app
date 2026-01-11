@@ -1,0 +1,15 @@
+export const STREAMING_ANIMATION = {
+  CHARS_PER_SECOND: 100,
+  MS_PER_CHAR: 10,
+} as const;
+
+export const ARTIFACT_VALIDATION = {
+  MINIMUM_QUERY_LENGTH: 10,
+  MINIMUM_TRACE_ID_LENGTH: 16,
+  MINIMUM_TRACEQL_LENGTH: 5,
+} as const;
+
+export const LLM_CONFIG = {
+  DEFAULT_MODEL: 'gpt-4o-mini',
+  PLANNING_TEMPERATURE_OFFSET: 0.2,
+} as const;

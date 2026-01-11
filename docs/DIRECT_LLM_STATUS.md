@@ -1,6 +1,6 @@
 # Direct LLM API Mode - Status
 
-##  Coming Soon - Experimental Feature
+## Coming Soon - Experimental Feature
 
 The **Direct LLM API mode** is currently under development and **not fully tested**. This feature allows Zagalin backend to call OpenAI/Anthropic APIs directly without requiring grafana-llm-app.
 
@@ -8,9 +8,9 @@ The **Direct LLM API mode** is currently under development and **not fully teste
 
 ## Current Status
 
- **Status**: Experimental / Not Production-Ready
- **Last Updated**: 2026-01-03
- **Testing**: Incomplete
+**Status**: Experimental / Not Production-Ready
+**Last Updated**: 2026-01-03
+**Testing**: Incomplete
 
 ---
 
@@ -20,48 +20,52 @@ Direct LLM mode allows Zagalin to bypass grafana-llm-app and communicate directl
 
 ```
 
-   Frontend  
+   Frontend
 
-       
-       
 
-   Zagalin   
-   Backend   
 
-       
-       
 
-  OpenAI or  
-  Anthropic  
-  Direct API 
+   Zagalin
+   Backend
+
+
+
+
+  OpenAI or
+  Anthropic
+  Direct API
 
 ```
 
 ### Benefits (When Complete)
--  No grafana-llm-app dependency
--  Full security features (rate limiting, validation, audit)
--  Direct control over API calls
--  Bring your own API keys
+
+- No grafana-llm-app dependency
+- Full security features (rate limiting, validation, audit)
+- Direct control over API calls
+- Bring your own API keys
 
 ### Implementation Status
--  Backend client code exists (`pkg/plugin/llm_direct.go`)
--  Settings infrastructure in place
--  OpenAI and Anthropic API support
--  **NOT** fully tested
--  **NOT** battle-tested in production
--  Function calling may have issues
--  Error handling incomplete
+
+- Backend client code exists (`pkg/plugin/llm_direct.go`)
+- Settings infrastructure in place
+- OpenAI and Anthropic API support
+- **NOT** fully tested
+- **NOT** battle-tested in production
+- Function calling may have issues
+- Error handling incomplete
 
 ---
 
 ## Why Not Use It Yet?
 
 1. **Insufficient Testing**
+
    - Only basic manual testing performed
    - No automated test coverage for direct mode
    - Edge cases not validated
 
 2. **Production Risk**
+
    - May fail unexpectedly in real-world use
    - Error handling not robust
    - Recovery mechanisms incomplete
@@ -97,9 +101,10 @@ If you manually configure `llmBackend: "direct"` in settings, the backend will l
 
 ## Recommended Modes (Stable & Tested)
 
-### 1. Official Grafana Mode (Default) 
+### 1. Official Grafana Mode (Default)
 
 **Configuration:**
+
 ```json
 {
   "llmBackend": "grafana-llm"
@@ -107,25 +112,29 @@ If you manually configure `llmBackend: "direct"` in settings, the backend will l
 ```
 
 **Architecture:**
+
 - Frontend → `@grafana/llm` (for LLM calls)
 - Backend → Query validation, rate limiting, storage
 
 **Pros:**
--  No service account needed
--  Session-based auth
--  Backend security features work
--  **Fully tested and stable**
+
+- No service account needed
+- Session-based auth
+- Backend security features work
+- **Fully tested and stable**
 
 **Use When:**
+
 - You want the easiest setup
 - You have grafana-llm-app installed
 - You don't need full backend control over LLM calls
 
 ---
 
-### 2. Backend Proxy Mode (Production) 
+### 2. Backend Proxy Mode (Production)
 
 **Configuration:**
+
 ```json
 {
   "llmBackend": "backend-proxy",
@@ -134,15 +143,18 @@ If you manually configure `llmBackend: "direct"` in settings, the backend will l
 ```
 
 **Architecture:**
+
 - Frontend → Zagalin Backend → grafana-llm-app → LLM Provider
 
 **Pros:**
--  Full security pipeline
--  Complete audit trail
--  Rate limiting enforced
--  **Fully tested and production-ready**
+
+- Full security pipeline
+- Complete audit trail
+- Rate limiting enforced
+- **Fully tested and production-ready**
 
 **Use When:**
+
 - Production environment
 - Need full audit trail
 - Want centralized LLM configuration
@@ -154,6 +166,7 @@ If you manually configure `llmBackend: "direct"` in settings, the backend will l
 **Estimated Timeline**: TBD (To Be Determined)
 
 **Required Work:**
+
 1. Comprehensive testing with all providers (OpenAI, Anthropic, Azure OpenAI)
 2. Function calling validation
 3. Error handling improvements
@@ -162,6 +175,7 @@ If you manually configure `llmBackend: "direct"` in settings, the backend will l
 6. Documentation completion
 
 **Progress Tracking:**
+
 - Issue: (TBD - will be created when work begins)
 - Milestone: (TBD)
 
@@ -215,6 +229,7 @@ Test these scenarios and report issues:
 ### 4. Report Issues
 
 If you find bugs, please report them with:
+
 - Provider (OpenAI/Anthropic)
 - Model used
 - Error messages
@@ -228,10 +243,12 @@ If you find bugs, please report them with:
 **Don't use Direct LLM mode in production yet.** It's experimental and incomplete.
 
 **Use these instead:**
--  `grafana-llm` (default) - Easy, stable, tested
--  `backend-proxy` - Production-ready, full security
+
+- `grafana-llm` (default) - Easy, stable, tested
+- `backend-proxy` - Production-ready, full security
 
 **When it's ready**, we'll:
+
 - Enable the UI option
 - Remove experimental warnings
 - Update documentation
@@ -250,4 +267,4 @@ If you have questions about Direct LLM mode or need help choosing the right back
 ---
 
 **Last Updated**: 2026-01-03
-**Status**:  Experimental - Do Not Use in Production
+**Status**: Experimental - Do Not Use in Production

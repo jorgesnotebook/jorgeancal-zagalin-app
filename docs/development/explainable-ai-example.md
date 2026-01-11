@@ -53,8 +53,10 @@ Respond in markdown format. Use the emoji headings above to structure your answe
 When you use this prompt, Claude naturally produces:
 
 ```markdown
-##  Observation
+## Observation
+
 I can see from your dashboard context:
+
 - API latency (p95) increased from 200ms to 1.2s over the last hour
 - Database query duration increased 6x in the same period
 - No change in request volume (steady at 1000 req/min)
@@ -62,22 +64,27 @@ I can see from your dashboard context:
 
 **Data Quality Confidence: 90%** - Recent data from reliable sources
 
-##  Analysis
+## Analysis
+
 Key findings:
+
 - **80% of slow queries** target the users table
 - Query plans show **full table scans** instead of index usage
 - No evidence of lock contention (lock wait time is normal)
 - Connection pool utilization is at 60% (healthy)
 
-##  Hypothesis
+## Hypothesis
+
 Ranked by likelihood:
 
 1. **Missing database indexes (Confidence: 85%)**
+
    - Evidence: Full table scans in query plans
    - Timing: Correlates with increased data volume
    - Impact: 6x slowdown matches expected behavior
 
 2. **Query N+1 problem (Confidence: 40%)**
+
    - Would explain multiplier effect
    - But connection pool shows no saturation
    - Less likely given metrics
@@ -87,7 +94,8 @@ Ranked by likelihood:
    - Only users table affected
    - Very unlikely
 
-##  Conclusion
+## Conclusion
+
 **Answer: Add indexes to the users table**
 
 **Overall Confidence: 80%**
@@ -96,13 +104,16 @@ The primary cause is missing indexes on frequently queried columns.
 This is a high-confidence recommendation based on query execution
 plans and performance correlation.
 
-##  Verification
+## Verification
+
 To verify:
+
 1. Check query execution plans: `EXPLAIN SELECT * FROM users WHERE email = ?`
 2. Review recent schema changes in the last 7 days
 3. Test adding indexes in staging environment first
 
 Additional helpful data:
+
 - Slow query log from database
 - Recent deployment history
 - Table growth rate over time
@@ -230,14 +241,14 @@ export function parseReasoningResponse(markdownResponse: string): ExplainableRes
 function extractSources(text: string): string[] {
   const metricPattern = /`([a-z_][a-z0-9_]*)`/gi;
   const matches = text.matchAll(metricPattern);
-  return Array.from(matches, m => m[1]);
+  return Array.from(matches, (m) => m[1]);
 }
 
 function extractHighestConfidence(text: string): number {
   const matches = Array.from(text.matchAll(CONFIDENCE_PATTERN));
   if (matches.length === 0) return 0.7;
 
-  const confidences = matches.map(m => {
+  const confidences = matches.map((m) => {
     const num = m[0].match(/\d+/)?.[0];
     return num ? parseInt(num) / 100 : 0.7;
   });
@@ -248,15 +259,15 @@ function extractHighestConfidence(text: string): number {
 function extractMetricNames(text: string): string[] {
   const metricPattern = /`([a-z_][a-z0-9_]*)`/gi;
   const matches = text.matchAll(metricPattern);
-  return Array.from(new Set(Array.from(matches, m => m[1])));
+  return Array.from(new Set(Array.from(matches, (m) => m[1])));
 }
 
 function extractMainAnswer(markdown: string): string {
   const conclusionMatch = markdown.match(SECTION_PATTERNS.conclusion);
   if (!conclusionMatch) return markdown;
 
-  const lines = conclusionMatch[1].split('\n').filter(l => l.trim());
-  const answerLine = lines.find(l => l.includes('Answer:'));
+  const lines = conclusionMatch[1].split('\n').filter((l) => l.trim());
+  const answerLine = lines.find((l) => l.includes('Answer:'));
 
   if (answerLine) {
     return answerLine.replace(/\*\*Answer:\s*\*\*\s*/i, '').trim();
@@ -335,7 +346,7 @@ const [showReasoning, setShowReasoning] = useState(true);
   label="Show reasoning process"
   value={showReasoning}
   onChange={(e) => setShowReasoning(e.currentTarget.checked)}
-/>
+/>;
 ```
 
 ### 2. Test Queries
@@ -359,11 +370,12 @@ Try these test queries to see reasoning in action:
 ### 3. Verify Output
 
 Check that:
--  Reasoning sections are properly parsed
--  Confidence scores are extracted
--  Source metrics are identified
--  Main answer is clearly stated
--  Verification steps are provided
+
+- Reasoning sections are properly parsed
+- Confidence scores are extracted
+- Source metrics are identified
+- Main answer is clearly stated
+- Verification steps are provided
 
 ## Next Steps
 
@@ -375,18 +387,18 @@ Check that:
 
 ## Benefits of This Approach
 
- **Quick to implement** - No backend schema changes
- **Works with existing models** - Just prompt engineering
- **Backwards compatible** - Falls back gracefully
- **User-friendly** - Natural markdown formatting
- **Debuggable** - Clear structure makes issues obvious
+**Quick to implement** - No backend schema changes
+**Works with existing models** - Just prompt engineering
+**Backwards compatible** - Falls back gracefully
+**User-friendly** - Natural markdown formatting
+**Debuggable** - Clear structure makes issues obvious
 
 ## Limitations
 
- **Not guaranteed** - LLM might not always follow format
- **Parsing fragility** - Regex-based parsing can break
- **Token overhead** - Uses more tokens per request
- **Model dependent** - Works best with Claude/GPT-4
+**Not guaranteed** - LLM might not always follow format
+**Parsing fragility** - Regex-based parsing can break
+**Token overhead** - Uses more tokens per request
+**Model dependent** - Works best with Claude/GPT-4
 
 ## Migration Path to Structured JSON
 

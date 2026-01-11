@@ -20,6 +20,7 @@ This directory contains configuration and guidance for Claude Code (AI assistant
 ## Purpose
 
 This configuration enables Claude Code to:
+
 - Understand the project's architecture and patterns
 - Follow Grafana's official standards and best practices
 - Apply KISS (Keep It Simple, Stupid) methodology
@@ -37,7 +38,7 @@ Each rule file can specify which files it applies to using YAML frontmatter:
 
 ```markdown
 ---
-paths: "**/*.{ts,tsx}"
+paths: '**/*.{ts,tsx}'
 ---
 
 # TypeScript-specific rules
@@ -46,9 +47,11 @@ paths: "**/*.{ts,tsx}"
 ### Rule Files Overview
 
 #### 1. grafana-plugin-standards.md
+
 **Scope**: All code files (`**/*.{ts,tsx,go}`)
 
 **Content**:
+
 - Official Grafana plugin development standards
 - System requirements and project structure
 - Build system and development workflow
@@ -60,9 +63,11 @@ paths: "**/*.{ts,tsx}"
 **When Claude uses this**: Working with any plugin code, build configuration, or architecture decisions.
 
 #### 2. grafana-llm-integration.md
+
 **Scope**: Frontend and backend files (`{src/**/*.{ts,tsx},pkg/**/*.go}`)
 
 **Content**:
+
 - Official Grafana LLM integration patterns
 - `@grafana/llm` package usage
 - Model Context Protocol (MCP) for agents
@@ -74,9 +79,11 @@ paths: "**/*.{ts,tsx}"
 **When Claude uses this**: Working with LLM features, chat interfaces, or assistant functionality.
 
 #### 3. app-plugin-development.md
+
 **Scope**: Frontend and backend files (`{src/**/*.{ts,tsx},pkg/**/*.go}`)
 
 **Content**:
+
 - App plugin architecture and capabilities
 - Custom pages and navigation
 - Backend integration patterns
@@ -89,9 +96,11 @@ paths: "**/*.{ts,tsx}"
 **When Claude uses this**: Implementing app plugin features, custom pages, or backend resources.
 
 #### 4. clean-code-principles.md
+
 **Scope**: All code files (no specific path filter)
 
 **Content**:
+
 - KISS (Keep It Simple, Stupid) principles
 - Clean code practices (meaningful names, small functions)
 - Comment guidelines (explain WHY, not WHAT)
@@ -102,9 +111,11 @@ paths: "**/*.{ts,tsx}"
 **When Claude uses this**: Writing any new code or refactoring existing code.
 
 #### 5. code-quality-standards.md
+
 **Scope**: All code files (`**/*.{ts,tsx,js,jsx,go}`)
 
 **Content**:
+
 - Code formatting (Prettier, gofmt)
 - Linting (ESLint, golangci-lint)
 - Type safety (TypeScript, Go types)
@@ -120,6 +131,7 @@ paths: "**/*.{ts,tsx}"
 ### 1. KISS (Keep It Simple, Stupid)
 
 **Core tenets**:
+
 - Solve the actual problem without adding extra features
 - Wait for 3+ similar uses before creating abstractions
 - Delete unused code immediately (no "just in case")
@@ -129,6 +141,7 @@ paths: "**/*.{ts,tsx}"
 ### 2. Grafana Standards
 
 **Must follow**:
+
 - Use `@grafana/ui` components (never custom UI)
 - Use `@grafana/data` for data frames
 - Backend as Go subprocess (gRPC isolation)
@@ -139,6 +152,7 @@ paths: "**/*.{ts,tsx}"
 ### 3. Security First
 
 **Always**:
+
 - Validate input on backend (never trust frontend)
 - Sanitize output before rendering (XSS prevention)
 - Use user's security context for all operations
@@ -149,24 +163,27 @@ paths: "**/*.{ts,tsx}"
 ### 4. Testing Requirements
 
 **Quality gates**:
--  Type checking: `npm run typecheck`
--  Linting: `npm run lint`
--  Unit tests: >70% coverage
--  E2E tests: Critical user flows
--  Backend tests: >80% coverage
--  Build succeeds: Frontend + backend
+
+- Type checking: `npm run typecheck`
+- Linting: `npm run lint`
+- Unit tests: >70% coverage
+- E2E tests: Critical user flows
+- Backend tests: >80% coverage
+- Build succeeds: Frontend + backend
 
 ## Usage by Claude Code
 
 ### Automatic Loading
 
 Claude Code automatically loads:
+
 1. **CLAUDE.md** - Main project instructions
-2. **rules/*.md** - All markdown files in rules directory (recursively)
+2. **rules/\*.md** - All markdown files in rules directory (recursively)
 
 ### Memory Hierarchy
 
 **Priority order** (highest to lowest):
+
 1. Enterprise policy (if configured)
 2. Project memory (`.claude/CLAUDE.md`)
 3. Project rules (`.claude/rules/*.md`)
@@ -179,8 +196,9 @@ Rules with `paths` frontmatter only apply when working with matching files:
 
 ```markdown
 ---
-paths: "src/**/*.{ts,tsx}"
+paths: 'src/**/*.{ts,tsx}'
 ---
+
 # Rules here only apply to TypeScript files in src/
 ```
 
@@ -189,6 +207,7 @@ paths: "src/**/*.{ts,tsx}"
 ### Before Starting Work
 
 Claude reads:
+
 - Project overview from CLAUDE.md
 - Relevant rules based on files being modified
 - Documentation from `docs/` folder
@@ -196,6 +215,7 @@ Claude reads:
 ### During Development
 
 Claude applies:
+
 - KISS principles from clean-code-principles.md
 - Grafana standards from grafana-plugin-standards.md
 - Plugin-specific patterns from app-plugin-development.md
@@ -204,6 +224,7 @@ Claude applies:
 ### Before Committing
 
 Claude runs (via TodoWrite or explicit request):
+
 ```bash
 npm run typecheck
 npm run lint
@@ -211,6 +232,7 @@ npm run test:ci
 ```
 
 And verifies:
+
 - No TypeScript errors
 - No linting issues
 - Tests pass
@@ -223,6 +245,7 @@ And verifies:
 ```
 
 Runs complete pipeline:
+
 1. Clean install (`npm ci`)
 2. Type checking
 3. Linting
@@ -240,7 +263,7 @@ Create new `.md` files in `.claude/rules/`:
 
 ```markdown
 ---
-paths: "src/components/**/*.tsx"
+paths: 'src/components/**/*.tsx'
 ---
 
 # Component-Specific Rules
@@ -280,17 +303,20 @@ Create `.claude/CLAUDE.local.md` for personal preferences (gitignored):
 ## Resources
 
 ### Official Documentation
+
 - **Claude Code Memory**: https://code.claude.com/docs/en/memory
 - **Grafana Plugin Tools**: https://grafana.com/developers/plugin-tools/
 - **grafana-llm-app**: https://github.com/grafana/grafana-llm-app
 
 ### Project Documentation
+
 - **Features Overview**: `../docs/FEATURES_OVERVIEW.md`
 - **API Endpoints**: `../docs/api/ENDPOINTS.md`
 - **Architecture**: `../docs/development/architecture.md`
 - **CI Pipeline**: `../docs/CI_PIPELINE_SUMMARY.md`
 
 ### Community
+
 - **Grafana Community Forum**: https://community.grafana.com/
 - **Plugin Development Channel**: Slack #plugin-development
 - **GitHub Discussions**: https://github.com/grafana/grafana/discussions
@@ -300,6 +326,7 @@ Create `.claude/CLAUDE.local.md` for personal preferences (gitignored):
 ### Updating Rules
 
 When Grafana releases new versions or standards:
+
 1. Update relevant rule files in `.claude/rules/`
 2. Test with Claude Code to verify rules are clear
 3. Commit changes to version control
@@ -307,6 +334,7 @@ When Grafana releases new versions or standards:
 ### Rule Review
 
 **Quarterly review checklist**:
+
 - [ ] Are rules still relevant to current codebase?
 - [ ] Do rules reflect latest Grafana standards?
 - [ ] Are there new patterns that should be documented?
@@ -316,6 +344,7 @@ When Grafana releases new versions or standards:
 ## Contributing
 
 When adding new features or patterns:
+
 1. Document the pattern in appropriate rule file
 2. Include code examples
 3. Reference official Grafana docs when applicable

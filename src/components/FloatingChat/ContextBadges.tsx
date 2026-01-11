@@ -33,12 +33,22 @@ export function ContextBadges({ contexts, onRemove, readOnly = false }: ContextB
               <Tooltip
                 content={
                   <div>
-                    <div><strong>Dashboard:</strong> {context.dashboardTitle}</div>
-                    {context.panelId && <div><strong>Panel:</strong> {context.panelTitle || `Panel ${context.panelId}`}</div>}
-                    {context.timeFrom && context.timeTo && (
-                      <div><strong>Time Range:</strong> {context.timeFrom} → {context.timeTo}</div>
+                    <div>
+                      <strong>Dashboard:</strong> {context.dashboardTitle}
+                    </div>
+                    {context.panelId && (
+                      <div>
+                        <strong>Panel:</strong> {context.panelTitle || `Panel ${context.panelId}`}
+                      </div>
                     )}
-                    <div><strong>Added:</strong> {new Date(context.addedAt).toLocaleString()}</div>
+                    {context.timeFrom && context.timeTo && (
+                      <div>
+                        <strong>Time Range:</strong> {context.timeFrom} → {context.timeTo}
+                      </div>
+                    )}
+                    <div>
+                      <strong>Added:</strong> {new Date(context.addedAt).toLocaleString()}
+                    </div>
                   </div>
                 }
               >

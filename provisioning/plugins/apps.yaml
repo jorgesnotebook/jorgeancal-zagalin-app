@@ -5,9 +5,9 @@ apps:
     enabled: true
     pinned: true
     jsonData:
-      llmBackend: "grafana-llm-app"
-      llmProvider: "openai"
-      llmModel: "gpt-4o-mini"
+      llmBackend: 'grafana-llm-app'
+      llmProvider: 'openai'
+      llmModel: 'gpt-4o-mini'
       maxRequestsPerMinute: 60
       monthlyBudgetUSD: 100
       contextRefreshMinutes: 60

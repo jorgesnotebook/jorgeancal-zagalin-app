@@ -38,14 +38,14 @@ class ConfigurationManager {
   }
 
   notifyObservers(key: string, value: any): void {
-    this.observers.forEach(fn => fn(key, value));
+    this.observers.forEach((fn) => fn(key, value));
   }
 }
 
 //  GOOD - Simple and direct
 const config = {
   apiUrl: 'https://api.example.com',
-  timeout: 5000
+  timeout: 5000,
 };
 ```
 
@@ -59,9 +59,9 @@ const config = {
 //  BAD - Unnecessarily complex
 function getUserName(user: User): string {
   return user?.profile?.personalInfo?.displayName ??
-         user?.profile?.personalInfo?.firstName && user?.profile?.personalInfo?.lastName
-           ? `${user.profile.personalInfo.firstName} ${user.profile.personalInfo.lastName}`
-           : user?.account?.username ?? 'Anonymous';
+    (user?.profile?.personalInfo?.firstName && user?.profile?.personalInfo?.lastName)
+    ? `${user.profile.personalInfo.firstName} ${user.profile.personalInfo.lastName}`
+    : user?.account?.username ?? 'Anonymous';
 }
 
 //  GOOD - Simple and clear
@@ -155,6 +155,7 @@ function fetchData(url: string): Promise<Response> {
 ```
 
 **When to add a dependency**:
+
 1. Solves a complex problem (e.g., markdown parsing)
 2. Widely used and well-maintained
 3. No reasonable built-in alternative
@@ -304,6 +305,7 @@ if len(allowedFunctions) == 0 {
 ```
 
 **When to comment**:
+
 - Complex algorithms or non-obvious logic
 - Important edge cases or gotchas
 - Security-critical code sections
@@ -311,6 +313,7 @@ if len(allowedFunctions) == 0 {
 - Performance optimizations with trade-offs
 
 **When NOT to comment**:
+
 - Function signatures (use clear names instead)
 - Variable declarations (use descriptive names)
 - Simple loops or conditionals
@@ -324,7 +327,7 @@ if len(allowedFunctions) == 0 {
 //  BAD - Error handling for internal functions
 function add(a: number, b: number): number {
   if (typeof a !== 'number' || typeof b !== 'number') {
-    throw new Error('Invalid arguments');  // TypeScript already ensures this
+    throw new Error('Invalid arguments'); // TypeScript already ensures this
   }
   return a + b;
 }
@@ -356,7 +359,7 @@ function processData(data: Data): Result {
   if (USE_NEW_ALGORITHM) {
     return newAlgorithm(data);
   } else {
-    return oldAlgorithm(data);  // Dead code
+    return oldAlgorithm(data); // Dead code
   }
 }
 
@@ -367,6 +370,7 @@ function processData(data: Data): Result {
 ```
 
 **When backward compatibility IS needed**:
+
 - Public APIs with external consumers
 - Database schema migrations
 - Plugin versions with different capabilities
@@ -402,6 +406,7 @@ type Config struct {
 ### When to Refactor
 
 **DO refactor when**:
+
 - You see duplicate code in 3+ places
 - A function exceeds 30 lines
 - You need to add comments to explain complex logic
@@ -409,6 +414,7 @@ type Config struct {
 - Tests are difficult to write
 
 **DON'T refactor when**:
+
 - Code works and is clear enough
 - You're changing functionality at the same time (refactor separately)
 - The abstraction would be used only once or twice
@@ -426,7 +432,11 @@ type Config struct {
 ```typescript
 // BEFORE - Complex and hard to understand
 function processRequest(req: Request): Response {
-  if (req.type === 'A' && req.status === 'active' || req.type === 'B' && req.priority > 5 || req.type === 'C' && req.user.role === 'admin') {
+  if (
+    (req.type === 'A' && req.status === 'active') ||
+    (req.type === 'B' && req.priority > 5) ||
+    (req.type === 'C' && req.user.role === 'admin')
+  ) {
     if (req.data && req.data.length > 0) {
       const results = [];
       for (let i = 0; i < req.data.length; i++) {
@@ -450,17 +460,17 @@ function processRequest(req: Request): Response {
     return { success: false, error: 'Invalid request' };
   }
 
-  const results = req.data
-    .filter(item => item.valid)
-    .map(item => transform(item));
+  const results = req.data.filter((item) => item.valid).map((item) => transform(item));
 
   return { success: true, data: results };
 }
 
 function isEligibleRequest(req: Request): boolean {
-  return (req.type === 'A' && req.status === 'active') ||
-         (req.type === 'B' && req.priority > 5) ||
-         (req.type === 'C' && req.user.role === 'admin');
+  return (
+    (req.type === 'A' && req.status === 'active') ||
+    (req.type === 'B' && req.priority > 5) ||
+    (req.type === 'C' && req.user.role === 'admin')
+  );
 }
 
 function hasValidData(req: Request): boolean {
@@ -473,21 +483,25 @@ function hasValidData(req: Request): boolean {
 When reviewing code (or your own code), ask:
 
 ### Simplicity
+
 - [ ] Is this the simplest solution that works?
 - [ ] Can I remove any code without losing functionality?
 - [ ] Are there any premature abstractions?
 
 ### Readability
+
 - [ ] Can someone unfamiliar with this code understand it quickly?
 - [ ] Are variable and function names descriptive?
 - [ ] Is the function small enough (< 30 lines)?
 
 ### Maintainability
+
 - [ ] Will this be easy to change later?
 - [ ] Are edge cases documented?
 - [ ] Are there tests for this code?
 
 ### Necessity
+
 - [ ] Is this feature actually needed?
 - [ ] Can we use an existing solution instead?
 - [ ] Are all dependencies necessary?
@@ -495,16 +509,19 @@ When reviewing code (or your own code), ask:
 ## Anti-Patterns to Avoid
 
 ### 1. God Objects
+
 Classes/modules that do everything.
 
 **Solution**: Split into focused, single-responsibility modules.
 
 ### 2. Premature Optimization
+
 Optimizing before knowing there's a performance problem.
 
 **Solution**: Make it work, then profile, then optimize.
 
 ### 3. Magic Numbers
+
 Unexplained numeric constants in code.
 
 ```typescript
@@ -518,11 +535,13 @@ if (user.age > MINIMUM_AGE && user.status === STATUS_ACTIVE) { ... }
 ```
 
 ### 4. Long Parameter Lists
+
 Functions with 5+ parameters.
 
 **Solution**: Group related parameters into objects.
 
 ### 5. Duplicate Code
+
 Copy-pasted code blocks.
 
 **Solution**: Extract common logic into shared functions (when used 3+ times).
@@ -530,11 +549,13 @@ Copy-pasted code blocks.
 ## Summary: KISS in Practice
 
 **Simple is not**:
+
 - Fewer features → It's the right features, clearly implemented
 - Less code → It's clear code that solves the problem
 - No abstractions → It's abstractions when they reduce complexity
 
 **Simple is**:
+
 - Easy to understand
 - Easy to change
 - Easy to test

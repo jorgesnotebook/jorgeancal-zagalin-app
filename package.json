@@ -10,6 +10,8 @@
     "lint": "eslint --cache .",
     "lint:fix": "npm run lint -- --fix && prettier --write --list-different .",
     "e2e": "playwright test",
+    "e2e:matrix": "./scripts/e2e-matrix-local.sh",
+    "e2e:matrix:quick": "./scripts/e2e-matrix-local.sh 10.4.0 12.0.0",
     "server": "docker compose up --build",
     "sign": "npx --yes @grafana/sign-plugin@latest",
     "ci:local": "./ci-local.sh"

@@ -11,6 +11,7 @@ Be respectful and constructive in all interactions. We're here to build somethin
 ### Reporting Bugs
 
 If you find a bug, please create an issue with:
+
 - Clear description of the problem
 - Steps to reproduce
 - Expected vs actual behavior
@@ -20,6 +21,7 @@ If you find a bug, please create an issue with:
 ### Suggesting Features
 
 Feature requests are welcome! Please:
+
 - Check if the feature has already been requested
 - Describe the use case and benefits
 - Provide examples of how it would work
@@ -72,9 +74,15 @@ npm run lint
 # Unit tests
 npm run test
 
-# E2E tests
+# E2E tests (single Grafana version)
 npm run e2e
+
+# E2E matrix tests (all supported Grafana versions)
+npm run e2e:matrix              # Test all versions (10.0.0 - 12.0.0)
+npm run e2e:matrix:quick        # Quick test (10.4.0, 12.0.0)
 ```
+
+For comprehensive E2E matrix testing documentation, see [docs/E2E_MATRIX_TESTING.md](docs/E2E_MATRIX_TESTING.md).
 
 ### Local Testing with Grafana
 
@@ -146,6 +154,7 @@ jorgeancal-zagalin-app/
 ## Release Process
 
 Releases are handled by maintainers:
+
 1. Version bump in package.json and plugin.json
 2. Update CHANGELOG.md
 3. Create git tag (e.g., `v1.0.0`)

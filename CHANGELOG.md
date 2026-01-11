@@ -7,9 +7,169 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+#### Evidence System
+
+- **Evidence extraction system removed** - Eliminated unused evidence extraction infrastructure (~3,364 lines)
+  - Removed backend evidence builders: `evidence.go`, `evidence_metrics.go`, `evidence_logs.go`, `evidence_traces.go`
+  - Removed test files: `evidence_*_test.go` (2,311 lines of test code)
+  - Removed frontend evidence type definitions from `assistantService.ts`
+  - Removed evidence building logic from `query_proxy.go` and `assistant_prompts.go`
+  - **Final cleanup**: Removed all cleanup comments referencing the deletion
+  - **Terminology fix**: Renamed "Evidence" section to "Artifacts" in `assistant.go` output (aligns with documented UX rules)
+  - Rationale: Evidence was generated but never displayed or used; aligns with "no evidence sections" UX philosophy
+  - Performance impact: Query execution ~50-100ms faster (evidence building overhead removed)
+  - See ADR: `docs/adr/003-remove-evidence-system.md`
+  - Related issue: `issues/high/005-resolve-evidence-system-architecture.md`
+
 ### Added
 
+#### Grafana Version Compatibility Detection
+
+- **Defensive Version Detection** - Automatic Grafana version detection with warnings for unsupported versions
+  - Frontend detection from `config.buildInfo.version` (primary)
+  - Backend detection via `X-Grafana-Version` HTTP header (optional)
+  - Graceful fallback to "unknown" if version unavailable (respects disabled reporting)
+  - **Minimum supported version**: Grafana 10.4.0
+  - **Privacy-respecting**: Only sends version data if available in Grafana
+- **Version Warning UI** - New `VersionWarning` component displays compatibility alerts
+  - Shows error alert for unsupported versions (< 10.4.0)
+  - Shows warning for unavailable version detection
+  - Displays in configuration page at top of settings
+  - Non-blocking: warnings are informational only
+- **Health Endpoint Enhancement** - Version info included in health check response
+  - New `version` object with: `detected`, `isAvailable`, `isSupported`, `minimumVersion`, `warnings`
+  - Enables monitoring and troubleshooting of version compatibility
+  - Example: `/api/plugins/jorgeancal-zagalin-app/health`
+- **Backend Version Middleware** - Automatic version extraction on all requests
+  - Wraps all HTTP handlers with version detection
+  - Caches detected version for session
+  - Logs warnings on first detection if unsupported
+- **Configuration-Based Control** - Features controlled by settings, not version
+  - Version detection is defensive (warns) not restrictive (blocks)
+  - User always controls features via plugin configuration
+  - Graceful degradation when version unavailable
+- **Comprehensive Testing** - Full test coverage for version detection
+  - Frontend: `versionDetector.test.ts` with 15+ test cases
+  - Backend: `version_test.go` with 40+ test cases
+  - Backend detector: `version_detector_test.go` with 10+ test cases
+  - Integration: `resources_test.go` health endpoint and middleware tests
+  - All tests passing with 100% coverage
+- **Files Added**:
+  - Backend: `pkg/plugin/version.go` (136 lines) - Version parsing and comparison
+  - Backend: `pkg/plugin/version_detector.go` (67 lines) - HTTP header extraction
+  - Frontend: `src/services/versionDetector.ts` (183 lines) - Version detection
+  - Frontend: `src/services/versionReporter.ts` (72 lines) - HTTP header helper
+  - Frontend: `src/components/VersionWarning/VersionWarning.tsx` (61 lines) - UI component
+  - Tests: `version_test.go`, `version_detector_test.go`, `versionDetector.test.ts` (587 lines total)
+  - Docs: `docs/VERSION_COMPATIBILITY.md` (400+ lines comprehensive guide)
+- **Total New Code**: ~1,270 lines (production + tests)
+- **Documentation**: Complete compatibility guide with troubleshooting and API reference
+- **Related Issue**: `issues/low/014-add-grafana-version-compatibility.md`
+
+#### LLM Semantic Query Validation (Experimental)
+
+- **Semantic Analysis** - AI-powered query validation beyond syntax checking
+  - Analyzes PromQL, LogQL, and TraceQL queries for performance issues
+  - Detects expensive operations, high cardinality, and best practice violations
+  - Provides actionable suggestions for query improvements
+  - Identifies potential security concerns and data exposure risks
+- **Two Operating Modes**:
+  - **Advisory Mode** (default): Provides warnings but allows all queries
+  - **Strict Mode**: Can block queries deemed unsafe by LLM
+- **Robust Implementation** with fail-open strategy:
+  - 5-second timeout per validation (queries proceed if timeout exceeded)
+  - Graceful error handling (errors log warnings but allow queries)
+  - Requires service account token for LLM API access
+  - Uses fast, cost-effective model (gpt-4o-mini, ~$0.00015/validation)
+- **New Backend Components**:
+  - `LLMClient.SimpleChat()` method for non-streaming synchronous LLM calls
+  - Enhanced `QueryValidator.callLLMForValidation()` with actual LLM integration
+  - LLM client initialization in app startup with service account token
+  - Comprehensive JSON response validation and error recovery
+- **Enhanced Configuration UI** with feature flag presentation:
+  - "EXPERIMENTAL" badge clearly marks beta status
+  - Detailed warnings about 1-5 second latency impact
+  - Cost transparency (~$0.00015 per query)
+  - Requirements checklist (service account token, LLM configuration)
+  - Fail-open behavior explained (errors don't block queries)
+  - Clear mode descriptions (Advisory vs Strict)
+  - Validation scope details (performance, best practices, security, improvements)
+- **Per-Feature Toggles** - Granular control over each validation type:
+  - Master switch: Enable/disable all query validation
+  - PromQL validation: Independent toggle
+  - LogQL validation: Independent toggle
+  - TraceQL validation: Independent toggle
+  - LLM semantic validation: Independent toggle
+  - Each can be enabled/disabled without affecting others
+- **Performance Considerations**:
+  - Pattern-based validation runs first (instant)
+  - LLM validation only runs if pattern validation passes
+  - Aggressive timeout prevents hanging queries
+  - Uses lightweight model to minimize cost and latency
+- **Files Modified**:
+  - Backend: `pkg/plugin/llm_client.go` (+94 lines) - New SimpleChat method
+  - Backend: `pkg/plugin/app.go` (+5 lines) - LLM client initialization
+  - Backend: `pkg/plugin/query_validation.go` (+68 lines) - Real LLM integration
+  - Frontend: `src/components/AppConfig/AppConfig.tsx` (+95 lines) - Enhanced UI
+- **Total Changes**: ~262 lines added
+- **Testing**: All existing tests pass, implementation validated
+- **Documentation**: Inline code comments and UI warnings explain behavior
+- **Related Issue**: `issues/medium/007-complete-or-remove-stub-features.md` (LLM validation)
+
+#### Async Error Handling Improvements
+
+- **Run Cleanup Tracking** - Added cleanup status tracking to RunState with three new fields:
+  - `CleanupScheduledAt`: Timestamp when cleanup was scheduled
+  - `CleanupError`: Error encountered during cleanup (if any)
+  - `CleanupStatus`: Current status ("scheduled", "cleaning", "cleaned", "failed")
+- **ScheduleCleanup Method** - New tracked cleanup method in RunManager that:
+  - Logs all cleanup operations with full context
+  - Tracks cleanup status through state transitions
+  - Handles errors gracefully without silent failures
+  - Replaces unsafe defer goroutine in `assistant.go:746-749` (CRITICAL FIX)
+- **Reference Dashboard Retry Logic** - Dashboard fetching now retries with exponential backoff:
+  - Max 3 retry attempts
+  - Exponential backoff: 5s, 10s, 20s
+  - Status tracking with `dashboardFetchStatus` struct
+  - Detailed logging of each attempt and final result
+- **Health Endpoint Enhancement** - CheckHealth now includes JSONDetails with background job status:
+  - Context manager last updated timestamp
+  - Run manager active run count
+  - Reference dashboard fetch status, attempts, and errors
+  - Enables monitoring and debugging of background services
+- **Comprehensive Testing** - Added 3 new test cases for cleanup tracking:
+  - `TestScheduleCleanup`: Verifies cleanup is scheduled and executes
+  - `TestScheduleCleanupNonExistentRun`: Tests error handling for invalid runs
+  - `TestScheduleCleanupStatusTracking`: Validates status transitions
+- **Impact**: Eliminated silent failures in 2 critical background goroutines, improved observability
+- **Related Issue**: `issues/low/011-improve-async-error-handling.md`
+
+#### Query Governance
+
+- **Time Range Clamping** - Prevents expensive queries by limiting the maximum time range
+  - Configurable max time range in hours (default: 24 hours, 0 = unlimited)
+  - Supports relative times (`now-5m`, `now-1h`, `now-7d`) and absolute times (RFC3339, Unix timestamps)
+  - Automatic format preservation (relative times stay relative)
+  - Graceful failure (logs warning but doesn't reject query if parsing fails)
+  - Full audit logging with user context for compliance
+  - Integrated into security pipeline (after rate limiting, before validation)
+  - Files: `pkg/plugin/guardrails.go`, `pkg/plugin/query_proxy.go`, `src/components/AppConfig/AppConfig.tsx`
+  - Tests: `pkg/plugin/guardrails_test.go` - 40+ test cases covering all scenarios
+
 ### Changed
+
+#### Security: User Identity Hashing
+
+- **BREAKING CHANGE**: Replaced FNV-1a (32-bit, non-cryptographic) with SHA-256 (64-bit) for user identity hashing
+  - Previous: `hash/fnv.New32a()` → 32-bit hash with collision risk at ~65K users
+  - New: `crypto/sha256` truncated to 64 bits → collision resistance up to ~4B users
+  - Impact: Audit log user IDs will change for existing users after upgrade
+  - Migration: Username is still logged alongside hash for correlation
+  - Security improvement: Prevents collision attacks, ensures cryptographic security
+  - Files: `pkg/plugin/query_proxy.go`, `pkg/plugin/user_identity_test.go`
+  - Issue: #004 - Fix User Identity Hashing Security Issue
 
 ### Fixed
 
@@ -22,6 +182,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 #### OpenTelemetry Enhancements
+
 - **Automatic Label Discovery System** - Detects which OTel label naming convention is used in each datasource
   - Supports multiple variations: `service_name`, `service.name`, `app`, `job`, etc.
   - Works with Prometheus (underscore/dot notation), Loki, and Tempo (`span.service.name`, `resource.service.name`)
@@ -31,6 +192,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Documentation: `docs/OTEL_LABEL_DISCOVERY.md`
 
 #### Conditional OTel Features
+
 - OTel parameters in LLM tools only appear when `otelEnforcement.enabled: true`
 - System prompts dynamically include OTel context based on enforcement flag
 - Query injection only active when enforcement enabled
@@ -39,6 +201,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 #### Code Quality Improvements
+
 - Refactored duplicated OTel extraction logic into DRY helper functions
 - Simplified query building with single-responsibility functions
 - Removed unnecessary `discoverLogQLLabels()` wrapper function (KISS principle)
@@ -48,6 +211,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 #### Security
+
 - **CVE-2025-15284** - Updated `qs` package from 6.14.0 to 6.14.1 (high severity vulnerability)
 - Added npm override to force secure version across all transitive dependencies
 
@@ -60,6 +224,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 #### Authentication
+
 - **Service Account Token Support** - Optional but recommended for production deployments
   - Backend settings field for storing service account token securely
   - Frontend configuration UI with clear setup instructions
@@ -68,17 +233,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Files: `pkg/plugin/settings.go`, `pkg/plugin/assistant.go`, `src/components/AppConfig/AppConfig.tsx`
 
 #### Developer Experience
+
 - Comprehensive documentation system with feature inventory, API reference, and configuration guides
 - Privacy-conscious usage logging with signal type detection (metrics/logs/traces/dashboard/investigation)
 - Frontend orchestration system for structured investigation workflows with planning and step execution
 - Artifact extraction and display for queries, links, and trace IDs
 
 ### Changed
+
 - Disabled Direct API configuration option in UI (still available via backend for future use)
 - Enhanced LLM integration with smart routing between dashboard questions and investigations
 - Improved authentication flow with better error messages and debug logging
 
 ### Fixed
+
 - TypeScript type consistency across ExecutionPlan interfaces
 - Linting errors in frontend orchestration components
 - React effect setState warnings with async wrappers and proper ref usage
@@ -96,6 +264,7 @@ Zagalin 0.0.2 introduces comprehensive security features that make it safe to de
 #### Security & Governance
 
 **Query Validation System** - Pattern-based validation for all query languages
+
 - Manual pattern-based validation for PromQL, LogQL, and TraceQL (zero external dependencies)
 - Syntax validation with balanced braces and operator detection
 - Complexity scoring to prevent expensive queries (configurable max complexity)
@@ -110,6 +279,7 @@ Zagalin 0.0.2 introduces comprehensive security features that make it safe to de
 - Files: `pkg/plugin/query_validation.go` (450 lines), `pkg/plugin/query_validation_test.go` (560 lines)
 
 **OpenTelemetry Scope Enforcement** - Automatic service and environment labeling
+
 - Enforces `service_name` and `deployment_environment_name` in all queries
 - Configurable defaults and validation rules per organization
 - Two enforcement modes:
@@ -119,6 +289,7 @@ Zagalin 0.0.2 introduces comprehensive security features that make it safe to de
 - Works seamlessly with PromQL, LogQL, and TraceQL
 - Audit logging for all scope enforcement actions
 - Example transformation:
+
   ```promql
   # Before
   rate(http_requests_total[5m])
@@ -126,9 +297,11 @@ Zagalin 0.0.2 introduces comprehensive security features that make it safe to de
   # After (with enforcement)
   rate(http_requests_total{service_name="my-service",deployment_environment_name="production"}[5m])
   ```
+
 - Files: `pkg/plugin/otel_enforcement.go` (343 lines)
 
 **Datasource Governance** - Allowlist system for approved datasources
+
 - Restrict queries to approved Prometheus/Loki/Tempo instances
 - Per-organization datasource control
 - Default datasource fallback when no preference specified
@@ -138,18 +311,21 @@ Zagalin 0.0.2 introduces comprehensive security features that make it safe to de
 - Files: `pkg/plugin/datasource.go`, integrated into `pkg/plugin/query_proxy.go`
 
 **Six-Step Security Pipeline** - Comprehensive query validation flow
+
 1. **Authentication**: Extract user identity (user ID, org ID, email) from Grafana context
 2. **Rate Limiting**: Token bucket algorithm (60 req/min default, configurable per user)
 3. **Datasource Allowlist**: Verify datasource is approved for this organization
 4. **Query Validation**: Pattern-based injection prevention and complexity limits
 5. **OTel Scope Enforcement**: Inject service_name and deployment_environment_name
 6. **Query Execution**: Forward to Grafana with full audit trail
+
 - Every step logs actions with full user context for compliance
 - Files: `pkg/plugin/query_proxy.go` (457 lines)
 
 #### Storage & Persistence
 
 **Conversation History Management** - Dual-tier storage with automatic migration
+
 - **Backend Storage**: File-based storage with per-user isolation
   - User-specific storage directories (`$GF_PLUGIN_APP_DATA_PATH/user_<login>_<hash>/`)
   - Conversation CRUD operations (Create, Read, Update, Delete)
@@ -175,6 +351,7 @@ Zagalin 0.0.2 introduces comprehensive security features that make it safe to de
 #### Developer Experience
 
 **AI Development Tools** - Standardized configurations for AI assistants
+
 - **Claude Code** (`.claude/CLAUDE.md`, 500+ lines):
   - Complete architecture reference
   - Development philosophy (KISS principle, security-first)
@@ -194,6 +371,7 @@ Zagalin 0.0.2 introduces comprehensive security features that make it safe to de
 - Makes AI assistants immediately productive with context
 
 **Local CI Pipeline** - Run full CI checks locally before pushing
+
 - `ci-local.sh` script:
   - Runs: npm ci → typecheck → lint → test:ci → build → mage coverage → mage buildAll → plugin validation
   - Catches issues before CI/CD runs
@@ -209,6 +387,7 @@ Zagalin 0.0.2 introduces comprehensive security features that make it safe to de
 #### Backend Improvements
 
 **Privacy-Conscious Usage Logging** - Track usage without exposing queries
+
 - Signal type detection: metrics, logs, traces, dashboard, investigation, general
 - Detects from dashboard context (datasource types) and message keywords
 - Never logs actual query content or message text
@@ -282,30 +461,31 @@ Zagalin 0.0.2 introduces comprehensive security features that make it safe to de
 ```json
 {
   "queryValidation": {
-    "enabled": false,                    // Master switch for all validation
-    "enablePromqlValidation": false,     // Toggle PromQL validation
-    "enableLogqlValidation": false,      // Toggle LogQL validation
-    "enableTraceqlValidation": false,    // Toggle TraceQL validation
-    "strictMode": false,                 // true = reject, false = sanitize
-    "maxQueryComplexity": 50,            // Max complexity score
-    "allowedFunctions": [],              // PromQL function allowlist (empty = all allowed)
-    "logValidationAttempts": true        // Log all validation events
+    "enabled": false, // Master switch for all validation
+    "enablePromqlValidation": false, // Toggle PromQL validation
+    "enableLogqlValidation": false, // Toggle LogQL validation
+    "enableTraceqlValidation": false, // Toggle TraceQL validation
+    "strictMode": false, // true = reject, false = sanitize
+    "maxQueryComplexity": 50, // Max complexity score
+    "allowedFunctions": [], // PromQL function allowlist (empty = all allowed)
+    "logValidationAttempts": true // Log all validation events
   },
   "otelEnforcement": {
-    "enabled": false,                    // Master switch
-    "requireServiceName": true,          // Enforce service_name label
-    "requireEnvironmentName": true,      // Enforce deployment_environment_name label
-    "defaultServiceName": "unknown",     // Default if not specified
+    "enabled": false, // Master switch
+    "requireServiceName": true, // Enforce service_name label
+    "requireEnvironmentName": true, // Enforce deployment_environment_name label
+    "defaultServiceName": "unknown", // Default if not specified
     "defaultEnvironmentName": "unknown", // Default if not specified
-    "rejectIfNoScope": false,            // true = reject, false = inject defaults
-    "validationOnlyMode": false          // true = warn only, false = enforce
+    "rejectIfNoScope": false, // true = reject, false = inject defaults
+    "validationOnlyMode": false // true = warn only, false = enforce
   },
-  "allowedDatasources": [],              // Empty = all allowed, ["uid1", "uid2"] = allowlist
-  "defaultDatasource": ""                // Default datasource UID if none specified
+  "allowedDatasources": [], // Empty = all allowed, ["uid1", "uid2"] = allowlist
+  "defaultDatasource": "" // Default datasource UID if none specified
 }
 ```
 
 **Recommended Production Settings**:
+
 ```json
 {
   "queryValidation": {
@@ -313,7 +493,7 @@ Zagalin 0.0.2 introduces comprehensive security features that make it safe to de
     "enablePromqlValidation": true,
     "enableLogqlValidation": true,
     "enableTraceqlValidation": true,
-    "strictMode": true,                  // Reject invalid queries
+    "strictMode": true, // Reject invalid queries
     "maxQueryComplexity": 50,
     "logValidationAttempts": true
   },
@@ -323,13 +503,9 @@ Zagalin 0.0.2 introduces comprehensive security features that make it safe to de
     "requireEnvironmentName": true,
     "defaultServiceName": "your-service-name",
     "defaultEnvironmentName": "production",
-    "rejectIfNoScope": true              // Strict enforcement
+    "rejectIfNoScope": true // Strict enforcement
   },
-  "allowedDatasources": [
-    "prometheus-prod-uid",
-    "loki-prod-uid",
-    "tempo-prod-uid"
-  ]
+  "allowedDatasources": ["prometheus-prod-uid", "loki-prod-uid", "tempo-prod-uid"]
 }
 ```
 
@@ -346,6 +522,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 #### Core Features
 
 **Context-Aware Chat** - AI assistant understands your current Grafana context
+
 - Dashboard awareness:
   - Dashboard UID, title, tags
   - Panel list with types and queries
@@ -362,6 +539,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 - Files: `src/services/contextService.ts`, `src/services/useGrafanaContext.ts`
 
 **Floating Chat Interface** - Global chat button on every dashboard
+
 - Portal-based mounting (persists across Grafana navigation)
 - Appears on all dashboard pages (`/d/:uid/`)
 - Collapsible sidebar with conversation list
@@ -372,6 +550,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 - Files: `src/globalChatMount.tsx`, `src/components/FloatingChat/`
 
 **Full Chat Page** - Dedicated page for extended conversations
+
 - Available at Apps → Zagalin → Chat
 - Full-screen chat experience
 - Same context awareness as floating chat
@@ -381,6 +560,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 #### LLM Integration
 
 **Provider-Agnostic Support** - Works with any LLM through grafana-llm-app
+
 - Supported providers:
   - OpenAI (GPT-4, GPT-3.5)
   - Azure OpenAI
@@ -391,6 +571,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 - Files: `pkg/plugin/llm_client.go`, `src/services/assistantService.ts`
 
 **System Prompt Engineering** - Senior Staff SRE persona
+
 - Prompt defines Zagalin as experienced SRE with years of on-call experience
 - Emphasizes:
   - Reliability > Performance > Features
@@ -401,6 +582,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 - Files: `pkg/plugin/assistant_prompts.go`
 
 **Skills System** - Auto-detected user intent
+
 - **explain_panel**: Explains what a dashboard panel shows
   - Analyzes query, datasource, visualization type
   - Interprets current data and trends
@@ -417,6 +599,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 - Files: `pkg/plugin/assistant_prompts.go` (skill detection logic)
 
 **Function Calling** - Structured tool execution
+
 - Available tools:
   - `navigate_to_dashboard`: Navigate to specific dashboard by UID
   - `create_promql_query`: Generate and validate PromQL queries
@@ -428,6 +611,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 #### Query Generation
 
 **PromQL Generation** - Natural language to Prometheus queries
+
 - Understands metric names and label selectors
 - Suggests aggregations (sum, rate, avg, max, min)
 - Function recommendations (rate, increase, histogram_quantile)
@@ -437,6 +621,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
   - Output: `histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{service="api"}[5m]))`
 
 **LogQL Generation** - Natural language to Loki log queries
+
 - Log stream selector generation
 - Filter operators (|=, !=, |~, !~)
 - Parser suggestions (json, logfmt, pattern)
@@ -446,6 +631,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
   - Output: `{service="payment"} |= "error" | json`
 
 **TraceQL Generation** - Natural language to Tempo trace queries
+
 - Span attribute filters
 - Resource selectors
 - Duration and status filters
@@ -457,6 +643,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 #### Backend Services
 
 **Context Manager** - Extracts and caches observability context
+
 - Prometheus metric discovery:
   - Extracts metric names from Prometheus API
   - Label enumeration for common metrics
@@ -474,6 +661,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 - Files: `pkg/plugin/context/manager.go`, `pkg/plugin/context/metrics.go`, `pkg/plugin/context/logs.go`, `pkg/plugin/context/traces.go`
 
 **Rate Limiting** - Token bucket algorithm per user
+
 - Default: 60 requests/minute per user
 - Configurable per organization
 - Budget tracking for LLM costs
@@ -481,6 +669,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 - Files: `pkg/plugin/guardrails.go`
 
 **Health Monitoring** - Status endpoints for observability
+
 - `GET /health` - Plugin health check (uptime, version, status)
 - `GET /settings` - Current plugin configuration
 - grafana-llm-app availability detection
@@ -489,6 +678,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 #### Configuration
 
 **Plugin Settings** - Flexible configuration system
+
 - **LLM Backend Mode**:
   - `grafana-llm-app`: Use Grafana's LLM App plugin (recommended)
   - `direct`: Call LLM providers directly with API keys (future)
@@ -509,6 +699,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 ### Architecture
 
 **Hybrid Plugin** - React frontend + Go backend
+
 - **Frontend**:
   - React 18 with TypeScript
   - Grafana UI components (@grafana/ui)
@@ -526,6 +717,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
   - Backend: `pkg/`
 
 **Security-First Design**
+
 - No credential storage (uses Grafana's secure storage)
 - Session-based authentication (forwarded from Grafana)
 - User context in all datasource queries (respects Grafana permissions)
@@ -534,6 +726,7 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 - Files: `pkg/plugin/query_proxy.go` (security pipeline)
 
 **Testing Infrastructure**
+
 - **Frontend Unit Tests**: Jest with React Testing Library
   - Component tests
   - Service tests
@@ -576,10 +769,10 @@ Zagalin 0.0.1 establishes the core foundation: a context-aware AI assistant that
 
 ## Version History Summary
 
-| Version | Release Date | Theme | Major Features | Code Changes |
-|---------|-------------|-------|----------------|--------------|
-| 0.0.2 | 2025-12-27 | Security & Governance | Query validation, OTel enforcement, datasource governance, conversation history, AI dev tools, usage logging | +3,000 lines |
-| 0.0.1 | 2025-12-24 | Foundation | Context-aware chat, floating UI, query generation, skills system, LLM integration, testing infrastructure | Initial release (~8,000 lines) |
+| Version | Release Date | Theme                 | Major Features                                                                                               | Code Changes                   |
+| ------- | ------------ | --------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------ |
+| 0.0.2   | 2025-12-27   | Security & Governance | Query validation, OTel enforcement, datasource governance, conversation history, AI dev tools, usage logging | +3,000 lines                   |
+| 0.0.1   | 2025-12-24   | Foundation            | Context-aware chat, floating UI, query generation, skills system, LLM integration, testing infrastructure    | Initial release (~8,000 lines) |
 
 ---
 
@@ -621,41 +814,41 @@ All security features are opt-in. Add these to your plugin configuration:
 **Migration Steps**:
 
 1. **Update Plugin**:
+
    ```bash
    grafana-cli plugins upgrade jorgeancal-zagalin-app
    # or restart Grafana if using Docker/K8s
    ```
 
 2. **Review Security Features**:
+
    - Read query validation documentation in `.claude/CLAUDE.md`
    - Understand OTel enforcement impact on existing queries
    - Identify approved datasources for allowlist
 
 3. **Gradual Rollout** (recommended):
+
    - **Week 1**: Enable validation in validation-only mode
      ```json
      {
-       "queryValidation": {"enabled": true, "strictMode": false, "logValidationAttempts": true},
-       "otelEnforcement": {"enabled": true, "validationOnlyMode": true}
+       "queryValidation": { "enabled": true, "strictMode": false, "logValidationAttempts": true },
+       "otelEnforcement": { "enabled": true, "validationOnlyMode": true }
      }
      ```
    - **Week 2**: Review logs, adjust allowlists and defaults
    - **Week 3**: Enable strict mode
      ```json
      {
-       "queryValidation": {"strictMode": true},
-       "otelEnforcement": {"rejectIfNoScope": true, "validationOnlyMode": false}
+       "queryValidation": { "strictMode": true },
+       "otelEnforcement": { "rejectIfNoScope": true, "validationOnlyMode": false }
      }
      ```
 
 4. **Configure Datasource Governance** (optional but recommended):
+
    ```json
    {
-     "allowedDatasources": [
-       "prometheus-prod-uid",
-       "loki-prod-uid",
-       "tempo-prod-uid"
-     ],
+     "allowedDatasources": ["prometheus-prod-uid", "loki-prod-uid", "tempo-prod-uid"],
      "defaultDatasource": "prometheus-prod-uid"
    }
    ```

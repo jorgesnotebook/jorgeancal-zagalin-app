@@ -1,12 +1,12 @@
 ---
-paths: "**/*"
+paths: '**/*'
 ---
 
 # Architecture Tour - Zagalin Plugin
 
 A visual walkthrough of how this plugin works, with ASCII diagrams and code pointers.
 
-##  High-Level Architecture
+## High-Level Architecture
 
 ```mermaid
 graph TB
@@ -32,12 +32,13 @@ graph TB
 ```
 
 **Key Points**:
+
 - Frontend: React 18 + TypeScript
 - Backend: Go 1.21+ (runs as subprocess)
 - Communication: HTTP via Grafana Plugin SDK
 - LLM: Proxied through grafana-llm-app
 
-##  Directory Structure
+## Directory Structure
 
 ```
 jorgeancal-zagalin-app/
@@ -48,18 +49,18 @@ jorgeancal-zagalin-app/
        AppConfig/            # Configuration UI
        FloatingChat/         # Global floating chat button
        AskPanel/             # Dashboard panel component
-   
+
     pages/                    # Page components
        ChatPage.tsx          # Full-screen chat interface
        ConfigPage/           # Plugin configuration
        AssistantChatPage.tsx # AI assistant chat
-   
+
     services/                 # Business logic
        conversationStorage.ts    # Dual-tier storage
        contextService.ts         # Extract Grafana context
        assistantService.ts       # LLM API client
        zagalinTools.ts           # Function calling handlers
-   
+
     hooks/                    # Custom React hooks
     types/                    # TypeScript type definitions
     module.tsx                # Plugin entry point
@@ -102,11 +103,12 @@ jorgeancal-zagalin-app/
 ```
 
 **Code Volume**:
+
 - Frontend: ~3,725 lines (services)
 - Backend: ~7,887 lines
 - Total: 11,600+ lines of code
 
-##  Request Flow Diagrams
+## Request Flow Diagrams
 
 ### 1. User Sends Chat Message
 
@@ -139,6 +141,7 @@ sequenceDiagram
 ```
 
 **Files**:
+
 - Frontend: `src/pages/ChatPage.tsx:45-78`
 - Service: `src/services/assistantService.ts:89-120`
 - Backend: `pkg/plugin/assistant.go:123-234`
@@ -163,6 +166,7 @@ graph TD
 ```
 
 **Security Layers**:
+
 1. **Rate Limiting**: 60 req/min per user (token bucket)
 2. **Allowlist**: Only approved datasources
 3. **Validation**: Injection prevention, complexity check
@@ -170,6 +174,7 @@ graph TD
 5. **Audit**: Full logging with user identity
 
 **Files**:
+
 - Pipeline: `pkg/plugin/query_proxy.go:156-289`
 - Validation: `pkg/plugin/query_validation.go:45-450`
 - Rate Limiting: `pkg/plugin/guardrails.go:78-134`
@@ -198,6 +203,7 @@ graph TD
 **Purpose**: Reduce LLM token usage by pre-extracting context
 
 **Files**:
+
 - Manager: `pkg/plugin/context/manager.go:34-189`
 - Prometheus: `pkg/plugin/context/metrics.go:23-145`
 - Loki: `pkg/plugin/context/logs.go:19-98`
@@ -220,16 +226,18 @@ graph TD
 ```
 
 **Fallback Strategy**:
+
 1. Try backend storage (preferred)
 2. If unavailable, use localStorage
 3. Auto-migrate localStorage → backend when available
 
 **Files**:
+
 - Facade: `src/services/conversationStorage.ts:23-167`
 - API Client: `src/services/storageApiClient.ts:19-89`
 - Backend: `pkg/plugin/storage.go:34-234`
 
-##  Frontend Architecture
+## Frontend Architecture
 
 ### Component Hierarchy
 
@@ -248,6 +256,7 @@ graph TD
 ```
 
 **Key Pattern**: **Portal Mounting**
+
 - `globalChatMount.tsx` creates global div
 - Mounts once when module loads
 - Persists across Grafana navigation
@@ -280,7 +289,7 @@ graph LR
 
 **Purpose**: Separate business logic from UI
 
-##  Backend Architecture
+## Backend Architecture
 
 ### Main Components
 
@@ -328,7 +337,7 @@ func (a *App) CallResource(ctx, req, sender) error {
 
 **Pattern**: Resource handler per feature
 
-##  Security Architecture
+## Security Architecture
 
 ### Multi-Layer Defense
 
@@ -345,7 +354,7 @@ graph TD
 
 **Defense in Depth**: Multiple independent layers
 
-##  Testing Architecture
+## Testing Architecture
 
 ```mermaid
 graph TD
@@ -361,11 +370,12 @@ graph TD
 ```
 
 **Test Pyramid**:
+
 - Many unit tests (fast, isolated)
 - Some E2E tests (slow, integrated)
 - Critical paths: 100% coverage
 
-##  Build Architecture
+## Build Architecture
 
 ### Frontend Build (Webpack)
 
@@ -401,7 +411,7 @@ graph TD
 **Build**: `mage -v buildAll`
 **Test**: `mage -v coverage`
 
-##  Integration Points
+## Integration Points
 
 ### With Grafana
 
@@ -446,9 +456,10 @@ graph LR
     Grafana --> Perms[User permissions<br/>enforced]
 ```
 
-##  Critical Files by Feature
+## Critical Files by Feature
 
 ### LLM Chat
+
 - Frontend: `src/pages/ChatPage.tsx`
 - Service: `src/services/assistantService.ts`
 - Backend: `pkg/plugin/assistant.go`
@@ -456,38 +467,44 @@ graph LR
 - Tools: `pkg/plugin/assistant_tools.go`
 
 ### Query Security
+
 - Handler: `pkg/plugin/query_proxy.go`
 - Validation: `pkg/plugin/query_validation.go`
 - Rate Limit: `pkg/plugin/guardrails.go`
 - OTel: `pkg/plugin/otel_enforcement.go`
 
 ### Storage
+
 - Frontend: `src/services/conversationStorage.ts`
 - Backend: `pkg/plugin/storage.go`
 
 ### Context
+
 - Manager: `pkg/plugin/context/manager.go`
 - Prometheus: `pkg/plugin/context/metrics.go`
 - Loki: `pkg/plugin/context/logs.go`
 
-##  Performance Characteristics
+## Performance Characteristics
 
 **Frontend**:
+
 - Bundle size: <1 MB (gzipped)
 - Initial load: <3 seconds
 - React hot reload: <1 second
 
 **Backend**:
+
 - Memory: <100 MB per instance
 - CPU: <50% average
 - Query latency: <200ms (p95)
 
 **LLM**:
+
 - Streaming: Real-time SSE
 - Context injection: <100ms overhead
 - Token optimization: Context pre-extraction
 
-##  Data Flow Summary
+## Data Flow Summary
 
 ```mermaid
 graph TD
@@ -505,6 +522,7 @@ graph TD
 ```
 
 **Key Patterns**:
+
 - Backend proxy for security
 - Dual-tier storage for reliability
 - Context caching for performance
@@ -512,14 +530,16 @@ graph TD
 
 ---
 
-##  Next Steps
+## Next Steps
 
 **Understand specific areas**:
+
 - Frontend tour: `.claude/rules/00-getting-started/frontend-tour.md`
 - Backend tour: `.claude/rules/00-getting-started/backend-tour.md`
 - Common tasks: `.claude/rules/00-getting-started/common-tasks.md`
 
 **Deep dive**:
+
 - LLM integration: `.claude/rules/03-integrations/llm-official.md`
 - Security pipeline: `.claude/rules/01-grafana-standards/security.md`
 - Testing: `.claude/rules/02-development/testing.md`

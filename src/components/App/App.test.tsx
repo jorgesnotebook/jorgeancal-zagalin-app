@@ -87,8 +87,11 @@ describe('Components/App', () => {
       </MemoryRouter>
     );
 
-    await waitFor(() => {
-      expect(getByPlaceholderText('Ask anything...')).toBeInTheDocument();
-    }, { timeout: 3000 });
+    await waitFor(
+      () => {
+        expect(getByPlaceholderText('Ask anything...')).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
   });
 });

@@ -6,14 +6,16 @@ import (
 )
 
 type PluginSettings struct {
-	LLMBackend string `json:"llmBackend"` 
+	LLMBackend string `json:"llmBackend"`
 
-	LLMProvider      string `json:"llmProvider"`      
-	LLMModel         string `json:"llmModel"`         
-	LLMEndpoint      string `json:"llmEndpoint"`      
-	LLMOrganization  string `json:"llmOrganization"`  
+	LLMProvider      string `json:"llmProvider"`
+	LLMModel         string `json:"llmModel"`
+	LLMEndpoint      string `json:"llmEndpoint"`
+	LLMOrganization  string `json:"llmOrganization"`
 
 	MaxRequestsPerMinute int     `json:"maxRequestsPerMinute"`
+	MaxQueriesPerRequest int     `json:"maxQueriesPerRequest"` // Maximum number of queries allowed per request
+	MaxQueryTimeRangeHours int   `json:"maxQueryTimeRangeHours"` // Maximum time range in hours (0 = unlimited)
 	MonthlyBudgetUSD     float64 `json:"monthlyBudgetUSD"`
 
 	ContextRefreshMinutes int `json:"contextRefreshMinutes"`
@@ -103,6 +105,12 @@ func applyDefaults(s *PluginSettings) {
 	if s.MaxRequestsPerMinute == 0 {
 		s.MaxRequestsPerMinute = 60
 	}
+	if s.MaxQueriesPerRequest == 0 {
+		s.MaxQueriesPerRequest = 10 // Default: 10 queries per request
+	}
+	if s.MaxQueryTimeRangeHours == 0 {
+		s.MaxQueryTimeRangeHours = 24 // Default: 24 hours
+	}
 	if s.MonthlyBudgetUSD == 0 {
 		s.MonthlyBudgetUSD = 100.0
 	}
@@ -150,6 +158,9 @@ func applyDefaults(s *PluginSettings) {
 func (s *Settings) Validate() error {
 	if s.MaxRequestsPerMinute < 0 {
 		return fmt.Errorf("max requests per minute must be >= 0")
+	}
+	if s.MaxQueryTimeRangeHours < 0 {
+		return fmt.Errorf("max query time range hours must be >= 0 (0 = unlimited)")
 	}
 	if s.MonthlyBudgetUSD < 0 {
 		return fmt.Errorf("monthly budget must be >= 0")

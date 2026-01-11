@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
@@ -666,10 +667,73 @@ Respond in JSON format:
 }
 
 func (v *QueryValidator) callLLMForValidation(ctx context.Context, prompt string) (string, error) {
+	// Check if LLM client is available
+	if v.app.llmClient == nil {
+		backend.Logger.Warn("LLM client not initialized, skipping semantic validation")
+		return `{"safe": true, "warnings": ["LLM validation unavailable - no service account token configured"], "suggestions": [], "reason": ""}`, nil
+	}
 
-	backend.Logger.Debug("LLM validation would be called here", "prompt", prompt)
+	// Check if settings are available
+	if v.app.settings == nil {
+		backend.Logger.Warn("Settings not initialized, skipping semantic validation")
+		return `{"safe": true, "warnings": ["LLM validation unavailable - settings not initialized"], "suggestions": [], "reason": ""}`, nil
+	}
 
-	return `{"safe": true, "warnings": [], "suggestions": [], "reason": ""}`, nil
+	// Set aggressive timeout for validation (max 5 seconds)
+	validationCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	backend.Logger.Debug("Calling LLM for semantic query validation")
+
+	// Prepare LLM request - use fast, cheap model for validation
+	model := v.app.settings.LLMModel
+	if model == "" {
+		model = "gpt-4o-mini" // Default to fast, cheap model
+	}
+
+	llmRequest := LLMStreamRequest{
+		Model: model,
+		Messages: []AssistantMessage{
+			{
+				Role:    "system",
+				Content: "You are a query validation expert. Respond only in valid JSON format.",
+			},
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+		Temperature: 0.0,   // Deterministic responses
+		MaxTokens:   500,   // Keep responses short
+		Stream:      false, // Non-streaming
+	}
+
+	// Call LLM with timeout
+	response, err := v.app.llmClient.SimpleChat(validationCtx, llmRequest)
+	if err != nil {
+		// FAIL-OPEN: On error, allow query but log warning
+		backend.Logger.Warn("LLM validation call failed, allowing query",
+			"error", err,
+			"mode", v.settings.LLMValidationMode,
+		)
+
+		// Return safe response with warning
+		return `{"safe": true, "warnings": ["LLM validation unavailable - service error"], "suggestions": [], "reason": ""}`, nil
+	}
+
+	backend.Logger.Debug("LLM validation completed", "responseLength", len(response))
+
+	// Validate response is valid JSON
+	var testJSON map[string]interface{}
+	if err := json.Unmarshal([]byte(response), &testJSON); err != nil {
+		backend.Logger.Warn("LLM returned invalid JSON, allowing query",
+			"error", err,
+			"response", response,
+		)
+		return `{"safe": true, "warnings": ["LLM validation returned invalid response"], "suggestions": [], "reason": ""}`, nil
+	}
+
+	return response, nil
 }
 
 func (v *QueryValidator) parseLLMValidationResponse(response string, result *QueryValidationResult) {

@@ -15,9 +15,7 @@ export interface DatasourceListResponse {
 
 export async function listDatasources(): Promise<DatasourceListResponse> {
   try {
-    return await getBackendSrv().get<DatasourceListResponse>(
-      getPluginApiUrl('/datasources')
-    );
+    return await getBackendSrv().get<DatasourceListResponse>(getPluginApiUrl('/datasources'));
   } catch (error: any) {
     console.error('Failed to fetch datasources:', error);
     return {

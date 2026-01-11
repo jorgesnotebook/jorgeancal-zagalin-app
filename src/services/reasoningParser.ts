@@ -111,7 +111,7 @@ export function parseReasoningResponse(markdownResponse: string): ExplainableRes
 
 function extractSources(text: string): string[] {
   const matches = text.matchAll(METRIC_PATTERN);
-  return Array.from(matches, m => m[1]);
+  return Array.from(matches, (m) => m[1]);
 }
 
 function extractHighestConfidence(text: string): number {
@@ -120,7 +120,7 @@ function extractHighestConfidence(text: string): number {
     return 0.7;
   }
 
-  const confidences = matches.map(m => {
+  const confidences = matches.map((m) => {
     const num = m[0].match(/\d+/)?.[0];
     return num ? parseInt(num, 10) / 100 : 0.7;
   });
@@ -130,7 +130,7 @@ function extractHighestConfidence(text: string): number {
 
 function extractMetricNames(text: string): string[] {
   const matches = text.matchAll(METRIC_PATTERN);
-  return Array.from(new Set(Array.from(matches, m => m[1])));
+  return Array.from(new Set(Array.from(matches, (m) => m[1])));
 }
 
 function extractMainAnswer(markdown: string): string {
@@ -139,8 +139,8 @@ function extractMainAnswer(markdown: string): string {
     return markdown;
   }
 
-  const lines = conclusionMatch[1].split('\n').filter(l => l.trim());
-  const answerLine = lines.find(l => l.includes('Answer:'));
+  const lines = conclusionMatch[1].split('\n').filter((l) => l.trim());
+  const answerLine = lines.find((l) => l.includes('Answer:'));
 
   if (answerLine) {
     return answerLine.replace(/\*\*Answer:\s*\*\*\s*/i, '').trim();
