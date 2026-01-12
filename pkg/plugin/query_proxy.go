@@ -309,16 +309,17 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if a.queryValidator != nil && a.settings != nil && a.settings.QueryValidation.Enabled {
-		dsTypeStr, err := a.getDatasourceType(req.Context(), req, queryReq.Datasource)
-		if err != nil {
-			backend.Logger.Warn("Failed to detect datasource type for validation",
-				"error", err,
-				"datasource", queryReq.Datasource,
-			)
-			dsTypeStr = "other"
-		}
+	// Detect datasource type once for both validation and query execution
+	dsTypeStr, err := a.getDatasourceType(req.Context(), req, queryReq.Datasource)
+	if err != nil {
+		backend.Logger.Warn("Failed to detect datasource type",
+			"error", err,
+			"datasource", queryReq.Datasource,
+		)
+		dsTypeStr = "other"
+	}
 
+	if a.queryValidator != nil && a.settings != nil && a.settings.QueryValidation.Enabled {
 		var dsType DatasourceType
 		switch dsTypeStr {
 		case "prometheus":
@@ -401,15 +402,7 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if a.settings != nil && a.settings.OtelEnforcement.Enabled {
-		dsTypeStr, err := a.getDatasourceType(req.Context(), req, queryReq.Datasource)
-		if err != nil {
-			backend.Logger.Warn("Failed to detect datasource type, using validation-only mode",
-				"error", err,
-				"datasource", queryReq.Datasource,
-			)
-			dsTypeStr = "other"
-		}
-
+		// Convert dsTypeStr to DatasourceType enum
 		var dsType DatasourceType
 		switch dsTypeStr {
 		case "prometheus":
@@ -482,7 +475,7 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 			req.Context(),
 			user,
 			queryReq.Datasource,
-			"other",
+			dsTypeStr,
 			query,
 			queryReq.TimeRange,
 		)
