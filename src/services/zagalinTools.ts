@@ -323,6 +323,12 @@ export async function executeToolCall(toolCall: ToolCall): Promise<any> {
     case 'explain_error':
       return { message: 'Error explanation delegated to LLM', args };
 
+    case 'execute_promql':
+      return executePromQL(args);
+
+    case 'execute_logql':
+      return executeLogQL(args);
+
     default:
       return { error: `Unknown tool: ${toolCall.function.name}` };
   }
@@ -761,5 +767,93 @@ function openExploreView(params: ExploreParams): NavigationResult {
   } catch (error) {
     console.error('Failed to construct explore URL:', error);
     return { success: false, error: 'Failed to construct URL' };
+  }
+}
+
+/**
+ * Execute PromQL query and return structured analytics
+ */
+async function executePromQL(params: any): Promise<any> {
+  const { datasourceUid, query, from, to, step } = params;
+
+  if (!datasourceUid || !query) {
+    return {
+      success: false,
+      error: 'Missing required parameters: datasourceUid and query',
+    };
+  }
+
+  try {
+    const { getBackendSrv } = await import('@grafana/runtime');
+
+    const response = await getBackendSrv().post(
+      '/api/plugins/jorgeancal-zagalin-app/resources/tools/execute_promql',
+      {
+        datasourceUid,
+        query,
+        from: from || 'now-15m',
+        to: to || 'now',
+        step: step || undefined,
+        serviceName: params.serviceName,
+        environmentName: params.environmentName,
+      }
+    );
+
+    return {
+      success: true,
+      ...response,
+    };
+  } catch (error: any) {
+    console.error('Failed to execute PromQL query:', error);
+    return {
+      success: false,
+      error: `Failed to execute PromQL query: ${error.message || 'Unknown error'}`,
+      query,
+      datasourceUid,
+    };
+  }
+}
+
+/**
+ * Execute LogQL query and return log analysis
+ */
+async function executeLogQL(params: any): Promise<any> {
+  const { datasourceUid, query, from, to, limit } = params;
+
+  if (!datasourceUid || !query) {
+    return {
+      success: false,
+      error: 'Missing required parameters: datasourceUid and query',
+    };
+  }
+
+  try {
+    const { getBackendSrv } = await import('@grafana/runtime');
+
+    const response = await getBackendSrv().post(
+      '/api/plugins/jorgeancal-zagalin-app/resources/tools/execute_logql',
+      {
+        datasourceUid,
+        query,
+        from: from || 'now-15m',
+        to: to || 'now',
+        limit: limit || 1000,
+        serviceName: params.serviceName,
+        environmentName: params.environmentName,
+      }
+    );
+
+    return {
+      success: true,
+      ...response,
+    };
+  } catch (error: any) {
+    console.error('Failed to execute LogQL query:', error);
+    return {
+      success: false,
+      error: `Failed to execute LogQL query: ${error.message || 'Unknown error'}`,
+      query,
+      datasourceUid,
+    };
   }
 }

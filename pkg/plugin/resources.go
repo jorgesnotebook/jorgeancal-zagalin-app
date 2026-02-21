@@ -160,6 +160,9 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("/runs/start", a.versionDetectionMiddleware(a.handleStartRun))
 	mux.HandleFunc("/runs/", a.versionDetectionMiddleware(a.handleRunRoutes))
+
+	mux.HandleFunc("/tools/execute_promql", a.versionDetectionMiddleware(a.handleExecutePromQL))
+	mux.HandleFunc("/tools/execute_logql", a.versionDetectionMiddleware(a.handleExecuteLogQL))
 }
 
 func (a *App) handleContextStatus(w http.ResponseWriter, req *http.Request) {
@@ -263,4 +266,106 @@ func (a *App) handleContextRefresh(w http.ResponseWriter, req *http.Request) {
 		"success": true,
 		"message": "Context refreshed successfully",
 	})
+}
+
+func (a *App) handleExecutePromQL(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract user identity
+	user, err := extractUserIdentity(req)
+	if err != nil {
+		sendErrorResponse(w, "Authentication required", err, http.StatusUnauthorized)
+		return
+	}
+
+	// Rate limiting
+	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
+		if !a.guardrails.rateLimiter.Allow(user.UserLogin) {
+			backend.Logger.Warn("Rate limit exceeded for execute_promql", "user", user.UserLogin)
+			sendErrorResponse(w, "Rate limit exceeded", fmt.Errorf("too many requests"), http.StatusTooManyRequests)
+			return
+		}
+	}
+
+	// Parse request body
+	var args map[string]interface{}
+	if err := json.NewDecoder(req.Body).Decode(&args); err != nil {
+		sendErrorResponse(w, "Invalid request body", err, http.StatusBadRequest)
+		return
+	}
+
+	// Execute PromQL query
+	result, err := a.executePromQL(req.Context(), args, user)
+	if err != nil {
+		backend.Logger.Error("PromQL execution failed",
+			"error", err,
+			"user", user.UserLogin,
+			"query", args["query"],
+		)
+		sendErrorResponse(w, "Query execution failed", err, http.StatusInternalServerError)
+		return
+	}
+
+	backend.Logger.Info("PromQL query executed successfully",
+		"user", user.UserLogin,
+		"query", args["query"],
+		"datasource", args["datasourceUid"],
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(result))
+}
+
+func (a *App) handleExecuteLogQL(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract user identity
+	user, err := extractUserIdentity(req)
+	if err != nil {
+		sendErrorResponse(w, "Authentication required", err, http.StatusUnauthorized)
+		return
+	}
+
+	// Rate limiting
+	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
+		if !a.guardrails.rateLimiter.Allow(user.UserLogin) {
+			backend.Logger.Warn("Rate limit exceeded for execute_logql", "user", user.UserLogin)
+			sendErrorResponse(w, "Rate limit exceeded", fmt.Errorf("too many requests"), http.StatusTooManyRequests)
+			return
+		}
+	}
+
+	// Parse request body
+	var args map[string]interface{}
+	if err := json.NewDecoder(req.Body).Decode(&args); err != nil {
+		sendErrorResponse(w, "Invalid request body", err, http.StatusBadRequest)
+		return
+	}
+
+	// Execute LogQL query
+	result, err := a.executeLogQL(req.Context(), args, user)
+	if err != nil {
+		backend.Logger.Error("LogQL execution failed",
+			"error", err,
+			"user", user.UserLogin,
+			"query", args["query"],
+		)
+		sendErrorResponse(w, "Query execution failed", err, http.StatusInternalServerError)
+		return
+	}
+
+	backend.Logger.Info("LogQL query executed successfully",
+		"user", user.UserLogin,
+		"query", args["query"],
+		"datasource", args["datasourceUid"],
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(result))
 }

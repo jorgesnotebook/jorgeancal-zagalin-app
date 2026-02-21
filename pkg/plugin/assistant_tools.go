@@ -244,6 +244,72 @@ var ZAGALIN_TOOLS = []Tool{
 			},
 		},
 	},
+	{
+		Type: "function",
+		Function: Function{
+			Name:        "execute_promql",
+			Description: "Execute a PromQL query against Prometheus and return structured analytics including trends, anomalies, min/max/avg values. CRITICAL: ALWAYS call this after generating a query when investigating metrics - do not generate a query and stop. This provides actual data for analysis.",
+			Parameters: ToolParameters{
+				Type: "object",
+				Properties: map[string]PropertyDefinition{
+					"datasourceUid": {
+						Type:        "string",
+						Description: "The Prometheus datasource UID",
+					},
+					"query": {
+						Type:        "string",
+						Description: "The PromQL query to execute (e.g., 'rate(http_requests_total[5m])')",
+					},
+					"from": {
+						Type:        "string",
+						Description: "Start time for query (e.g., 'now-15m', '2024-01-01T00:00:00Z'). Default: 'now-15m'",
+					},
+					"to": {
+						Type:        "string",
+						Description: "End time for query (e.g., 'now', '2024-01-01T01:00:00Z'). Default: 'now'",
+					},
+					"step": {
+						Type:        "string",
+						Description: "Query resolution step (e.g., '15s', '1m'). Optional - Grafana calculates if not provided",
+					},
+				},
+				Required: []string{"datasourceUid", "query"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: Function{
+			Name:        "execute_logql",
+			Description: "Execute a LogQL query against Loki and return log analysis including error rates, patterns, trends. CRITICAL: ALWAYS call this after generating a query when investigating logs - do not generate a query and stop. This provides actual log data for troubleshooting.",
+			Parameters: ToolParameters{
+				Type: "object",
+				Properties: map[string]PropertyDefinition{
+					"datasourceUid": {
+						Type:        "string",
+						Description: "The Loki datasource UID",
+					},
+					"query": {
+						Type:        "string",
+						Description: "The LogQL query to execute (e.g., '{namespace=\"production\"} |= \"error\"')",
+					},
+					"from": {
+						Type:        "string",
+						Description: "Start time for query (e.g., 'now-15m', '2024-01-01T00:00:00Z'). Default: 'now-15m'",
+					},
+					"to": {
+						Type:        "string",
+						Description: "End time for query (e.g., 'now', '2024-01-01T01:00:00Z'). Default: 'now'",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of log lines to return (default: 1000, max: 5000)",
+					},
+				},
+				Required: []string{"datasourceUid", "query"},
+			},
+		},
+	},
 }
 
 func GetTools(functionCallingEnabled bool, settings *Settings) []Tool {
@@ -260,6 +326,10 @@ func GetTools(functionCallingEnabled bool, settings *Settings) []Tool {
 			tools = append(tools, buildLogQLTool(settings))
 		} else if tool.Function.Name == "create_traceql_query" {
 			tools = append(tools, buildTraceQLTool(settings))
+		} else if tool.Function.Name == "execute_promql" {
+			tools = append(tools, buildExecutePromQLTool(settings))
+		} else if tool.Function.Name == "execute_logql" {
+			tools = append(tools, buildExecuteLogQLTool(settings))
 		} else {
 			tools = append(tools, tool)
 		}
@@ -401,6 +471,110 @@ func buildTraceQLTool(settings *Settings) Tool {
 				Type:       "object",
 				Properties: props,
 				Required:   []string{"traceSelector"},
+			},
+		},
+	}
+}
+
+func buildExecutePromQLTool(settings *Settings) Tool {
+	props := map[string]PropertyDefinition{
+		"datasourceUid": {
+			Type:        "string",
+			Description: "The Prometheus datasource UID",
+		},
+		"query": {
+			Type:        "string",
+			Description: "The PromQL query to execute (e.g., 'rate(http_requests_total[5m])')",
+		},
+		"from": {
+			Type:        "string",
+			Description: "Start time for query (e.g., 'now-15m', '2024-01-01T00:00:00Z'). Default: 'now-15m'",
+		},
+		"to": {
+			Type:        "string",
+			Description: "End time for query (e.g., 'now', '2024-01-01T01:00:00Z'). Default: 'now'",
+		},
+		"step": {
+			Type:        "string",
+			Description: "Query resolution step (e.g., '15s', '1m'). Optional - Grafana calculates if not provided",
+		},
+	}
+
+	description := "Execute a PromQL query against Prometheus and return structured analytics including trends, anomalies, min/max/avg values. CRITICAL: ALWAYS call this after generating a query when investigating metrics - do not generate a query and stop. This provides actual data for analysis."
+
+	if settings != nil && settings.OtelEnforcement.Enabled {
+		props["serviceName"] = PropertyDefinition{
+			Type:        "string",
+			Description: "OpenTelemetry service.name for multi-tenant scoping (e.g., \"api-gateway\", \"payment-service\"). Extract from dashboard context if available.",
+		}
+		props["environmentName"] = PropertyDefinition{
+			Type:        "string",
+			Description: "OpenTelemetry deployment.environment.name (e.g., \"production\", \"staging\", \"development\"). Extract from dashboard context if available.",
+		}
+		description += " IMPORTANT: Include serviceName and environmentName for proper OTel scoping."
+	}
+
+	return Tool{
+		Type: "function",
+		Function: Function{
+			Name:        "execute_promql",
+			Description: description,
+			Parameters: ToolParameters{
+				Type:       "object",
+				Properties: props,
+				Required:   []string{"datasourceUid", "query"},
+			},
+		},
+	}
+}
+
+func buildExecuteLogQLTool(settings *Settings) Tool {
+	props := map[string]PropertyDefinition{
+		"datasourceUid": {
+			Type:        "string",
+			Description: "The Loki datasource UID",
+		},
+		"query": {
+			Type:        "string",
+			Description: "The LogQL query to execute (e.g., '{namespace=\"production\"} |= \"error\"')",
+		},
+		"from": {
+			Type:        "string",
+			Description: "Start time for query (e.g., 'now-15m', '2024-01-01T00:00:00Z'). Default: 'now-15m'",
+		},
+		"to": {
+			Type:        "string",
+			Description: "End time for query (e.g., 'now', '2024-01-01T01:00:00Z'). Default: 'now'",
+		},
+		"limit": {
+			Type:        "number",
+			Description: "Maximum number of log lines to return (default: 1000, max: 5000)",
+		},
+	}
+
+	description := "Execute a LogQL query against Loki and return log analysis including error rates, patterns, trends. CRITICAL: ALWAYS call this after generating a query when investigating logs - do not generate a query and stop. This provides actual log data for troubleshooting."
+
+	if settings != nil && settings.OtelEnforcement.Enabled {
+		props["serviceName"] = PropertyDefinition{
+			Type:        "string",
+			Description: "OpenTelemetry service.name for multi-tenant scoping (e.g., \"api-gateway\", \"payment-service\"). Extract from dashboard context if available.",
+		}
+		props["environmentName"] = PropertyDefinition{
+			Type:        "string",
+			Description: "OpenTelemetry deployment.environment.name (e.g., \"production\", \"staging\", \"development\"). Extract from dashboard context if available.",
+		}
+		description += " IMPORTANT: Include serviceName and environmentName for proper OTel scoping."
+	}
+
+	return Tool{
+		Type: "function",
+		Function: Function{
+			Name:        "execute_logql",
+			Description: description,
+			Parameters: ToolParameters{
+				Type:       "object",
+				Properties: props,
+				Required:   []string{"datasourceUid", "query"},
 			},
 		},
 	}
