@@ -11,8 +11,11 @@ import { isLLMReady } from '../services/llmHealthService';
 import { VectorSearchService } from '../services/vectorSearchService';
 import { type ToolCall } from '../services/zagalinTools';
 import { useZagalinConfig } from '../hooks/useZagalinConfig';
-import { streamAssistantChatRouted as streamAssistantChat } from '../services/assistantServiceRouter';
-import type { AssistantRequest, StreamChunk } from '../services/assistantService';
+import { LLMClient } from '../services/llm/LLMClient';
+import type { AssistantRequest, StreamChunk } from '../services/llm/types';
+
+// Singleton instance for reuse
+const llmClient = new LLMClient();
 import { ContextService } from '../services/contextService';
 
 interface Message {
@@ -142,7 +145,7 @@ function AssistantChatPage() {
       };
 
       let accumulatedContent = '';
-      const stream = streamAssistantChat(assistantRequest).pipe(
+      const stream = llmClient.chat(assistantRequest).pipe(
         finalize(() => {
           setIsStreaming(false);
         })

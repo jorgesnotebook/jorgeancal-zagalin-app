@@ -31,7 +31,10 @@ import { ContextBadges } from './ContextBadges';
 import { ReasoningDisplay } from './ReasoningDisplay';
 import { parseReasoningResponse } from '../../services/reasoningParser';
 import type { Artifact } from '../../services/runService';
-import { streamAssistantChatRouted as streamAssistantChat } from '../../services/assistantServiceRouter';
+import { LLMClient } from '../../services/llm/LLMClient';
+
+// Singleton instance for reuse
+const llmClient = new LLMClient();
 import { FrontendOrchestrator, type OrchestratorEvent } from '../../services/frontendOrchestrator';
 import type { ExecutionPlan } from '../../services/frontendPrompts';
 import { needsOrchestration } from '../../services/orchestrationDetector';
@@ -323,7 +326,7 @@ export function ChatPanel() {
     // Extract fresh context at the moment of asking (includes current URL, template vars, time range)
     const currentContext = await ContextService.getContext();
 
-    streamAssistantChat({
+    llmClient.chat({
       message: userMessage.content,
       enrichedMessage: enrichedPrompt,
       history: messages.map((m) => ({ role: m.role, content: m.content })),
@@ -428,7 +431,7 @@ export function ChatPanel() {
     // Extract fresh context at the moment of asking (includes current URL, template vars, time range)
     const currentContext = await ContextService.getContext();
 
-    streamAssistantChat({
+    llmClient.chat({
       message: enhancedQuery,
       history: messages.map((m) => ({ role: m.role, content: m.content })),
       context: {
