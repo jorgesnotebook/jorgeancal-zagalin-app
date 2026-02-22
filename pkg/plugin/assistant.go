@@ -16,6 +16,16 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
+// Maximum number of tool call iterations to prevent infinite loops
+const maxToolIterations = 10
+
+// Backend-executable tools that can be run directly without frontend
+var backendExecutableTools = map[string]bool{
+	"execute_promql":  true,
+	"execute_logql":   true,
+	"execute_traceql": true,
+}
+
 type AssistantRequest struct {
 	Message  string             `json:"message"`
 	History  []AssistantMessage `json:"history"`
@@ -305,13 +315,6 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		backend.Logger.Info("Tools included in LLM request", "tools", toolNames)
 	}
 
-	chunkChan, err := llmClient.StreamChat(ctx, llmReq, req)
-	if err != nil {
-		backend.Logger.Error("Failed to call grafana-llm-app", "error", err, "user", user.UserLogin)
-		sendErrorResponse(rw, "Failed to call LLM", err, http.StatusInternalServerError)
-		return
-	}
-
 	signalType := detectSignalType(assistantReq.Message, assistantReq.Context)
 
 	backend.Logger.Info("LLM chat request",
@@ -324,7 +327,349 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		"historyLength", len(assistantReq.History),
 	)
 
-	a.streamSSEResponseWithValidation(ctx, rw, chunkChan, skill, user)
+	// Run the agent loop with tool execution
+	a.runAgentLoop(ctx, rw, llmClient, llmReq, skill, user, req)
+}
+
+// runAgentLoop implements the agentic loop that executes backend tools and continues
+// until the LLM returns a final text response (no more tool calls)
+func (a *App) runAgentLoop(ctx context.Context, rw http.ResponseWriter, llmClient *LLMClient, llmReq LLMStreamRequest, skill string, user *UserIdentity, incomingReq *http.Request) {
+	// Set up SSE headers
+	rw.Header().Set("Content-Type", "text/event-stream")
+	rw.Header().Set("Cache-Control", "no-cache")
+	rw.Header().Set("Connection", "keep-alive")
+	rw.WriteHeader(http.StatusOK)
+
+	flusher, ok := rw.(http.Flusher)
+	if !ok {
+		backend.Logger.Error("ResponseWriter does not support flushing")
+		return
+	}
+
+	// Send skill metadata
+	if skill != "" {
+		metadataJSON, _ := json.Marshal(map[string]string{"skill": skill})
+		fmt.Fprintf(rw, "data: %s\n\n", string(metadataJSON))
+		flusher.Flush()
+	}
+
+	startTime := time.Now()
+	iteration := 0
+	messages := llmReq.Messages
+
+	for iteration < maxToolIterations {
+		iteration++
+
+		backend.Logger.Info("Agent loop iteration",
+			"iteration", iteration,
+			"messageCount", len(messages),
+			"user", user.UserLogin,
+		)
+
+		// Update request with current messages
+		llmReq.Messages = messages
+
+		// Make LLM call
+		chunkChan, err := llmClient.StreamChat(ctx, llmReq, incomingReq)
+		if err != nil {
+			backend.Logger.Error("Failed to call LLM in agent loop", "error", err, "iteration", iteration)
+			errorJSON, _ := json.Marshal(LLMStreamChunk{Error: fmt.Sprintf("LLM call failed: %v", err)})
+			fmt.Fprintf(rw, "data: %s\n\n", string(errorJSON))
+			flusher.Flush()
+			return
+		}
+
+		// Process the stream and collect tool calls
+		toolCalls, assistantContent, done := a.processAgentStream(ctx, rw, flusher, chunkChan, user)
+
+		if done {
+			// LLM returned final response, exit the loop
+			backend.Logger.Info("Agent loop completed with final response",
+				"iterations", iteration,
+				"duration", time.Since(startTime),
+				"user", user.UserLogin,
+			)
+			fmt.Fprintf(rw, "data: {\"done\":true}\n\n")
+			flusher.Flush()
+			return
+		}
+
+		// Check if we have backend-executable tool calls
+		backendToolCalls := a.filterBackendToolCalls(toolCalls)
+
+		if len(backendToolCalls) == 0 {
+			// No backend tools to execute, forward to frontend and exit
+			backend.Logger.Debug("No backend tools to execute, forwarding to frontend",
+				"toolCount", len(toolCalls),
+			)
+
+			// Forward remaining tool calls to frontend
+			for _, tc := range toolCalls {
+				chunkJSON, _ := json.Marshal(LLMStreamChunk{ToolCall: tc})
+				fmt.Fprintf(rw, "data: %s\n\n", string(chunkJSON))
+				flusher.Flush()
+			}
+
+			fmt.Fprintf(rw, "data: {\"done\":true}\n\n")
+			flusher.Flush()
+			return
+		}
+
+		// Execute backend tools and build tool result messages
+		toolResultMessages := a.executeBackendTools(ctx, rw, flusher, backendToolCalls, user)
+
+		// Add assistant message with tool calls
+		assistantMsg := AssistantMessage{
+			Role:    "assistant",
+			Content: assistantContent,
+		}
+		messages = append(messages, assistantMsg)
+
+		// Add tool result messages
+		for _, toolResult := range toolResultMessages {
+			messages = append(messages, toolResult)
+		}
+
+		// Forward non-backend tool calls to frontend
+		for _, tc := range toolCalls {
+			if !backendExecutableTools[tc.Function.Name] {
+				chunkJSON, _ := json.Marshal(LLMStreamChunk{ToolCall: tc})
+				fmt.Fprintf(rw, "data: %s\n\n", string(chunkJSON))
+				flusher.Flush()
+			}
+		}
+
+		backend.Logger.Info("Continuing agent loop with tool results",
+			"iteration", iteration,
+			"toolsExecuted", len(backendToolCalls),
+			"totalMessages", len(messages),
+		)
+	}
+
+	// Exceeded max iterations
+	backend.Logger.Warn("Agent loop exceeded max iterations",
+		"maxIterations", maxToolIterations,
+		"user", user.UserLogin,
+	)
+	errorJSON, _ := json.Marshal(LLMStreamChunk{
+		Chunk: "\n\n*Note: Maximum tool execution limit reached. Some analysis may be incomplete.*",
+	})
+	fmt.Fprintf(rw, "data: %s\n\n", string(errorJSON))
+	fmt.Fprintf(rw, "data: {\"done\":true}\n\n")
+	flusher.Flush()
+}
+
+// processAgentStream reads the LLM stream, forwards text chunks to the client,
+// and accumulates tool calls. Returns the collected tool calls, assistant content, and whether the stream is done.
+func (a *App) processAgentStream(ctx context.Context, rw http.ResponseWriter, flusher http.Flusher, chunkChan <-chan LLMStreamChunk, user *UserIdentity) ([]*ToolCallChunk, string, bool) {
+	toolCallAccumulator := make(map[string]*ToolCallChunk)
+	var completedToolCalls []*ToolCallChunk
+	var assistantContent strings.Builder
+	hasToolCalls := false
+
+	for {
+		select {
+		case <-ctx.Done():
+			backend.Logger.Info("Agent stream cancelled by client", "user", user.UserLogin)
+			return completedToolCalls, assistantContent.String(), true
+
+		case chunk, ok := <-chunkChan:
+			if !ok {
+				// Channel closed - check if we had tool calls
+				if hasToolCalls {
+					return completedToolCalls, assistantContent.String(), false
+				}
+				return completedToolCalls, assistantContent.String(), true
+			}
+
+			if chunk.Error != "" {
+				// Forward error to client
+				chunkJSON, _ := json.Marshal(chunk)
+				fmt.Fprintf(rw, "data: %s\n\n", string(chunkJSON))
+				flusher.Flush()
+				return completedToolCalls, assistantContent.String(), true
+			}
+
+			if chunk.Done {
+				if hasToolCalls {
+					return completedToolCalls, assistantContent.String(), false
+				}
+				return completedToolCalls, assistantContent.String(), true
+			}
+
+			// Handle text content - stream directly to client
+			if chunk.Chunk != "" {
+				assistantContent.WriteString(chunk.Chunk)
+				chunkJSON, _ := json.Marshal(chunk)
+				fmt.Fprintf(rw, "data: %s\n\n", string(chunkJSON))
+				flusher.Flush()
+			}
+
+			// Handle tool calls - accumulate them
+			if chunk.ToolCall != nil {
+				hasToolCalls = true
+
+				if existing, exists := toolCallAccumulator[chunk.ToolCall.ID]; exists {
+					existing.Function.Arguments += chunk.ToolCall.Function.Arguments
+				} else {
+					toolCallAccumulator[chunk.ToolCall.ID] = chunk.ToolCall
+				}
+
+				// Check if tool call is complete
+				accumulated := toolCallAccumulator[chunk.ToolCall.ID]
+				if isCompleteJSON(accumulated.Function.Arguments) {
+					completedToolCalls = append(completedToolCalls, accumulated)
+					delete(toolCallAccumulator, chunk.ToolCall.ID)
+				}
+			}
+		}
+	}
+}
+
+// filterBackendToolCalls returns only tool calls that can be executed on the backend
+func (a *App) filterBackendToolCalls(toolCalls []*ToolCallChunk) []*ToolCallChunk {
+	var backendCalls []*ToolCallChunk
+	for _, tc := range toolCalls {
+		if backendExecutableTools[tc.Function.Name] {
+			backendCalls = append(backendCalls, tc)
+		}
+	}
+	return backendCalls
+}
+
+// executeBackendTools executes the given tool calls on the backend and returns tool result messages
+func (a *App) executeBackendTools(ctx context.Context, rw http.ResponseWriter, flusher http.Flusher, toolCalls []*ToolCallChunk, user *UserIdentity) []AssistantMessage {
+	var results []AssistantMessage
+
+	for _, tc := range toolCalls {
+		// Send tool_start event
+		toolStartEvent := map[string]interface{}{
+			"type":      "tool_start",
+			"tool_name": tc.Function.Name,
+			"tool_id":   tc.ID,
+		}
+		toolStartJSON, _ := json.Marshal(toolStartEvent)
+		fmt.Fprintf(rw, "data: %s\n\n", string(toolStartJSON))
+		flusher.Flush()
+
+		// Parse tool arguments
+		var args map[string]interface{}
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+			backend.Logger.Error("Failed to parse tool arguments",
+				"tool", tc.Function.Name,
+				"error", err,
+			)
+			results = append(results, a.buildToolResultMessage(tc.ID, tc.Function.Name, fmt.Sprintf("Error: Failed to parse arguments: %v", err)))
+			a.sendToolEndEvent(rw, flusher, tc.ID, tc.Function.Name, false, "Failed to parse arguments")
+			continue
+		}
+
+		backend.Logger.Info("Executing backend tool",
+			"tool", tc.Function.Name,
+			"toolId", tc.ID,
+			"user", user.UserLogin,
+		)
+
+		// Execute the tool
+		var result string
+		var err error
+
+		switch tc.Function.Name {
+		case "execute_promql":
+			result, err = a.executePromQL(ctx, args, user)
+		case "execute_logql":
+			result, err = a.executeLogQL(ctx, args, user)
+		case "execute_traceql":
+			result, err = a.executeTraceQL(ctx, args, user)
+		default:
+			err = fmt.Errorf("unknown backend tool: %s", tc.Function.Name)
+		}
+
+		if err != nil {
+			backend.Logger.Error("Tool execution failed",
+				"tool", tc.Function.Name,
+				"toolId", tc.ID,
+				"error", err,
+				"user", user.UserLogin,
+			)
+			results = append(results, a.buildToolResultMessage(tc.ID, tc.Function.Name, fmt.Sprintf("Error: %v", err)))
+			a.sendToolEndEvent(rw, flusher, tc.ID, tc.Function.Name, false, err.Error())
+			continue
+		}
+
+		backend.Logger.Info("Tool execution succeeded",
+			"tool", tc.Function.Name,
+			"toolId", tc.ID,
+			"resultLength", len(result),
+			"user", user.UserLogin,
+		)
+
+		// Build tool result message
+		results = append(results, a.buildToolResultMessage(tc.ID, tc.Function.Name, result))
+
+		// Send tool_end event with summary
+		summary := a.buildToolResultSummary(tc.Function.Name, result)
+		a.sendToolEndEvent(rw, flusher, tc.ID, tc.Function.Name, true, summary)
+	}
+
+	return results
+}
+
+// buildToolResultMessage creates a tool result message for the LLM
+func (a *App) buildToolResultMessage(toolID, toolName, result string) AssistantMessage {
+	return AssistantMessage{
+		Role:    "tool",
+		Content: result,
+	}
+}
+
+// sendToolEndEvent sends a tool_end SSE event to the client
+func (a *App) sendToolEndEvent(rw http.ResponseWriter, flusher http.Flusher, toolID, toolName string, success bool, summary string) {
+	toolEndEvent := map[string]interface{}{
+		"type":      "tool_end",
+		"tool_name": toolName,
+		"tool_id":   toolID,
+		"success":   success,
+		"summary":   summary,
+	}
+	toolEndJSON, _ := json.Marshal(toolEndEvent)
+	fmt.Fprintf(rw, "data: %s\n\n", string(toolEndJSON))
+	flusher.Flush()
+}
+
+// buildToolResultSummary creates a short summary of the tool result for UI display
+func (a *App) buildToolResultSummary(toolName, result string) string {
+	// Parse the result to extract key metrics for the summary
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &data); err != nil {
+		return "Query completed"
+	}
+
+	switch toolName {
+	case "execute_promql":
+		if series, ok := data["series"].(float64); ok {
+			if latest, ok := data["latest"].(float64); ok {
+				return fmt.Sprintf("Found %d series, latest value: %.2f", int(series), latest)
+			}
+			return fmt.Sprintf("Found %d series", int(series))
+		}
+	case "execute_logql":
+		if lines, ok := data["returnedLines"].(float64); ok {
+			if errorCount, ok := data["errorCount"].(float64); ok {
+				return fmt.Sprintf("%d log lines, %d errors", int(lines), int(errorCount))
+			}
+			return fmt.Sprintf("%d log lines", int(lines))
+		}
+	case "execute_traceql":
+		if traceCount, ok := data["traceCount"].(float64); ok {
+			if spanCount, ok := data["spanCount"].(float64); ok {
+				return fmt.Sprintf("%d traces, %d spans", int(traceCount), int(spanCount))
+			}
+			return fmt.Sprintf("%d traces", int(traceCount))
+		}
+	}
+
+	return "Query completed"
 }
 
 func streamSSEResponse(ctx context.Context, rw http.ResponseWriter, chunkChan <-chan LLMStreamChunk, skill string) {

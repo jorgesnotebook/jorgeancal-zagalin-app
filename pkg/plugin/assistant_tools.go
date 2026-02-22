@@ -310,6 +310,39 @@ var ZAGALIN_TOOLS = []Tool{
 			},
 		},
 	},
+	{
+		Type: "function",
+		Function: Function{
+			Name:        "execute_traceql",
+			Description: "Execute a TraceQL query against Tempo and return trace analytics including latency percentiles (p50, p95, p99), error rates, and service/operation breakdowns. CRITICAL: ALWAYS call this after generating a query when investigating traces - do not generate a query and stop. This provides actual trace data for distributed system troubleshooting.",
+			Parameters: ToolParameters{
+				Type: "object",
+				Properties: map[string]PropertyDefinition{
+					"datasourceUid": {
+						Type:        "string",
+						Description: "The Tempo datasource UID",
+					},
+					"query": {
+						Type:        "string",
+						Description: "The TraceQL query to execute (e.g., '{service.name=\"api-gateway\"}')",
+					},
+					"from": {
+						Type:        "string",
+						Description: "Start time for query (e.g., 'now-15m', '2024-01-01T00:00:00Z'). Default: 'now-15m'",
+					},
+					"to": {
+						Type:        "string",
+						Description: "End time for query (e.g., 'now', '2024-01-01T01:00:00Z'). Default: 'now'",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of traces to return (default: 100, max: 1000)",
+					},
+				},
+				Required: []string{"datasourceUid", "query"},
+			},
+		},
+	},
 }
 
 func GetTools(functionCallingEnabled bool, settings *Settings) []Tool {
@@ -330,6 +363,8 @@ func GetTools(functionCallingEnabled bool, settings *Settings) []Tool {
 			tools = append(tools, buildExecutePromQLTool(settings))
 		} else if tool.Function.Name == "execute_logql" {
 			tools = append(tools, buildExecuteLogQLTool(settings))
+		} else if tool.Function.Name == "execute_traceql" {
+			tools = append(tools, buildExecuteTraceQLTool(settings))
 		} else {
 			tools = append(tools, tool)
 		}
@@ -570,6 +605,58 @@ func buildExecuteLogQLTool(settings *Settings) Tool {
 		Type: "function",
 		Function: Function{
 			Name:        "execute_logql",
+			Description: description,
+			Parameters: ToolParameters{
+				Type:       "object",
+				Properties: props,
+				Required:   []string{"datasourceUid", "query"},
+			},
+		},
+	}
+}
+
+func buildExecuteTraceQLTool(settings *Settings) Tool {
+	props := map[string]PropertyDefinition{
+		"datasourceUid": {
+			Type:        "string",
+			Description: "The Tempo datasource UID",
+		},
+		"query": {
+			Type:        "string",
+			Description: "The TraceQL query to execute (e.g., '{service.name=\"api-gateway\"}')",
+		},
+		"from": {
+			Type:        "string",
+			Description: "Start time for query (e.g., 'now-15m', '2024-01-01T00:00:00Z'). Default: 'now-15m'",
+		},
+		"to": {
+			Type:        "string",
+			Description: "End time for query (e.g., 'now', '2024-01-01T01:00:00Z'). Default: 'now'",
+		},
+		"limit": {
+			Type:        "number",
+			Description: "Maximum number of traces to return (default: 100, max: 1000)",
+		},
+	}
+
+	description := "Execute a TraceQL query against Tempo and return trace analytics including latency percentiles (p50, p95, p99), error rates, and service/operation breakdowns. CRITICAL: ALWAYS call this after generating a query when investigating traces - do not generate a query and stop. This provides actual trace data for distributed system troubleshooting."
+
+	if settings != nil && settings.OtelEnforcement.Enabled {
+		props["serviceName"] = PropertyDefinition{
+			Type:        "string",
+			Description: "OpenTelemetry service.name for multi-tenant scoping (e.g., \"api-gateway\", \"payment-service\"). Extract from dashboard context if available.",
+		}
+		props["environmentName"] = PropertyDefinition{
+			Type:        "string",
+			Description: "OpenTelemetry deployment.environment.name (e.g., \"production\", \"staging\", \"development\"). Extract from dashboard context if available.",
+		}
+		description += " IMPORTANT: Include serviceName and environmentName for proper OTel scoping."
+	}
+
+	return Tool{
+		Type: "function",
+		Function: Function{
+			Name:        "execute_traceql",
 			Description: description,
 			Parameters: ToolParameters{
 				Type:       "object",

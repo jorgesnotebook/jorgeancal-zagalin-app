@@ -329,6 +329,9 @@ export async function executeToolCall(toolCall: ToolCall): Promise<any> {
     case 'execute_logql':
       return executeLogQL(args);
 
+    case 'execute_traceql':
+      return executeTraceQL(args);
+
     default:
       return { error: `Unknown tool: ${toolCall.function.name}` };
   }
@@ -852,6 +855,50 @@ async function executeLogQL(params: any): Promise<any> {
     return {
       success: false,
       error: `Failed to execute LogQL query: ${error.message || 'Unknown error'}`,
+      query,
+      datasourceUid,
+    };
+  }
+}
+
+/**
+ * Execute TraceQL query and return trace analytics
+ */
+async function executeTraceQL(params: any): Promise<any> {
+  const { datasourceUid, query, from, to, limit } = params;
+
+  if (!datasourceUid || !query) {
+    return {
+      success: false,
+      error: 'Missing required parameters: datasourceUid and query',
+    };
+  }
+
+  try {
+    const { getBackendSrv } = await import('@grafana/runtime');
+
+    const response = await getBackendSrv().post(
+      '/api/plugins/jorgeancal-zagalin-app/resources/tools/execute_traceql',
+      {
+        datasourceUid,
+        query,
+        from: from || 'now-15m',
+        to: to || 'now',
+        limit: limit || 100,
+        serviceName: params.serviceName,
+        environmentName: params.environmentName,
+      }
+    );
+
+    return {
+      success: true,
+      ...response,
+    };
+  } catch (error: any) {
+    console.error('Failed to execute TraceQL query:', error);
+    return {
+      success: false,
+      error: `Failed to execute TraceQL query: ${error.message || 'Unknown error'}`,
       query,
       datasourceUid,
     };

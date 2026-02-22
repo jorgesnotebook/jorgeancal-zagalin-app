@@ -243,6 +243,115 @@ func (a *App) executeLogQL(ctx context.Context, args map[string]interface{}, use
 	return string(resultJSON), nil
 }
 
+// executeTraceQL executes a TraceQL query and returns trace analytics
+func (a *App) executeTraceQL(ctx context.Context, args map[string]interface{}, user *UserIdentity) (string, error) {
+	// Extract parameters
+	datasourceUid, ok := args["datasourceUid"].(string)
+	if !ok || datasourceUid == "" {
+		return "", fmt.Errorf("datasourceUid is required")
+	}
+
+	query, ok := args["query"].(string)
+	if !ok || query == "" {
+		return "", fmt.Errorf("query is required")
+	}
+
+	from, ok := args["from"].(string)
+	if !ok || from == "" {
+		from = "now-15m"
+	}
+
+	to, ok := args["to"].(string)
+	if !ok || to == "" {
+		to = "now"
+	}
+
+	// Limit is optional - default to 100
+	limit := 100
+	if limitVal, ok := args["limit"].(float64); ok {
+		limit = int(limitVal)
+	}
+	// Cap at 1000
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	// Apply OTel enforcement if enabled
+	if a.settings != nil && a.settings.OtelEnforcement.Enabled {
+		// Extract service name and environment from args
+		serviceName, _ := args["serviceName"].(string)
+		environmentName, _ := args["environmentName"].(string)
+
+		scope := &OtelScope{
+			ServiceName:     serviceName,
+			EnvironmentName: environmentName,
+			Source:          "tool_args",
+		}
+
+		// Apply defaults
+		a.applyOtelScopeDefaults(scope)
+
+		// Validate scope
+		if err := a.validateOtelScope(scope); err != nil {
+			return "", fmt.Errorf("OTel validation failed: %w", err)
+		}
+
+		// Inject scope into query
+		labelFormat := a.otelRegistry.GetFormat(datasourceUid)
+		if labelFormat == nil {
+			labelFormat = a.DiscoverOTelLabels(ctx, datasourceUid, DatasourceTempo)
+			a.otelRegistry.SetFormat(datasourceUid, labelFormat)
+		}
+
+		selectors := BuildOTelLabels(labelFormat, scope.ServiceName, scope.EnvironmentName)
+		query = injectTraceQLSelectors(query, selectors)
+
+		backend.Logger.Debug("OTel scope injected into TraceQL query",
+			"original", args["query"],
+			"injected", query,
+			"scope", scope,
+		)
+	}
+
+	// Build query payload for Tempo
+	queryPayload := QueryPayload{
+		Query:         query,
+		MaxDataPoints: int64(limit),
+	}
+
+	// Build time range
+	timeRange := TimeRange{
+		From: from,
+		To:   to,
+	}
+
+	// Execute query via Grafana query client
+	if a.grafanaQueryClient == nil {
+		return "", fmt.Errorf("Grafana query client not initialized")
+	}
+
+	response, err := a.grafanaQueryClient.ExecuteQuery(ctx, user, datasourceUid, "tempo", queryPayload, timeRange)
+	if err != nil {
+		return "", fmt.Errorf("query execution failed: %w", err)
+	}
+
+	// Check for errors in response
+	if result, ok := response.Results["A"]; ok && result.Error != "" {
+		return "", fmt.Errorf("query error: %s", result.Error)
+	}
+
+	// Format response as structured JSON with trace analytics
+	result := formatTraceQLResult(response, query)
+
+	// Marshal to JSON string
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal result: %w", err)
+	}
+
+	return string(resultJSON), nil
+}
+
 // PromQLResult represents structured PromQL query results with analytics
 type PromQLResult struct {
 	Query           string                 `json:"query"`
@@ -283,6 +392,43 @@ type ErrorPattern struct {
 	Message string  `json:"message"`
 	Count   int     `json:"count"`
 	Percent float64 `json:"percent"`
+}
+
+// TraceQLResult represents structured TraceQL query results with trace analytics
+type TraceQLResult struct {
+	Query            string           `json:"query"`
+	TraceCount       int              `json:"traceCount"`
+	SpanCount        int              `json:"spanCount"`
+	AvgDuration      float64          `json:"avgDuration"`      // milliseconds
+	P50Duration      float64          `json:"p50Duration"`      // median
+	P95Duration      float64          `json:"p95Duration"`
+	P99Duration      float64          `json:"p99Duration"`
+	MaxDuration      float64          `json:"maxDuration"`
+	ErrorRate        float64          `json:"errorRate"`        // percentage
+	ErrorCount       int              `json:"errorCount"`
+	TopErrors        []ErrorPattern   `json:"topErrors"`
+	TopServices      []ServiceStats   `json:"topServices"`
+	TopOperations    []OperationStats `json:"topOperations"`
+	SpanDistribution map[string]int   `json:"spanDistribution"` // duration buckets
+	FirstSeenAt      string           `json:"firstSeenAt,omitempty"`
+	Trend            string           `json:"trend"`   // stable | increasing | decreasing
+	Anomaly          bool             `json:"anomaly"`
+}
+
+// ServiceStats represents service-level trace statistics
+type ServiceStats struct {
+	ServiceName string  `json:"serviceName"`
+	SpanCount   int     `json:"spanCount"`
+	AvgDuration float64 `json:"avgDuration"`
+	ErrorRate   float64 `json:"errorRate"`
+}
+
+// OperationStats represents operation-level trace statistics
+type OperationStats struct {
+	OperationName string  `json:"operationName"`
+	SpanCount     int     `json:"spanCount"`
+	AvgDuration   float64 `json:"avgDuration"`
+	P95Duration   float64 `json:"p95Duration"`
 }
 
 // formatPromQLResult formats Grafana query response into structured PromQL result
@@ -553,6 +699,393 @@ func formatLogQLResult(response *GrafanaQueryResponse, query string) *LogQLResul
 	}
 
 	return result
+}
+
+// formatTraceQLResult formats Grafana query response into structured trace analytics
+func formatTraceQLResult(response *GrafanaQueryResponse, query string) *TraceQLResult {
+	result := &TraceQLResult{
+		Query:            query,
+		TraceCount:       0,
+		SpanCount:        0,
+		AvgDuration:      0,
+		P50Duration:      0,
+		P95Duration:      0,
+		P99Duration:      0,
+		MaxDuration:      0,
+		ErrorRate:        0,
+		ErrorCount:       0,
+		TopErrors:        []ErrorPattern{},
+		TopServices:      []ServiceStats{},
+		TopOperations:    []OperationStats{},
+		SpanDistribution: make(map[string]int),
+		Trend:            "stable",
+		Anomaly:          false,
+	}
+
+	resultData, ok := response.Results["A"]
+	if !ok || len(resultData.Frames) == 0 {
+		return result
+	}
+
+	var allDurations []float64
+	var firstTimestamp int64
+	traceIDs := make(map[string]bool)
+	serviceStats := make(map[string]*ServiceStats)
+	operationStats := make(map[string]*OperationStats)
+	errorMessages := make(map[string]int)
+
+	// Process frames - Tempo returns span data in frames
+	for _, frame := range resultData.Frames {
+		frameMap, ok := frame.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		schema, ok := frameMap["schema"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		fields, ok := schema["fields"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		data, ok := frameMap["data"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		values, ok := data["values"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		// Map field names to indices
+		fieldIndices := make(map[string]int)
+		for i, field := range fields {
+			fieldMap, ok := field.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			name, _ := fieldMap["name"].(string)
+			fieldIndices[name] = i
+		}
+
+		// Get values arrays
+		var traceIDValues, spanIDValues, serviceValues, operationValues, durationValues, statusValues, startTimeValues []interface{}
+
+		if idx, ok := fieldIndices["traceID"]; ok && idx < len(values) {
+			traceIDValues, _ = values[idx].([]interface{})
+		}
+		if idx, ok := fieldIndices["spanID"]; ok && idx < len(values) {
+			spanIDValues, _ = values[idx].([]interface{})
+		}
+		if idx, ok := fieldIndices["serviceName"]; ok && idx < len(values) {
+			serviceValues, _ = values[idx].([]interface{})
+		}
+		if idx, ok := fieldIndices["operationName"]; ok && idx < len(values) {
+			operationValues, _ = values[idx].([]interface{})
+		}
+		if idx, ok := fieldIndices["duration"]; ok && idx < len(values) {
+			durationValues, _ = values[idx].([]interface{})
+		}
+		if idx, ok := fieldIndices["statusCode"]; ok && idx < len(values) {
+			statusValues, _ = values[idx].([]interface{})
+		}
+		if idx, ok := fieldIndices["startTime"]; ok && idx < len(values) {
+			startTimeValues, _ = values[idx].([]interface{})
+		}
+
+		// Process each span
+		spanCount := 0
+		if traceIDValues != nil {
+			spanCount = len(traceIDValues)
+		} else if spanIDValues != nil {
+			spanCount = len(spanIDValues)
+		} else if durationValues != nil {
+			spanCount = len(durationValues)
+		}
+
+		for i := 0; i < spanCount; i++ {
+			result.SpanCount++
+
+			// Track unique trace IDs
+			if traceIDValues != nil && i < len(traceIDValues) {
+				if traceID, ok := traceIDValues[i].(string); ok && traceID != "" {
+					traceIDs[traceID] = true
+				}
+			}
+
+			// Duration - convert from nanoseconds to milliseconds
+			var durationMs float64
+			if durationValues != nil && i < len(durationValues) {
+				if dur, ok := durationValues[i].(float64); ok {
+					durationMs = dur / 1_000_000 // nanoseconds to milliseconds
+					allDurations = append(allDurations, durationMs)
+
+					if durationMs > result.MaxDuration {
+						result.MaxDuration = durationMs
+					}
+				}
+			}
+
+			// Service stats
+			var serviceName string
+			if serviceValues != nil && i < len(serviceValues) {
+				serviceName, _ = serviceValues[i].(string)
+			}
+			if serviceName != "" {
+				if _, exists := serviceStats[serviceName]; !exists {
+					serviceStats[serviceName] = &ServiceStats{ServiceName: serviceName}
+				}
+				serviceStats[serviceName].SpanCount++
+				serviceStats[serviceName].AvgDuration += durationMs
+			}
+
+			// Operation stats
+			var operationName string
+			if operationValues != nil && i < len(operationValues) {
+				operationName, _ = operationValues[i].(string)
+			}
+			if operationName != "" {
+				if _, exists := operationStats[operationName]; !exists {
+					operationStats[operationName] = &OperationStats{OperationName: operationName}
+				}
+				operationStats[operationName].SpanCount++
+				operationStats[operationName].AvgDuration += durationMs
+			}
+
+			// Status code - 0 = OK, 1 = UNSET, 2 = ERROR
+			if statusValues != nil && i < len(statusValues) {
+				if status, ok := statusValues[i].(float64); ok && status == 2 {
+					result.ErrorCount++
+					// Use service + operation as error message pattern
+					errorKey := serviceName + ": " + operationName
+					if errorKey == ": " {
+						errorKey = "Unknown error"
+					}
+					errorMessages[errorKey]++
+
+					if serviceName != "" {
+						serviceStats[serviceName].ErrorRate++
+					}
+				}
+			}
+
+			// First seen timestamp
+			if startTimeValues != nil && i < len(startTimeValues) {
+				if ts, ok := startTimeValues[i].(float64); ok {
+					if firstTimestamp == 0 || int64(ts) < firstTimestamp {
+						firstTimestamp = int64(ts)
+					}
+				}
+			}
+
+			// Duration distribution buckets
+			if durationMs > 0 {
+				bucket := getDurationBucket(durationMs)
+				result.SpanDistribution[bucket]++
+			}
+		}
+	}
+
+	result.TraceCount = len(traceIDs)
+
+	// Calculate duration percentiles
+	if len(allDurations) > 0 {
+		sort.Float64s(allDurations)
+
+		// Average
+		sum := 0.0
+		for _, d := range allDurations {
+			sum += d
+		}
+		result.AvgDuration = sum / float64(len(allDurations))
+
+		// Percentiles
+		result.P50Duration = percentile(allDurations, 50)
+		result.P95Duration = percentile(allDurations, 95)
+		result.P99Duration = percentile(allDurations, 99)
+
+		// Trend detection
+		result.Trend = detectTrend(allDurations)
+
+		// Anomaly detection - any span >3x average
+		for _, d := range allDurations {
+			if d > result.AvgDuration*3 {
+				result.Anomaly = true
+				break
+			}
+		}
+	}
+
+	// Error rate
+	if result.SpanCount > 0 {
+		result.ErrorRate = float64(result.ErrorCount) / float64(result.SpanCount) * 100
+	}
+
+	// Finalize service stats (calculate average duration and error rate)
+	for name, stats := range serviceStats {
+		if stats.SpanCount > 0 {
+			stats.AvgDuration = stats.AvgDuration / float64(stats.SpanCount)
+			stats.ErrorRate = stats.ErrorRate / float64(stats.SpanCount) * 100
+		}
+		serviceStats[name] = stats
+	}
+
+	// Finalize operation stats
+	operationDurations := make(map[string][]float64)
+	for _, frame := range resultData.Frames {
+		frameMap, ok := frame.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		schema, ok := frameMap["schema"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		fields, ok := schema["fields"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		data, ok := frameMap["data"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		values, ok := data["values"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		fieldIndices := make(map[string]int)
+		for i, field := range fields {
+			fieldMap, ok := field.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			name, _ := fieldMap["name"].(string)
+			fieldIndices[name] = i
+		}
+
+		var operationValues, durationValues []interface{}
+		if idx, ok := fieldIndices["operationName"]; ok && idx < len(values) {
+			operationValues, _ = values[idx].([]interface{})
+		}
+		if idx, ok := fieldIndices["duration"]; ok && idx < len(values) {
+			durationValues, _ = values[idx].([]interface{})
+		}
+
+		if operationValues != nil && durationValues != nil {
+			for i := 0; i < len(operationValues) && i < len(durationValues); i++ {
+				opName, _ := operationValues[i].(string)
+				dur, _ := durationValues[i].(float64)
+				if opName != "" && dur > 0 {
+					operationDurations[opName] = append(operationDurations[opName], dur/1_000_000)
+				}
+			}
+		}
+	}
+
+	for name, stats := range operationStats {
+		if stats.SpanCount > 0 {
+			stats.AvgDuration = stats.AvgDuration / float64(stats.SpanCount)
+		}
+		if durations, ok := operationDurations[name]; ok && len(durations) > 0 {
+			sort.Float64s(durations)
+			stats.P95Duration = percentile(durations, 95)
+		}
+		operationStats[name] = stats
+	}
+
+	// Sort and get top 5 services by span count
+	var services []ServiceStats
+	for _, s := range serviceStats {
+		services = append(services, *s)
+	}
+	sort.Slice(services, func(i, j int) bool {
+		return services[i].SpanCount > services[j].SpanCount
+	})
+	if len(services) > 5 {
+		services = services[:5]
+	}
+	result.TopServices = services
+
+	// Sort and get top 5 operations by average duration (slowest)
+	var operations []OperationStats
+	for _, o := range operationStats {
+		operations = append(operations, *o)
+	}
+	sort.Slice(operations, func(i, j int) bool {
+		return operations[i].AvgDuration > operations[j].AvgDuration
+	})
+	if len(operations) > 5 {
+		operations = operations[:5]
+	}
+	result.TopOperations = operations
+
+	// Sort and get top 5 errors
+	type errorCount struct {
+		message string
+		count   int
+	}
+	var errors []errorCount
+	for msg, count := range errorMessages {
+		errors = append(errors, errorCount{msg, count})
+	}
+	sort.Slice(errors, func(i, j int) bool {
+		return errors[i].count > errors[j].count
+	})
+	for i := 0; i < 5 && i < len(errors); i++ {
+		pct := 0.0
+		if result.ErrorCount > 0 {
+			pct = float64(errors[i].count) / float64(result.ErrorCount) * 100
+		}
+		result.TopErrors = append(result.TopErrors, ErrorPattern{
+			Message: errors[i].message,
+			Count:   errors[i].count,
+			Percent: pct,
+		})
+	}
+
+	// First seen timestamp
+	if firstTimestamp > 0 {
+		result.FirstSeenAt = time.Unix(0, firstTimestamp).UTC().Format(time.RFC3339)
+	}
+
+	return result
+}
+
+// getDurationBucket returns the bucket name for a duration in milliseconds
+func getDurationBucket(durationMs float64) string {
+	switch {
+	case durationMs < 10:
+		return "<10ms"
+	case durationMs < 50:
+		return "10-50ms"
+	case durationMs < 100:
+		return "50-100ms"
+	case durationMs < 500:
+		return "100-500ms"
+	default:
+		return ">500ms"
+	}
+}
+
+// percentile calculates the p-th percentile of a sorted slice
+func percentile(sorted []float64, p int) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	idx := int(float64(len(sorted)) * float64(p) / 100.0)
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
 }
 
 // detectTrend analyzes values to determine trend
