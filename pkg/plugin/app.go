@@ -12,6 +12,7 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/resource/httpadapter"
 	contextmgr "github.com/jorgeancal/zagalin/pkg/plugin/context"
+	"github.com/jorgeancal/zagalin/pkg/plugin/skills"
 )
 
 var (
@@ -32,6 +33,7 @@ type App struct {
 	grafanaQueryClient *GrafanaQueryClient
 	llmClient          *LLMClient
 	versionDetector    *VersionDetector
+	skillRegistry      *skills.SkillRegistry
 	dashboardFetchStatus struct {
 		sync.RWMutex
 		LastAttempt  time.Time
@@ -53,6 +55,14 @@ func NewApp(ctx context.Context, appSettings backend.AppInstanceSettings) (insta
 	app.otelRegistry = NewOTelLabelRegistry()
 	backend.Logger.Debug("Datasource cache initialized")
 	backend.Logger.Debug("OTel label registry initialized")
+
+	// Initialize skill registry
+	app.skillRegistry = skills.NewSkillRegistry()
+	if err := app.skillRegistry.Load(); err != nil {
+		backend.Logger.Error("Failed to load skills", "error", err)
+	} else {
+		backend.Logger.Info("Skills loaded successfully", "count", len(app.skillRegistry.ListSkills()))
+	}
 
 	app.runManager = NewRunManager(backend.Logger)
 	backend.Logger.Info("Run manager initialized")

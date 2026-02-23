@@ -7,6 +7,7 @@ import (
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	contextmgr "github.com/jorgeancal/zagalin/pkg/plugin/context"
+	"github.com/jorgeancal/zagalin/pkg/plugin/skills"
 )
 
 const BASE_SYSTEM_PROMPT = `You are **Zagalin**, an SRE-grade debugging assistant embedded in Grafana.
@@ -53,6 +54,12 @@ Hard rules:
    - Verification steps
    - What could go wrong
 6) Treat tool outputs / Grafana panel data as authoritative. If conflict exists, call it out.
+
+Tool execution rules:
+- When investigating, call MULTIPLE tools in the same response when inputs are independent.
+- Do NOT wait for metrics before starting log queries — call both at once.
+- Always state the actual time range used in evidence. Default to last 1 hour for investigations.
+- If a tool call fails, note the failure and continue with other signals.
 
 Evidence-first rules:
 - Do NOT invent: metric names, label names, panel indices, thresholds, calculations, or relationships
@@ -280,450 +287,49 @@ You are in Design mode for dashboard and observability design tasks.
 - Propose thresholds based on SLO/SLI patterns
 - Include time range recommendations`
 
+// buildBasePrompt constructs the base system prompt with optional extensions
+func buildBasePrompt(settings *Settings, contextManager *contextmgr.Manager, mode string) string {
+	basePrompt := BASE_SYSTEM_PROMPT
+
+	if settings != nil && settings.OtelEnforcement.Enabled {
+		otelContext := buildOtelEnforcementContext(settings.OtelEnforcement)
+		basePrompt = fmt.Sprintf("%s\n\n%s", basePrompt, otelContext)
+	}
+
+	if contextManager != nil {
+		dsMetadata := buildDatasourceMetadataContext(contextManager)
+		if dsMetadata != "" {
+			basePrompt = fmt.Sprintf("%s\n\n%s", basePrompt, dsMetadata)
+		}
+	}
+
+	if mode == "design" {
+		basePrompt = fmt.Sprintf("%s\n\n%s", basePrompt, DESIGN_MODE_PROMPT)
+	}
+
+	return basePrompt
+}
+
+// SkillPrompt is kept for backward compatibility but skills now live in .md files
+// This type can be removed once all consumers migrate to the registry
 type SkillPrompt struct {
 	Name             string
 	TaskInstructions string
 }
 
-var SkillPrompts = map[string]SkillPrompt{
-	"explain_panel": {
-		Name: "explain_panel",
-		TaskInstructions: `Your task is to explain what a panel shows using ONLY the information provided.
+// SkillPrompts is deprecated - skills are now loaded from .md files via SkillRegistry
+// This empty map is kept for backward compatibility during migration
+var SkillPrompts = map[string]SkillPrompt{}
 
-REQUIRED STRUCTURE:
-1. **What this panel measures** (1-2 sentences)
-   - Based on: [datasource type, time range, query provided]
-
-2. **How the query works** (plain English)
-   - Break down the calculation step by step
-   - Reference actual metric names and labels from the query
-
-3. **How to interpret the pattern** (behavioral guidance)
-   - What does "normal" look like for this query?
-   - What patterns would be concerning?
-   - Use trend language: "increasing", "stable", "dropping" (NOT fixed thresholds)
-
-4. **What to check next** (only if pattern is abnormal)
-   - Max 3 concrete checks
-   - Must reference available context or related panels
-
-5. **One thing to confirm** (optional, max ONE question)
-   - Only ask if critical information is missing
-
-6. **Confidence: [High/Medium/Low]** (MANDATORY)
-   - High: Based directly on panel query + datasource + time range
-   - Medium: Based on partial context with stated assumptions
-   - Low: Conceptual explanation (missing key data)
-
-CONTEXT STRUCTURE:
-You will receive context in this format:
-
---- AVAILABLE CONTEXT ---
-[Panel query, datasource, time range, dashboard panels]
-
---- UNKNOWN CONTEXT ---
-[Anything not explicitly provided above]
-
-ENFORCEMENT RULES:
-- Do NOT reference metrics not in the query
-- Do NOT provide thresholds unless derived from query
-- Do NOT say "typically" or "usually" without evidence
-- Do NOT reference panels by index unless provided
-- If query is missing, state: "No query provided - cannot explain calculation"
-
-EXAMPLES OF GOOD RESPONSES:
-- "This panel measures HTTP request rate using rate(http_requests_total[5m]). The query calculates..."
-- "An increasing trend could indicate traffic growth or a potential attack..."
-- "To confirm: is this measuring heap memory or total process memory?"
-
-EXAMPLES OF BAD RESPONSES:
-- "This should typically be around 10-30%"
-- "Panel 2 shows..."  (without panel index in context)
-- "The cpu_usage metric indicates..." (if query uses different metric name)
-`,
-	},
-	"generate_query": {
-		Name: "generate_query",
-		TaskInstructions: `Your task is to convert English requests into valid %s queries.
-
-Guidelines:
-- Generate syntactically correct %s
-- Use best practices (avoid high cardinality, use appropriate functions)
-- Explain what the query does
-- Warn about potential performance issues
-- Suggest time range if not specified
-
-Format your response as:
-` + "```%s" + `
-<query>
-` + "```" + `
-
-**Explanation**: <what the query does>
-**Performance**: <any warnings about cardinality, time range, etc>
-**Usage**: <suggested time range and resolution>`,
-	},
-	"troubleshoot": {
-		Name: "troubleshoot",
-		TaskInstructions: `Your task is to provide structured troubleshooting based ONLY on available context.
-
-**CONTEXT-GATED INVESTIGATION - CRITICAL**
-Before proceeding, you MUST check:
-- Do I have panel queries, metric results, or log results?
-- Do I have explicit statements about signal presence/absence?
-
-If NO context is available, you MUST:
-- STOP immediately
-- Ask ONE question: "Which dashboard or panel should I base the investigation on?"
-- Do NOT speculate, assume, or invent symptoms
-
-REQUIRED STRUCTURE:
-1. **Most likely causes** (ranked by probability, with correlation analysis)
-   - Cause 1: [Description] (Confidence: High/Med/Low)
-     - Correlation: Does this correlate with traffic? Deploys? GC? CPU throttling?
-   - Cause 2: [Description] (Confidence: High/Med/Low)
-     - Correlation: [Multi-signal correlation if available]
-   - Cause 3: [Description] (Confidence: High/Med/Low)
-
-2. **Investigation Memory** (what we know so far)
-   - Ruled out: [What's been checked and eliminated]
-   - Still unknown: [Key missing data]
-   - Leading hypothesis: [Current most likely cause]
-
-3. **Immediate actions (next 5-10 minutes)**
-   - [ ] Check X using [specific query or panel]
-   - [ ] Verify Y in [specific location]
-   - [ ] Confirm Z by [specific action]
-
-   **Queries to run now:**
-   ` + "```promql or logql" + `
-   [Specific query based on available metrics]
-   ` + "```" + `
-   **Expected result**: [What normal vs abnormal looks like]
-
-4. **Follow-up actions (post-incident / next sprint)**
-   - Alerting improvements
-   - Dashboard additions
-   - Architecture changes
-   - Monitoring gaps to fill
-
-5. **Next decision point**
-   - If [condition], then [action]
-   - If [condition], then [action]
-
-6. **Confidence: [High/Medium/Low]**
-   - State clearly what context you have and what's missing
-
-CONTEXT STRUCTURE:
-You will receive:
---- AVAILABLE CONTEXT ---
-[Dashboard panels, time range, current metrics/logs]
-
---- DATASOURCE METADATA --- (if available)
-[Known metrics, labels, services]
-
-ENFORCEMENT RULES (NON-NEGOTIABLE):
-- Do NOT invent metric names - only use metrics from context or metadata
-- Do NOT provide absolute thresholds without evidence
-- Do NOT reference panels without their indices
-- Rank causes by evidence strength (High = strong evidence, Low = speculation)
-- Every query MUST use metrics that exist in datasource metadata
-- PREFER multi-signal correlation over single-metric analysis
-- SEPARATE immediate actions from long-term improvements
-
-**HALLUCINATION PREVENTION (HARD CONSTRAINTS):**
-- If you have not SEEN a metric → do NOT mention it
-- If you have not SEEN an error → do NOT assume failure
-- If you have not SEEN a trend → do NOT describe one
-- If context is MISSING → STOP and ask for it
-- NEVER ask for screenshots, files, exports, or "what it looks like"
-- Hypotheses MUST be traceable to specific queries or panels
-
-EXAMPLE GOOD RESPONSE:
-"Based on panel data from Memory usage (panel 2), CPU (panel 1), and request rate (panel 3):
-
-   Most likely causes:
-   1. Memory leak in application (High) - heap usage increasing linearly per panel 2
-      - Correlation: No correlation with traffic (panel 3 stable), started after deploy 3h ago
-   2. Database connection pool exhaustion (Low) - cannot confirm without connection metrics
-
-   Investigation Memory:
-   - Ruled out: CPU throttling (panel 1 shows CPU steady at 40%)
-   - Still unknown: GC pressure, error rate
-   - Leading hypothesis: Memory leak in recent deploy
-
-   Immediate actions:
-   - [ ] Check panel 2 query for heap vs non-heap breakdown
-   - [ ] Correlate panel 2 spike time with deploy logs
-
-   Follow-up actions:
-   - Add GC pause time panel
-   - Add error rate monitoring"
-
-EXAMPLE GOOD DASHBOARD ANALYSIS (WITH EVIDENCE):
-User: "I'm looking at this dashboard and I don't fully understand what's going on. Can you explain?"
-[System provides panel data:]
-Panel 1 "Error Rate": Current: 3.24/s | trending up (+15.3%) | ⚠️ SPIKE DETECTED | Range: 1.50/s - 4.10/s
-Panel 2 "Latency p95": Current: 245ms | stable (-2.1%) | Range: 230ms - 260ms
-Panel 3 "Active Connections": Current: 89% | stable (+1.2%) | ⚠️ SATURATED (>90%)
-Panel 4 "Request Rate": Current: 150 req/s | stable (+0.5%) | Range: 145 req/s - 155 req/s
-Panel 5 "DB Query Time": Current: 180ms | increasing (+24.8%) | Range: 140ms - 195ms
-Time Range: Last 15 minutes
-Variables: env=production, cluster=us-east
-
-Assistant response:
-## Current Context
-- Active filters: env=production, cluster=us-east
-- Time range: Last 15 minutes
-
-## What's Happening
-Based on REAL data from 5 panels:
-
-1. **Error Rate** (Panel 1): 3.24/s, up 15.3% with SPIKE DETECTED
-   - Jumped from baseline ~2.7/s to 4.10/s peak
-   - This is abnormal
-
-2. **Latency p95** (Panel 2): 245ms, stable
-   - Within normal range (avg: 245ms over period)
-   - Not degrading despite errors
-
-3. **Active Connections** (Panel 3): 89%, SATURATED
-   - ⚠️ Near connection pool capacity (>90% is critical)
-   - Stable at this high level
-
-4. **Request Rate** (Panel 4): 150 req/s, stable
-   - Traffic unchanged, ruling out load spike as cause
-
-5. **DB Query Time** (Panel 5): 180ms, increasing +24.8%
-   - Database queries slowing down significantly
-   - Jumped from ~140ms to 195ms peak
-
-## Why This Matters
-Connection pool saturation + slow DB queries → requests waiting for connections → errors. Users experiencing intermittent failures.
-
-## Likely Causes
-1. Database performance degradation (High confidence)
-   - Evidence: DB query time up 24.8%, connections saturated despite stable traffic
-   - Explains both connection pool pressure and error spike
-
-2. Connection leak (Medium confidence)
-   - Evidence: 89% utilization with stable traffic suggests connections not being released
-   - Would explain saturation without traffic increase
-
-3. Slow query introduced (Medium confidence)
-   - Evidence: DB query time increased recently
-   - Could be recent deployment or data growth
-
-## Next Actions
-1. Check DB server metrics (CPU, disk I/O, active queries) to confirm DB performance issue
-2. Review slow query log for queries >150ms
-3. Check for long-running transactions holding connections
-4. Review recent deployments that might have introduced slow queries
-5. Temporary mitigation: Consider increasing connection pool size if DB is healthy
-
-EXAMPLE GOOD TRACE ANALYSIS (WITH EVIDENCE):
-User: "What's wrong with trace abc123 in tempo-prod?"
-Assistant: [Calls get_trace_by_id with traceId="abc123", datasource="tempo-prod"]
-Tool response: { success: true, traceStructure: { totalSpans: 15, services: ["api-gateway", "user-service", "db-service"], rootService: "api-gateway", rootOperation: "GET /api/users", totalDuration: "2340.50ms", errorCount: 2 }, slowestSpans: [{ service: "db-service", operation: "SELECT users", duration: "1800.23ms" }], errors: [{ service: "user-service", operation: "validateUser", status: "STATUS_CODE_ERROR" }], summary: "Trace has 15 spans across 3 services. Root service: api-gateway. Total duration: 2340.50ms. Found 2 error spans." }
-
-## Trace Summary
-The trace shows a 2.34-second request to GET /api/users that failed with 2 errors across 15 spans and 3 services (api-gateway → user-service → db-service).
-
-## Service Flow
-api-gateway → user-service → db-service
-
-## Performance Breakdown
-**Slowest span:**
-- db-service::SELECT users took 1800.23ms (77% of total time)
-
-The database query is the primary bottleneck, consuming most of the trace duration.
-
-## Issues Found
-**Errors detected:**
-- user-service::validateUser returned STATUS_CODE_ERROR
-
-The validation step failed in the user-service after the database query completed.
-
-## Next Actions
-1. Check db-service logs for the SELECT users query at trace time
-2. Investigate user-service::validateUser logic - why did validation fail?
-3. Review if 1.8s database query is within normal range (check db-service query performance metrics)
-4. Consider adding caching for user validation if query performance is acceptable
-
-EXAMPLE BAD DASHBOARD RESPONSE (FORBIDDEN):
-User: "I'm looking at this dashboard and I don't fully understand what's going on. Can you explain?"
-[System provides NO panel data - only panel names]
-
-BAD Assistant response:
-"This dashboard monitors database connection pools. Connection pool metrics typically indicate performance issues when:
-- Connections exceed 70-80% of capacity
-- Wait times increase
-- Query latency degrades
-
-You should check:
-1. Panel 1 to see if error rate is elevated
-2. Panel 3 to verify connections aren't saturated
-3. Panel 5 to confirm database queries are performing normally
-
-Usually, connection pool issues are caused by:
-- Slow queries holding connections
-- Connection leaks in application code
-- Insufficient pool size for current load
-
-Can you share what the current values are showing?"
-
-**Why this is BAD:**
-- Generic description without actual data ("typically indicate")
-- Invented thresholds ("70-80% of capacity") without evidence
-- Asks user to check panels instead of analyzing real data
-- Uses "usually" without evidence
-- Requests user to provide values manually
-- No citation of actual panel data
-- Pure hallucination based on dashboard name
-
-EXAMPLE BAD RESPONSE (FORBIDDEN):
-- "Can you share a screenshot of the dashboard?"
-- "It looks like a memory leak" (without evidence)
-- "Usually this happens when GC pauses increase" (haven't seen GC data)
-- "Check if cpu_usage is above 80%" (invented threshold)
-- Proceeding with investigation when no queries/panels available
-- "Let me analyze the trace..." without calling get_trace_by_id
-- "The trace shows [invented spans]" before fetching data
-- "This dashboard typically shows..." (generic description without real data)
-- "You should check if [panel] is showing..." (asking user to do the analysis)
-`,
-	},
-	"analyze_dashboard": {
-		Name: "analyze_dashboard",
-		TaskInstructions: `The user is asking about what they see on their screen.
-
-Your task is to:
-1. **Describe the overall purpose** - What story does this dashboard tell? What system/service is being monitored?
-2. **Summarize key panels** - What are the most important visualizations? Group related panels together
-3. **Identify patterns** - What should the user focus on? Are there any red flags or interesting trends?
-4. **Provide context** - Why would someone use this dashboard? What decisions does it support?
-
-Be conversational and insightful. Imagine you're sitting next to them explaining what you see.`,
-	},
-	"review_dashboard": {
-		Name: "review_dashboard",
-		TaskInstructions: `Your task is to review dashboard quality and identify potential issues.
-
-REVIEW AREAS:
-1. **Query Quality Issues**
-   - Detect inconsistent aggregations (mixing sum/avg across similar metrics)
-   - Flag misuse of rate() on gauges or counters without rate()
-   - Warn about unbounded cardinality (missing label filters)
-   - Identify expensive queries (long time ranges, high cardinality)
-
-2. **Label & Naming Consistency**
-   - Highlight inconsistent labels across panels (e.g., service vs service_name)
-   - Flag panels using different metric naming conventions
-   - Identify panels that should be related but use different label selectors
-
-3. **Visualization & UX Issues**
-   - Misleading units (bytes shown as numbers, percentages as decimals)
-   - Inconsistent time windows across related panels
-   - Missing legends or unclear panel titles
-   - Graphs that should be stacked but aren't (or vice versa)
-
-4. **Observability Gaps**
-   - Missing error rate panels when latency is shown
-   - Missing memory metrics when CPU is tracked
-   - Logs without corresponding metrics
-   - No SLI/SLO indicators for user-facing services
-
-5. **Actionability**
-   - Panels that show symptoms but not causes
-   - Missing annotations for deploys/incidents
-   - No links to runbooks or related dashboards
-
-RESPONSE STRUCTURE:
-**Dashboard Purpose**: [Brief description]
-
-**Strengths**:
-- [What's done well]
-
-**Issues Found**:
-1. [Issue category]: [Specific problem]
-   - Impact: [Why this matters]
-   - Fix: [How to improve]
-
-2. [Next issue]...
-
-**Priority Improvements**:
-1. [Most important fix]
-2. [Second priority]
-3. [Third priority]
-
-**Confidence: [High/Medium/Low]**
-- Based on: [What data was available for review]
-
-ENFORCEMENT RULES:
-- Only flag issues with specific panel references
-- Provide actionable fixes, not just criticisms
-- Prioritize user impact over aesthetic preferences
-- If query is missing, state: "Can't review query quality without panel queries"
-
-EXAMPLE GOOD REVIEW:
-"Issues Found:
-   1. Query Quality: Panel 2 'Request Rate' uses sum(rate(...)) without by() clause
-      - Impact: Loses breakdown by service, makes debugging harder
-      - Fix: Add 'by (service)' to preserve service-level detail
-
-   2. Label Consistency: Panels 1-3 use 'service' label, Panel 4 uses 'service_name'
-      - Impact: Can't correlate metrics across panels
-      - Fix: Standardize on 'service' label across all queries
-
-   Confidence: High - Based on 4 panel queries reviewed"
-
-EXAMPLE BAD REVIEW:
-- "This dashboard could be better"
-- "Consider improving the layout"
-- "Queries might be slow" (without specific evidence)
-`,
-	},
-
-	"design_dashboard": {
-		Name: "design_dashboard",
-		TaskInstructions: `Your task is to design a new dashboard or propose improvements.
-
-REQUIRED STRUCTURE:
-1. **Purpose** - What story should this dashboard tell?
-2. **Audience** - Who will use it? (SRE, developers, business)
-3. **Key Metrics** - What are the critical signals?
-4. **Panel Layout** - Suggested visualization structure
-5. **Design Rationale** - Why these choices?
-
-DESIGN PRINCIPLES:
-- Start with user goals: "What decisions does this enable?"
-- Follow signal hierarchy: Errors → Latency → Traffic → Saturation
-- Use consistent naming and units
-- Group related panels
-- Include descriptions for context
-
-PANEL DESIGN:
-For each panel, suggest:
-- Title and description
-- Metric or log query
-- Visualization type (graph, stat, table, etc.)
-- Thresholds (if applicable)
-- Time range
-
-VALIDATION:
-- How will we know if this dashboard is useful?
-- What questions should it answer?
-- What actions should it enable?
-
-**Confidence: [High/Medium/Low]**
-- Based on: Available metrics, reference dashboards, best practices`,
-	},
-}
 
 type AssistantContext struct {
 	Dashboard    *DashboardContext  `json:"dashboard,omitempty"`
 	Panel        *PanelContext      `json:"panel,omitempty"`
 	TimeRange    *TimeRange         `json:"timeRange,omitempty"`
 	TemplateVars []TemplateVariable `json:"templateVars,omitempty"`
+	// Alert context - set by webhook handler for alert-triggered investigations
+	AlertSource  string            `json:"alertSource,omitempty"`
+	AlertLabels  map[string]string `json:"alertLabels,omitempty"`
 }
 
 type DashboardContext struct {
@@ -755,16 +361,31 @@ type TemplateVariable struct {
 }
 
 func BuildSystemPrompt(skill string, context AssistantContext, settings *Settings, contextManager *contextmgr.Manager, mode string) string {
-	skillPrompt, exists := SkillPrompts[skill]
-	if !exists {
-		return BASE_SYSTEM_PROMPT
+	return BuildSystemPromptWithRegistry(skill, context, settings, contextManager, mode, nil)
+}
+
+// BuildSystemPromptWithRegistry builds the system prompt using the skill registry
+func BuildSystemPromptWithRegistry(skill string, context AssistantContext, settings *Settings, contextManager *contextmgr.Manager, mode string, registry *skills.SkillRegistry) string {
+	var taskInstructions string
+
+	// Get skill content from registry
+	if registry != nil && skill != "" {
+		taskInstructions = registry.GetContent(skill)
 	}
 
-	taskInstructions := skillPrompt.TaskInstructions
+	// If no skill content found, return base prompt
+	if taskInstructions == "" {
+		return buildBasePrompt(settings, contextManager, mode)
+	}
 
+	// Handle template placeholder for generate_query skill
 	if skill == "generate_query" {
 		queryLang := detectQueryLanguage(context)
-		taskInstructions = fmt.Sprintf(taskInstructions, queryLang, queryLang, queryLang)
+		if registry != nil {
+			if meta := registry.GetMetadata(skill); meta != nil && meta.SupportsTemplate {
+				taskInstructions = fmt.Sprintf(taskInstructions, queryLang, queryLang, queryLang)
+			}
+		}
 	}
 
 	basePrompt := BASE_SYSTEM_PROMPT
@@ -972,9 +593,73 @@ func BuildUserPrompt(skill string, userMessage string, context AssistantContext)
 		return buildTroubleshootPrompt(userMessage, context)
 	case "analyze_dashboard":
 		return buildAnalyzeDashboardPrompt(context)
+	case "incident_investigate":
+		return buildIncidentInvestigatePrompt(userMessage, context)
 	default:
 		return userMessage
 	}
+}
+
+// buildIncidentInvestigatePrompt formats alert context and user message for incident investigation
+func buildIncidentInvestigatePrompt(userMessage string, context AssistantContext) string {
+	var prompt strings.Builder
+
+	prompt.WriteString("--- INCIDENT INVESTIGATION REQUEST ---\n\n")
+
+	// If we have alert context (from webhook), format it prominently
+	if context.AlertSource != "" {
+		prompt.WriteString("**ALERT TRIGGERED INVESTIGATION**\n\n")
+		prompt.WriteString(fmt.Sprintf("**Alert Source**: %s\n", context.AlertSource))
+
+		if len(context.AlertLabels) > 0 {
+			prompt.WriteString("**Alert Labels**:\n")
+			// Extract key labels for prominent display
+			if alertName, ok := context.AlertLabels["alertname"]; ok {
+				prompt.WriteString(fmt.Sprintf("- **Alert Name**: %s\n", alertName))
+			}
+			if severity, ok := context.AlertLabels["severity"]; ok {
+				prompt.WriteString(fmt.Sprintf("- **Severity**: %s\n", severity))
+			}
+			if service, ok := context.AlertLabels["service"]; ok {
+				prompt.WriteString(fmt.Sprintf("- **Service**: %s\n", service))
+			}
+			// Other labels
+			for k, v := range context.AlertLabels {
+				if k != "alertname" && k != "severity" && k != "service" {
+					prompt.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
+				}
+			}
+		}
+		prompt.WriteString("\n")
+	}
+
+	// User's question/message
+	prompt.WriteString(fmt.Sprintf("**User Issue**: %s\n\n", userMessage))
+
+	// Add dashboard context if available
+	if context.Dashboard != nil {
+		prompt.WriteString("**Dashboard Context Available**:\n")
+		prompt.WriteString(fmt.Sprintf("- Dashboard: \"%s\"\n", context.Dashboard.Title))
+		if len(context.Dashboard.Panels) > 0 {
+			prompt.WriteString(fmt.Sprintf("- Panels: %d available\n", len(context.Dashboard.Panels)))
+		}
+		prompt.WriteString("\n")
+	}
+
+	// Time range if available
+	if context.TimeRange != nil {
+		prompt.WriteString(fmt.Sprintf("**Time Range**: %s to %s\n\n", context.TimeRange.From, context.TimeRange.To))
+	} else {
+		prompt.WriteString("**Time Range**: Not specified - default to last 1 hour\n\n")
+	}
+
+	prompt.WriteString("--- INVESTIGATION INSTRUCTIONS ---\n")
+	prompt.WriteString("1. Start by calling get_firing_alerts to understand current alert state\n")
+	prompt.WriteString("2. Call execute_promql AND execute_logql in PARALLEL for affected services\n")
+	prompt.WriteString("3. Correlate findings and identify root cause\n")
+	prompt.WriteString("4. Follow the MANDATORY OUTPUT FORMAT from your instructions\n")
+
+	return prompt.String()
 }
 
 func buildExplainPanelPrompt(context AssistantContext) string {
@@ -1217,8 +902,64 @@ type skillDetectionScore struct {
 }
 
 func DetectSkill(userInput string, context AssistantContext) string {
+	return DetectSkillWithRegistry(userInput, context, nil)
+}
+
+// DetectSkillWithRegistry detects the appropriate skill using the registry for scoring
+func DetectSkillWithRegistry(userInput string, context AssistantContext, registry *skills.SkillRegistry) string {
+	// Minimum confidence threshold - below this, fall through to base prompt
+	const minConfidenceThreshold = 40
+
+	hasAlertSource := context.AlertSource != ""
+	hasDashboardContext := context.Dashboard != nil
+	hasPanelContext := context.Panel != nil
+
+	// Try registry-based scoring first
+	if registry != nil && registry.IsLoaded() {
+		bestSkill, bestScore := registry.ScoreInput(userInput, hasAlertSource, hasDashboardContext, hasPanelContext)
+
+		if bestScore >= minConfidenceThreshold {
+			backend.Logger.Debug("Skill auto-detected via registry",
+				"skill", bestSkill,
+				"confidence", bestScore,
+				"inputLength", len(userInput),
+			)
+			return bestSkill
+		}
+
+		if bestScore > 0 {
+			backend.Logger.Debug("Skill detection below threshold, using base prompt",
+				"maxConfidence", bestScore,
+				"threshold", minConfidenceThreshold,
+				"inputLength", len(userInput),
+			)
+		}
+		return "" // Fall through to base prompt
+	}
+
+	// Fallback to hardcoded scoring if registry not available
 	input := strings.ToLower(userInput)
 	scores := []skillDetectionScore{}
+
+	// Incident investigation - check first as it can have highest priority (200 for alert-triggered)
+	incidentScore := scoreIncidentInvestigation(input, context)
+	if incidentScore > 0 {
+		scores = append(scores, skillDetectionScore{
+			skill:      "incident_investigate",
+			confidence: incidentScore,
+			reason:     "Incident investigation keywords or alert context detected",
+		})
+	}
+
+	// Alert triage (stub for S3-3)
+	alertTriageScore := scoreAlertTriage(input, context)
+	if alertTriageScore > 0 {
+		scores = append(scores, skillDetectionScore{
+			skill:      "alert_triage",
+			confidence: alertTriageScore,
+			reason:     "Alert triage keywords detected",
+		})
+	}
 
 	if context.Dashboard != nil {
 		reviewScore := scoreReviewDashboard(input, context)
@@ -1281,7 +1022,7 @@ func DetectSkill(userInput string, context AssistantContext) string {
 	}
 
 	if len(scores) == 0 {
-		return "" 
+		return "" // Fall through to base prompt / general chat
 	}
 
 	maxScore := scores[0]
@@ -1289,6 +1030,16 @@ func DetectSkill(userInput string, context AssistantContext) string {
 		if score.confidence > maxScore.confidence {
 			maxScore = score
 		}
+	}
+
+	// Apply minimum confidence threshold
+	if maxScore.confidence < minConfidenceThreshold {
+		backend.Logger.Debug("Skill detection below threshold, using base prompt",
+			"maxConfidence", maxScore.confidence,
+			"threshold", minConfidenceThreshold,
+			"inputLength", len(userInput),
+		)
+		return "" // Fall through to base prompt / general chat
 	}
 
 	if maxScore.confidence >= 50 {
@@ -1574,6 +1325,60 @@ func contains(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
+// scoreIncidentInvestigation scores input for incident investigation skill
+func scoreIncidentInvestigation(input string, ctx AssistantContext) int {
+	score := 0
+
+	// AlertSource set = always wins (triggered by webhook)
+	if ctx.AlertSource != "" {
+		return 200
+	}
+
+	// High-signal phrases: +100 each
+	highSignalPhrases := []string{
+		"root cause", "why is", "down",
+		"sla breach", "outage", "p0", "p1", "pager", "incident",
+	}
+	for _, phrase := range highSignalPhrases {
+		if contains(input, phrase) {
+			score += 100
+		}
+	}
+
+	// Service + symptom patterns: +80 each
+	serviceSymptomPatterns := []string{
+		"returning 500", "returning 503", "returning 502",
+		"error spike", "connection refused", "latency spike",
+		"timeout", "failing requests", "high error rate",
+		"service unavailable", "connection timeout",
+	}
+	for _, pattern := range serviceSymptomPatterns {
+		if contains(input, pattern) {
+			score += 80
+		}
+	}
+
+	// General incident words: +20 each
+	generalIncidentWords := []string{
+		"broken", "failing", "spike", "crash", "crashed",
+		"degraded", "degradation", "intermittent", "flapping",
+		"alerting", "paging", "oncall",
+	}
+	for _, word := range generalIncidentWords {
+		if contains(input, word) {
+			score += 20
+		}
+	}
+
+	return score
+}
+
+// scoreAlertTriage is a stub for future alert triage skill (S3-3)
+func scoreAlertTriage(input string, ctx AssistantContext) int {
+	// TODO: Implement in S3-3
+	return 0
+}
+
 const PLANNING_SYSTEM_PROMPT = `You are **Zagalin**, an SRE-grade planning assistant for observability workflows.
 
 Approach:
@@ -1588,8 +1393,17 @@ Planning rules:
 1) Check dashboard context FIRST. Use what's already visible.
 2) If no dashboard: Follow Metrics → Logs → Traces.
 3) Each step must produce a concrete artifact (query result, finding, action taken).
-4) Keep steps atomic (30-90 seconds each). Max 5 steps.
+4) Keep steps atomic (30-90 seconds each). Max 5 steps (or 8 for incident investigations).
 5) If a step could be risky, flag it clearly.
+
+Signal Priority Order (for incident investigations):
+1) **Alerts**: Start with get_firing_alerts to understand current state
+2) **Errors**: Check error rates and status codes first (most direct impact)
+3) **Latency**: Then check for latency degradation
+4) **Logs**: Query logs for error details and stack traces
+5) **Traffic**: Verify traffic patterns are normal
+6) **Saturation**: Check resource limits (CPU, memory, connections)
+7) **Traces**: If applicable, trace specific failing requests
 
 Your response MUST be valid JSON in this exact format:
 {

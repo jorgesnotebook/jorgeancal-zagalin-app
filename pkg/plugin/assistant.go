@@ -21,9 +21,10 @@ const maxToolIterations = 10
 
 // Backend-executable tools that can be run directly without frontend
 var backendExecutableTools = map[string]bool{
-	"execute_promql":  true,
-	"execute_logql":   true,
-	"execute_traceql": true,
+	"execute_promql":    true,
+	"execute_logql":     true,
+	"execute_traceql":   true,
+	"get_firing_alerts": true,
 }
 
 type AssistantRequest struct {
@@ -181,7 +182,7 @@ func (a *App) parseAssistantRequest(req *http.Request) (*AssistantRequest, error
 func (a *App) determineSkillAndMode(assistantReq *AssistantRequest) (skill string, mode string) {
 	skill = assistantReq.SkillHint
 	if skill == "" {
-		skill = DetectSkill(assistantReq.Message, assistantReq.Context)
+		skill = DetectSkillWithRegistry(assistantReq.Message, assistantReq.Context, a.skillRegistry)
 	}
 
 	mode = assistantReq.Mode
@@ -193,7 +194,7 @@ func (a *App) determineSkillAndMode(assistantReq *AssistantRequest) (skill strin
 }
 
 func (a *App) buildMessages(skill string, assistantReq *AssistantRequest) []AssistantMessage {
-	systemPrompt := BuildSystemPrompt(skill, assistantReq.Context, a.settings, a.contextManager, assistantReq.Mode)
+	systemPrompt := BuildSystemPromptWithRegistry(skill, assistantReq.Context, a.settings, a.contextManager, assistantReq.Mode, a.skillRegistry)
 	userPrompt := BuildUserPrompt(skill, assistantReq.Message, assistantReq.Context)
 
 	messages := []AssistantMessage{
@@ -581,6 +582,8 @@ func (a *App) executeBackendTools(ctx context.Context, rw http.ResponseWriter, f
 			result, err = a.executeLogQL(ctx, args, user)
 		case "execute_traceql":
 			result, err = a.executeTraceQL(ctx, args, user)
+		case "get_firing_alerts":
+			result, err = a.getFiringAlerts(ctx, args, user)
 		default:
 			err = fmt.Errorf("unknown backend tool: %s", tc.Function.Name)
 		}
@@ -666,6 +669,13 @@ func (a *App) buildToolResultSummary(toolName, result string) string {
 				return fmt.Sprintf("%d traces, %d spans", int(traceCount), int(spanCount))
 			}
 			return fmt.Sprintf("%d traces", int(traceCount))
+		}
+	case "get_firing_alerts":
+		if count, ok := data["count"].(float64); ok {
+			if patterns, ok := data["patterns"].([]interface{}); ok && len(patterns) > 0 {
+				return fmt.Sprintf("%d firing alerts, %d patterns detected", int(count), len(patterns))
+			}
+			return fmt.Sprintf("%d firing alerts", int(count))
 		}
 	}
 
@@ -1218,13 +1228,19 @@ func (a *App) generateExecutionPlan(ctx context.Context, req AssistantRequest, i
 		},
 	}
 
+	// Use settings model with fallback to gpt-4o-mini
+	model := "gpt-4o-mini"
+	if a.settings != nil && a.settings.LLMModel != "" {
+		model = a.settings.LLMModel
+	}
+
 	llmReq := LLMStreamRequest{
-		Model:               "gpt-4o-mini",
+		Model:               model,
 		Messages:            messages,
-		Temperature:         0.3,  
-		MaxTokens:           getMaxTokensForModel("gpt-4o-mini", 1000),
-		MaxCompletionTokens: getMaxCompletionTokensForModel("gpt-4o-mini", 1000),
-		Tools:               nil, 
+		Temperature:         0.3,
+		MaxTokens:           getMaxTokensForModel(model, 1000),
+		MaxCompletionTokens: getMaxCompletionTokensForModel(model, 1000),
+		Tools:               nil,
 		ToolChoice:          "none",
 	}
 
@@ -1291,8 +1307,21 @@ func (a *App) generateExecutionPlan(ctx context.Context, req AssistantRequest, i
 	if len(plan.Steps) == 0 {
 		return nil, fmt.Errorf("plan has no steps")
 	}
-	if len(plan.Steps) > 5 {
-		plan.Steps = plan.Steps[:5] 
+
+	// Determine max steps based on detected skill metadata
+	maxSteps := 5
+	detectedSkill := DetectSkillWithRegistry(req.Message, req.Context, a.skillRegistry)
+	if a.skillRegistry != nil {
+		if meta := a.skillRegistry.GetMetadata(detectedSkill); meta != nil && meta.MaxSteps > 0 {
+			maxSteps = meta.MaxSteps
+		}
+	} else if detectedSkill == "incident_investigate" {
+		// Fallback for when registry not available
+		maxSteps = 8
+	}
+
+	if len(plan.Steps) > maxSteps {
+		plan.Steps = plan.Steps[:maxSteps]
 	}
 
 	for i := range plan.Steps {
@@ -1304,9 +1333,9 @@ func (a *App) generateExecutionPlan(ctx context.Context, req AssistantRequest, i
 }
 
 func (a *App) executeStep(ctx context.Context, run *RunState, req AssistantRequest, step PlannedStep, stepIndex int, incomingReq *http.Request) (string, []Artifact, error) {
-	skill := DetectSkill(step.Description, req.Context)
+	skill := DetectSkillWithRegistry(step.Description, req.Context, a.skillRegistry)
 
-	systemPrompt := BuildSystemPrompt(skill, req.Context, a.settings, a.contextManager, req.Mode)
+	systemPrompt := BuildSystemPromptWithRegistry(skill, req.Context, a.settings, a.contextManager, req.Mode, a.skillRegistry)
 
 	var previousFindings strings.Builder
 	if stepIndex > 0 {

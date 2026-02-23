@@ -343,6 +343,18 @@ var ZAGALIN_TOOLS = []Tool{
 			},
 		},
 	},
+	{
+		Type: "function",
+		Function: Function{
+			Name:        "get_firing_alerts",
+			Description: "Fetch currently firing alerts from Grafana's Alertmanager. Returns a count of firing alerts, details for each alert (name, severity, service, labels, start time, summary), and detects patterns when multiple alerts share the same service. Use this to understand the current alert state before investigating issues.",
+			Parameters: ToolParameters{
+				Type:       "object",
+				Properties: map[string]PropertyDefinition{},
+				Required:   []string{},
+			},
+		},
+	},
 }
 
 func GetTools(functionCallingEnabled bool, settings *Settings) []Tool {
