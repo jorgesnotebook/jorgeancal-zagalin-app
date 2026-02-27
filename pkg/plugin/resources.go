@@ -172,6 +172,8 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/tools/list_folders", a.versionDetectionMiddleware(a.handleListFolders))
 
 	mux.HandleFunc("/feedback", a.versionDetectionMiddleware(a.handleSubmitFeedback))
+
+	mux.HandleFunc("/mcp", a.versionDetectionMiddleware(a.handleMCP))
 }
 
 func (a *App) handleContextStatus(w http.ResponseWriter, req *http.Request) {
