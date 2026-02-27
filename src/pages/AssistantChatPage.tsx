@@ -11,8 +11,11 @@ import { isLLMReady } from '../services/llmHealthService';
 import { VectorSearchService } from '../services/vectorSearchService';
 import { type ToolCall } from '../services/zagalinTools';
 import { useZagalinConfig } from '../hooks/useZagalinConfig';
-import { streamAssistantChatRouted as streamAssistantChat } from '../services/assistantServiceRouter';
-import type { AssistantRequest, StreamChunk } from '../services/assistantService';
+import { LLMClient } from '../services/llm/LLMClient';
+import type { AssistantRequest, StreamChunk } from '../services/llm/types';
+
+// Singleton instance for reuse
+const llmClient = new LLMClient();
 import { ContextService } from '../services/contextService';
 
 interface Message {
@@ -89,12 +92,16 @@ function AssistantChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
 
-  // Cleanup subscription on unmount
+  // Abort active stream on component unmount or page unload.
   useEffect(() => {
+    const abort = () => {
+      streamSubscriptionRef.current?.unsubscribe();
+      streamSubscriptionRef.current = null;
+    };
+    window.addEventListener('beforeunload', abort);
     return () => {
-      if (streamSubscriptionRef.current) {
-        streamSubscriptionRef.current.unsubscribe();
-      }
+      window.removeEventListener('beforeunload', abort);
+      abort();
     };
   }, []);
 
@@ -142,7 +149,7 @@ function AssistantChatPage() {
       };
 
       let accumulatedContent = '';
-      const stream = streamAssistantChat(assistantRequest).pipe(
+      const stream = llmClient.chat(assistantRequest).pipe(
         finalize(() => {
           setIsStreaming(false);
         })

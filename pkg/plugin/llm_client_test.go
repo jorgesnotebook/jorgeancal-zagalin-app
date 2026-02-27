@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
@@ -154,10 +155,7 @@ func TestStreamChat(t *testing.T) {
 		},
 		{
 			name:     "HTTP error",
-			response: &http.Response{
-				StatusCode: http.StatusInternalServerError,
-				Body:       io.NopCloser(strings.NewReader(`{"error": "internal error"}`)),
-			},
+			response: nil, // overridden by roundTripFunc below
 			wantErr:    true,
 			wantChunks: 0,
 		},
@@ -186,11 +184,25 @@ func TestStreamChat(t *testing.T) {
 				err:      tt.err,
 			}
 
+			// For retryable status codes (5xx), use roundTripFunc to return a fresh body per attempt.
+			if tt.name == "HTTP error" {
+				mockTransport.roundTripFunc = func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusInternalServerError,
+						Body:       io.NopCloser(strings.NewReader(`{"error": "internal error"}`)),
+					}, nil
+				}
+			}
+
 			httpClient := &http.Client{
 				Transport: mockTransport,
 			}
 
 			client := NewLLMClient("http://localhost:3000", "", httpClient, log.DefaultLogger)
+			// Zero out retry delays so retryable-error tests don't slow down the suite.
+			if tt.name == "HTTP error" || tt.name == "network error" {
+				client.retryDelays = []time.Duration{0, 0}
+			}
 
 			ctx := context.Background()
 			incomingReq := httptest.NewRequest("GET", "/", nil)
@@ -313,6 +325,51 @@ func TestStreamChatAuthenticationHeaders(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestStreamChatContextCancellationSlowStream verifies the reader goroutine
+// exits promptly when the context is cancelled while no data is flowing
+// (simulates a slow LLM that hasn't sent the first token yet).
+func TestStreamChatContextCancellationSlowStream(t *testing.T) {
+	// A pipe where the write end never writes — simulates a silent LLM.
+	pr, pw := io.Pipe()
+	defer pw.Close()
+
+	mockHTTP := &mockRoundTripper{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       pr,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		},
+	}
+
+	client := NewLLMClient("http://localhost:3000", "", newMockHTTPClient(mockHTTP), log.DefaultLogger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	incomingReq := httptest.NewRequest("GET", "/", nil)
+
+	chunks, err := client.StreamChat(ctx, LLMStreamRequest{
+		Model:    "gpt-4",
+		Messages: []AssistantMessage{{Role: "user", Content: "test"}},
+	}, incomingReq)
+	if err != nil {
+		t.Fatalf("StreamChat() unexpected error: %v", err)
+	}
+
+	// Cancel while no data is flowing; the goroutine must exit promptly.
+	cancel()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-chunks:
+			if !ok {
+				return // channel closed — goroutine exited as expected
+			}
+		case <-deadline:
+			t.Fatal("reader goroutine did not exit within 2s after context cancellation")
+		}
 	}
 }
 
@@ -669,14 +726,24 @@ func TestStreamChatErrorResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			statusCode := tt.statusCode
+			responseBody := tt.responseBody
+
+			// For retryable statuses (5xx, 429) use roundTripFunc so each attempt
+			// gets a fresh response body, and zero out delays to keep the suite fast.
 			mockHTTP := &mockRoundTripper{
-				response: &http.Response{
-					StatusCode: tt.statusCode,
-					Body:       io.NopCloser(strings.NewReader(tt.responseBody)),
+				roundTripFunc: func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: statusCode,
+						Body:       io.NopCloser(strings.NewReader(responseBody)),
+					}, nil
 				},
 			}
 
 			client := NewLLMClient("http://localhost:3000", "", newMockHTTPClient(mockHTTP), log.DefaultLogger)
+			if isRetryableLLMStatus(tt.statusCode) {
+				client.retryDelays = []time.Duration{0, 0}
+			}
 
 			ctx := context.Background()
 			incomingReq := httptest.NewRequest("GET", "/", nil)

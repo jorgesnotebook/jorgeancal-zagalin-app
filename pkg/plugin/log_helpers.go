@@ -1,9 +1,25 @@
 package plugin
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 )
+
+type contextKey string
+
+const correlationIDKey contextKey = "correlationId"
+
+func ContextWithCorrelationID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, correlationIDKey, id)
+}
+
+func CorrelationIDFromContext(ctx context.Context) string {
+	if id, ok := ctx.Value(correlationIDKey).(string); ok {
+		return id
+	}
+	return ""
+}
 
 func hashQuery(query string) string {
 	if query == "" {

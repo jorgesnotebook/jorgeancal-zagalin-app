@@ -148,27 +148,6 @@ export const ZAGALIN_TOOLS: Tool[] = [
   {
     type: 'function',
     function: {
-      name: 'get_panel_data',
-      description: 'Retrieve current data from a dashboard panel',
-      parameters: {
-        type: 'object',
-        properties: {
-          dashboardUid: {
-            type: 'string',
-            description: 'Dashboard UID',
-          },
-          panelId: {
-            type: 'number',
-            description: 'Panel ID',
-          },
-        },
-        required: ['dashboardUid', 'panelId'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
       name: 'get_logs',
       description:
         'Fetch and analyze logs from a Loki datasource. Use this when the user asks about logs they are viewing or when you need to investigate log patterns, errors, or volume. Returns log analysis with trends, error rates, and notable messages.',
@@ -222,27 +201,6 @@ export const ZAGALIN_TOOLS: Tool[] = [
       },
     },
   },
-  {
-    type: 'function',
-    function: {
-      name: 'explain_error',
-      description: 'Provide a detailed explanation of an error message or status code',
-      parameters: {
-        type: 'object',
-        properties: {
-          errorMessage: {
-            type: 'string',
-            description: 'The error message or status code to explain',
-          },
-          context: {
-            type: 'string',
-            description: 'Additional context (e.g., which service, what operation)',
-          },
-        },
-        required: ['errorMessage'],
-      },
-    },
-  },
 ];
 
 /**
@@ -269,10 +227,147 @@ export function parseToolArguments<T = any>(args: string): T | null {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Tool permission gating
+// ---------------------------------------------------------------------------
+
 /**
- * Handle tool call execution
+ * Per-tool in-progress status messages shown in the chat UI while a tool is
+ * executing. Displayed immediately when a tool call is detected so users see
+ * feedback rather than a blank wait.
  */
-export async function executeToolCall(toolCall: ToolCall): Promise<any> {
+export const TOOL_STATUS_MESSAGES: Record<string, string> = {
+  execute_promql: 'Querying Prometheus…',
+  execute_logql: 'Fetching logs from Loki…',
+  execute_traceql: 'Searching traces in Tempo…',
+  get_trace_by_id: 'Fetching trace details…',
+  get_logs: 'Analysing logs…',
+  get_firing_alerts: 'Checking firing alerts…',
+  search_dashboards: 'Searching dashboards…',
+  get_dashboard: 'Loading dashboard details…',
+  get_annotations: 'Fetching annotations…',
+  list_folders: 'Listing folders…',
+  navigate_to_dashboard: 'Navigating to dashboard…',
+  open_explore_view: 'Opening Explore view…',
+  create_promql_query: 'Generating PromQL query…',
+  create_logql_query: 'Generating LogQL query…',
+  create_traceql_query: 'Generating TraceQL query…',
+};
+
+/**
+ * Tools that execute queries against live production systems.
+ * When permission gating is enabled, the user must approve before these run.
+ */
+export const TOOLS_REQUIRING_PERMISSION = new Set<string>([
+  'execute_promql',
+  'execute_logql',
+  'execute_traceql',
+  'get_logs',
+  'get_trace_by_id',
+]);
+
+/**
+ * Callback invoked when a sensitive tool needs user approval.
+ * Should return true to allow execution, false to deny.
+ */
+export type PermissionChecker = (toolName: string, permissionMessage: string) => Promise<boolean>;
+
+// ---------------------------------------------------------------------------
+// Tool output sanitization
+// ---------------------------------------------------------------------------
+
+/** Maximum serialized size (in characters) allowed for a single tool result. */
+export const MAX_TOOL_OUTPUT_CHARS = 20_000;
+
+/**
+ * Structural delimiters used by various LLM providers to separate conversation
+ * roles. A datasource result that contains these tokens could be interpreted as
+ * role-switching instructions when embedded in the conversation history.
+ */
+const INJECTION_DELIMITERS: string[] = [
+  '<|im_start|>',
+  '<|im_end|>',
+  '<|system|>',
+  '<|user|>',
+  '<|assistant|>',
+  '[INST]',
+  '[/INST]',
+  '<<SYS>>',
+  '<</SYS>>',
+  '<system>',
+  '</system>',
+];
+
+// Build a single case-insensitive regex from all delimiters.
+const INJECTION_DELIMITER_RE = new RegExp(
+  INJECTION_DELIMITERS.map((d) => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'),
+  'gi'
+);
+
+/**
+ * Recursively strip injection delimiters from all string values in an unknown
+ * value (object, array, or primitive).
+ */
+function sanitizeValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return value.replace(INJECTION_DELIMITER_RE, '');
+  }
+  if (Array.isArray(value)) {
+    return value.map(sanitizeValue);
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = sanitizeValue(v);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Sanitize a tool result before it is serialised into the conversation history:
+ *  1. Strip LLM prompt-injection delimiters from all string fields.
+ *  2. Truncate the serialised output to MAX_TOOL_OUTPUT_CHARS with a clear
+ *     notice so the LLM knows the data was cut.
+ *
+ * Exported for unit testing.
+ */
+export function sanitizeToolOutput(toolName: string, result: unknown): unknown {
+  const sanitized = sanitizeValue(result);
+
+  const serialized = JSON.stringify(sanitized);
+  if (serialized.length > MAX_TOOL_OUTPUT_CHARS) {
+    console.warn(
+      `[zagalinTools] Output for "${toolName}" truncated: ${serialized.length} → ${MAX_TOOL_OUTPUT_CHARS} chars`
+    );
+    return {
+      _truncated: true,
+      _originalSize: serialized.length,
+      _notice: `Result truncated to ${MAX_TOOL_OUTPUT_CHARS} characters. Summarise from the partial data below.`,
+      data: serialized.slice(0, MAX_TOOL_OUTPUT_CHARS),
+    };
+  }
+
+  return sanitized;
+}
+
+/**
+ * Handle tool call execution.
+ *
+ * @param toolCall          The tool call to execute.
+ * @param permissionChecker Optional callback for sensitive tools. When provided,
+ *                          tools in TOOLS_REQUIRING_PERMISSION pause and await
+ *                          approval before executing. Returning false cancels
+ *                          execution with an "execution denied" result.
+ * @param permissionMessage Custom message shown to the user during approval.
+ *                          Defaults to a generic prompt when omitted.
+ */
+export async function executeToolCall(
+  toolCall: ToolCall,
+  permissionChecker?: PermissionChecker,
+  permissionMessage?: string
+): Promise<any> {
   const args = parseToolArguments(toolCall.function.arguments);
   if (!args) {
     return { error: 'Invalid tool arguments' };
@@ -295,7 +390,27 @@ export async function executeToolCall(toolCall: ToolCall): Promise<any> {
     console.info('[zagalinTools] Using sanitized query:', args._sanitized_query);
   }
 
-  switch (toolCall.function.name) {
+  // Gate sensitive tools behind user approval when a checker is provided.
+  if (permissionChecker && TOOLS_REQUIRING_PERMISSION.has(toolCall.function.name)) {
+    const message =
+      permissionMessage ||
+      `Allow tool "${toolCall.function.name}" to execute a live query against a production datasource?`;
+    const allowed = await permissionChecker(toolCall.function.name, message);
+    if (!allowed) {
+      console.info(`[zagalinTools] Execution denied by user: ${toolCall.function.name}`);
+      return {
+        error: 'Execution denied by user',
+        toolName: toolCall.function.name,
+      };
+    }
+  }
+
+  const rawResult = await dispatchToolCall(toolCall.function.name, args);
+  return sanitizeToolOutput(toolCall.function.name, rawResult);
+}
+
+async function dispatchToolCall(name: string, args: any): Promise<any> {
+  switch (name) {
     case 'navigate_to_dashboard':
       return navigateToDashboard(args.dashboardUid, args.panelId);
 
@@ -311,20 +426,38 @@ export async function executeToolCall(toolCall: ToolCall): Promise<any> {
     case 'get_trace_by_id':
       return getTraceById(args);
 
-    case 'get_panel_data':
-      return { message: 'Panel data retrieval not yet implemented', args };
-
     case 'get_logs':
       return getLogs(args);
 
     case 'open_explore_view':
       return openExploreView(args);
 
-    case 'explain_error':
-      return { message: 'Error explanation delegated to LLM', args };
+    case 'execute_promql':
+      return executePromQL(args);
+
+    case 'execute_logql':
+      return executeLogQL(args);
+
+    case 'execute_traceql':
+      return executeTraceQL(args);
+
+    case 'get_firing_alerts':
+      return getFiringAlerts(args);
+
+    case 'search_dashboards':
+      return searchDashboards(args);
+
+    case 'get_dashboard':
+      return getDashboard(args);
+
+    case 'get_annotations':
+      return getAnnotations(args);
+
+    case 'list_folders':
+      return listFolders(args);
 
     default:
-      return { error: `Unknown tool: ${toolCall.function.name}` };
+      return { error: `Unknown tool: ${name}` };
   }
 }
 
@@ -761,5 +894,225 @@ function openExploreView(params: ExploreParams): NavigationResult {
   } catch (error) {
     console.error('Failed to construct explore URL:', error);
     return { success: false, error: 'Failed to construct URL' };
+  }
+}
+
+/**
+ * Execute PromQL query and return structured analytics
+ */
+async function executePromQL(params: any): Promise<any> {
+  const { datasourceUid, query, from, to, step } = params;
+
+  if (!datasourceUid || !query) {
+    return {
+      success: false,
+      error: 'Missing required parameters: datasourceUid and query',
+    };
+  }
+
+  try {
+    const { getBackendSrv } = await import('@grafana/runtime');
+
+    const response = await getBackendSrv().post(
+      '/api/plugins/jorgeancal-zagalin-app/resources/tools/execute_promql',
+      {
+        datasourceUid,
+        query,
+        from: from || 'now-15m',
+        to: to || 'now',
+        step: step || undefined,
+        serviceName: params.serviceName,
+        environmentName: params.environmentName,
+      }
+    );
+
+    return {
+      success: true,
+      ...response,
+    };
+  } catch (error: any) {
+    console.error('Failed to execute PromQL query:', error);
+    return {
+      success: false,
+      error: `Failed to execute PromQL query: ${error.message || 'Unknown error'}`,
+      query,
+      datasourceUid,
+    };
+  }
+}
+
+/**
+ * Execute LogQL query and return log analysis
+ */
+async function executeLogQL(params: any): Promise<any> {
+  const { datasourceUid, query, from, to, limit } = params;
+
+  if (!datasourceUid || !query) {
+    return {
+      success: false,
+      error: 'Missing required parameters: datasourceUid and query',
+    };
+  }
+
+  try {
+    const { getBackendSrv } = await import('@grafana/runtime');
+
+    const response = await getBackendSrv().post(
+      '/api/plugins/jorgeancal-zagalin-app/resources/tools/execute_logql',
+      {
+        datasourceUid,
+        query,
+        from: from || 'now-15m',
+        to: to || 'now',
+        limit: limit || 1000,
+        serviceName: params.serviceName,
+        environmentName: params.environmentName,
+      }
+    );
+
+    return {
+      success: true,
+      ...response,
+    };
+  } catch (error: any) {
+    console.error('Failed to execute LogQL query:', error);
+    return {
+      success: false,
+      error: `Failed to execute LogQL query: ${error.message || 'Unknown error'}`,
+      query,
+      datasourceUid,
+    };
+  }
+}
+
+/**
+ * Execute TraceQL query and return trace analytics
+ */
+async function executeTraceQL(params: any): Promise<any> {
+  const { datasourceUid, query, from, to, limit } = params;
+
+  if (!datasourceUid || !query) {
+    return {
+      success: false,
+      error: 'Missing required parameters: datasourceUid and query',
+    };
+  }
+
+  try {
+    const { getBackendSrv } = await import('@grafana/runtime');
+
+    const response = await getBackendSrv().post(
+      '/api/plugins/jorgeancal-zagalin-app/resources/tools/execute_traceql',
+      {
+        datasourceUid,
+        query,
+        from: from || 'now-15m',
+        to: to || 'now',
+        limit: limit || 100,
+        serviceName: params.serviceName,
+        environmentName: params.environmentName,
+      }
+    );
+
+    return {
+      success: true,
+      ...response,
+    };
+  } catch (error: any) {
+    console.error('Failed to execute TraceQL query:', error);
+    return {
+      success: false,
+      error: `Failed to execute TraceQL query: ${error.message || 'Unknown error'}`,
+      query,
+      datasourceUid,
+    };
+  }
+}
+
+/**
+ * Fetch currently firing alerts from Grafana Alertmanager
+ */
+async function getFiringAlerts(params: any): Promise<any> {
+  try {
+    const { getBackendSrv } = await import('@grafana/runtime');
+    const response = await getBackendSrv().post(
+      '/api/plugins/jorgeancal-zagalin-app/resources/tools/get_firing_alerts',
+      params || {}
+    );
+    return { success: true, ...response };
+  } catch (error: any) {
+    console.error('Failed to get firing alerts:', error);
+    return { success: false, error: `Failed to get firing alerts: ${error.message || 'Unknown error'}` };
+  }
+}
+
+/**
+ * Search Grafana dashboards by title or tag
+ */
+async function searchDashboards(params: any): Promise<any> {
+  try {
+    const { getBackendSrv } = await import('@grafana/runtime');
+    const response = await getBackendSrv().post(
+      '/api/plugins/jorgeancal-zagalin-app/resources/tools/search_dashboards',
+      params || {}
+    );
+    return { success: true, ...response };
+  } catch (error: any) {
+    console.error('Failed to search dashboards:', error);
+    return { success: false, error: `Failed to search dashboards: ${error.message || 'Unknown error'}` };
+  }
+}
+
+/**
+ * Fetch a specific Grafana dashboard by UID
+ */
+async function getDashboard(params: any): Promise<any> {
+  if (!params?.uid) {
+    return { success: false, error: 'Missing required parameter: uid' };
+  }
+  try {
+    const { getBackendSrv } = await import('@grafana/runtime');
+    const response = await getBackendSrv().post(
+      '/api/plugins/jorgeancal-zagalin-app/resources/tools/get_dashboard',
+      params
+    );
+    return { success: true, ...response };
+  } catch (error: any) {
+    console.error('Failed to get dashboard:', error);
+    return { success: false, error: `Failed to get dashboard: ${error.message || 'Unknown error'}` };
+  }
+}
+
+/**
+ * Fetch Grafana annotations for a given time range
+ */
+async function getAnnotations(params: any): Promise<any> {
+  try {
+    const { getBackendSrv } = await import('@grafana/runtime');
+    const response = await getBackendSrv().post(
+      '/api/plugins/jorgeancal-zagalin-app/resources/tools/get_annotations',
+      params || {}
+    );
+    return { success: true, ...response };
+  } catch (error: any) {
+    console.error('Failed to get annotations:', error);
+    return { success: false, error: `Failed to get annotations: ${error.message || 'Unknown error'}` };
+  }
+}
+
+/**
+ * List all Grafana folders
+ */
+async function listFolders(params: any): Promise<any> {
+  try {
+    const { getBackendSrv } = await import('@grafana/runtime');
+    const response = await getBackendSrv().post(
+      '/api/plugins/jorgeancal-zagalin-app/resources/tools/list_folders',
+      params || {}
+    );
+    return { success: true, ...response };
+  } catch (error: any) {
+    console.error('Failed to list folders:', error);
+    return { success: false, error: `Failed to list folders: ${error.message || 'Unknown error'}` };
   }
 }

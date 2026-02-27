@@ -17,11 +17,13 @@ import (
 )
 
 type AssistantRequest struct {
-	Message  string             `json:"message"`
-	History  []AssistantMessage `json:"history"`
-	Context  AssistantContext   `json:"context"`
-	SkillHint string            `json:"skillHint,omitempty"`
-	Mode     string             `json:"mode,omitempty"` 
+	Message       string             `json:"message"`
+	History       []AssistantMessage `json:"history"`
+	Context       AssistantContext   `json:"context"`
+	SkillHint     string             `json:"skillHint,omitempty"`
+	Mode          string             `json:"mode,omitempty"`
+	Step          int                `json:"step,omitempty"` // Current tool-call turn (0 = user-initiated)
+	CorrelationID string             `json:"correlationId,omitempty"`
 }
 
 type AssistantResponse struct {
@@ -183,8 +185,16 @@ func (a *App) determineSkillAndMode(assistantReq *AssistantRequest) (skill strin
 }
 
 func (a *App) buildMessages(skill string, assistantReq *AssistantRequest) []AssistantMessage {
+	sanitizedMsg := sanitizeUserMessage(assistantReq.Message)
+	if sanitizedMsg != assistantReq.Message {
+		backend.Logger.Warn("User message sanitized before LLM call",
+			"originalLen", len(assistantReq.Message),
+			"sanitizedLen", len(sanitizedMsg),
+		)
+	}
+
 	systemPrompt := BuildSystemPrompt(skill, assistantReq.Context, a.settings, a.contextManager, assistantReq.Mode)
-	userPrompt := BuildUserPrompt(skill, assistantReq.Message, assistantReq.Context)
+	userPrompt := BuildUserPrompt(skill, sanitizedMsg, assistantReq.Context)
 
 	messages := []AssistantMessage{
 		{
@@ -201,13 +211,13 @@ func (a *App) buildMessages(skill string, assistantReq *AssistantRequest) []Assi
 			Content: userPrompt,
 		})
 	} else {
-		if assistantReq.Message != "" {
+		if sanitizedMsg != "" {
 			messages = append(messages, AssistantMessage{
 				Role:    "user",
-				Content: assistantReq.Message,
+				Content: sanitizedMsg,
 			})
 		}
-		if userPrompt != "" && userPrompt != assistantReq.Message {
+		if userPrompt != "" && userPrompt != sanitizedMsg {
 			messages = append(messages, AssistantMessage{
 				Role:    "user",
 				Content: userPrompt,
@@ -228,20 +238,56 @@ func (a *App) buildLLMRequest(messages []AssistantMessage, mode string) LLMStrea
 	}
 
 	model := ""
+	var fallbackModels []string
 	if a.settings != nil && a.settings.LLMModel != "" {
 		model = a.settings.LLMModel
 		backend.Logger.Debug("Using model from plugin settings", "model", model, "mode", mode)
 	} else {
 		backend.Logger.Debug("Using default model from grafana-llm-app (no model configured in Zagalin settings)", "mode", mode)
 	}
+	if a.settings != nil {
+		fallbackModels = a.settings.LLMFallbackModels
+	}
+
+	tools := GetTools(true, a.settings, a.getCachedDatasources())
+
+	// Apply Anthropic prompt caching when a Claude model is configured.
+	// The system prompt is large and stable across turns — caching it cuts
+	// costs by ~90% and latency by ~85% on cache hits.
+	// Tool definitions are also stable; placing a breakpoint on the last tool
+	// adds a second cache layer at minimal extra cost.
+	if isAnthropicModel(model) {
+		for i, msg := range messages {
+			if msg.Role == "system" && msg.Content != "" {
+				messages[i] = AssistantMessage{
+					Role:    "system",
+					Content: msg.Content,
+					ContentBlocks: []ContentBlock{
+						{
+							Type:         "text",
+							Text:         msg.Content,
+							CacheControl: &CacheControl{Type: "ephemeral"},
+						},
+					},
+				}
+				backend.Logger.Debug("Applied cache_control to system message", "model", model)
+				break
+			}
+		}
+		if len(tools) > 0 {
+			tools[len(tools)-1].CacheControl = &CacheControl{Type: "ephemeral"}
+			backend.Logger.Debug("Applied cache_control to last tool definition", "model", model, "tool", tools[len(tools)-1].Function.Name)
+		}
+	}
 
 	return LLMStreamRequest{
 		Model:               model,
+		FallbackModels:      fallbackModels,
 		Messages:            messages,
 		Temperature:         temperature,
 		MaxTokens:           getMaxTokensForModel(model, maxTokens),
 		MaxCompletionTokens: getMaxCompletionTokensForModel(model, maxTokens),
-		Tools:               GetTools(true, a.settings),
+		Tools:               tools,
 		ToolChoice:          "auto",
 		Stream:              true,
 	}
@@ -267,6 +313,9 @@ func (a *App) createLLMClient() *LLMClient {
 func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
+	// Correlation ID: prefer header → body field → generate.
+	correlationID := req.Header.Get("X-Correlation-ID")
+
 	user, err := extractUserIdentity(req)
 	if err != nil {
 		sendErrorResponse(rw, "Authentication required", err, http.StatusUnauthorized)
@@ -284,32 +333,95 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if correlationID == "" && assistantReq.CorrelationID != "" {
+		correlationID = assistantReq.CorrelationID
+	}
+	if correlationID == "" {
+		correlationID = uuid.New().String()
+	}
+	ctx = ContextWithCorrelationID(ctx, correlationID)
+
+	// Max-turns protection: stop the tool-call loop before it can run indefinitely.
+	maxSteps := 10
+	if a.settings != nil && a.settings.MaxSteps > 0 {
+		maxSteps = a.settings.MaxSteps
+	}
+	if assistantReq.Step >= maxSteps {
+		backend.Logger.Warn("Max tool-call steps reached, stopping loop",
+			"user", user.UserLogin,
+			"step", assistantReq.Step,
+			"maxSteps", maxSteps,
+			"correlationId", correlationID,
+		)
+		a.streamMaxStepsReached(rw, maxSteps)
+		return
+	}
+
 	skill, mode := a.determineSkillAndMode(assistantReq)
 	messages := a.buildMessages(skill, assistantReq)
+	messages = repairOrphanedToolUseBlocks(messages)
 	llmReq := a.buildLLMRequest(messages, mode)
 	llmClient := a.createLLMClient()
 
-	// DEBUG: Log tools being sent
+	// Proactive summarization: compress history before hitting the context window limit.
+	var compressedHistory []AssistantMessage
+	if shouldSummarize(messages, llmReq.Model) {
+		backend.Logger.Info("Context window approaching limit, summarizing conversation",
+			"estimatedTokens", estimateTokens(messages),
+			"contextWindow", getContextWindowForModel(llmReq.Model),
+			"correlationId", correlationID,
+		)
+		summary, sumErr := a.summarizeConversation(ctx, assistantReq.History)
+		if sumErr == nil {
+			checkpoint := BuildCheckpointMessage(summary)
+			compressedHistory = []AssistantMessage{checkpoint}
+			compressedReq := *assistantReq
+			compressedReq.History = compressedHistory
+			messages = a.buildMessages(skill, &compressedReq)
+			messages = repairOrphanedToolUseBlocks(messages)
+			llmReq = a.buildLLMRequest(messages, mode)
+		} else {
+			backend.Logger.Warn("Summarization failed, continuing with full history", "error", sumErr)
+		}
+	}
+
 	backend.Logger.Info("LLM request prepared",
 		"skill", skill,
 		"mode", mode,
 		"model", llmReq.Model,
 		"toolCount", len(llmReq.Tools),
 		"temperature", llmReq.Temperature,
+		"correlationId", correlationID,
 	)
 	if len(llmReq.Tools) > 0 {
 		toolNames := make([]string, 0, len(llmReq.Tools))
 		for _, tool := range llmReq.Tools {
 			toolNames = append(toolNames, tool.Function.Name)
 		}
-		backend.Logger.Info("Tools included in LLM request", "tools", toolNames)
+		backend.Logger.Info("Tools included in LLM request", "tools", toolNames, "correlationId", correlationID)
 	}
 
 	chunkChan, err := llmClient.StreamChat(ctx, llmReq, req)
 	if err != nil {
-		backend.Logger.Error("Failed to call grafana-llm-app", "error", err, "user", user.UserLogin)
-		sendErrorResponse(rw, "Failed to call LLM", err, http.StatusInternalServerError)
-		return
+		// Reactive fallback: context window error after a large history with no prior compression.
+		if isContextWindowError(err) && compressedHistory == nil {
+			backend.Logger.Info("Context window error, attempting reactive summarization", "correlationId", correlationID)
+			summary, sumErr := a.summarizeConversation(ctx, assistantReq.History)
+			if sumErr == nil {
+				checkpoint := BuildCheckpointMessage(summary)
+				compressedHistory = []AssistantMessage{checkpoint}
+				compressedReq := *assistantReq
+				compressedReq.History = compressedHistory
+				messages = a.buildMessages(skill, &compressedReq)
+				llmReq = a.buildLLMRequest(messages, mode)
+				chunkChan, err = llmClient.StreamChat(ctx, llmReq, req)
+			}
+		}
+		if err != nil {
+			backend.Logger.Error("Failed to call grafana-llm-app", "error", err, "user", user.UserLogin, "correlationId", correlationID)
+			sendErrorResponse(rw, "Failed to call LLM", err, http.StatusInternalServerError)
+			return
+		}
 	}
 
 	signalType := detectSignalType(assistantReq.Message, assistantReq.Context)
@@ -322,9 +434,10 @@ func (a *App) handleLLMChat(rw http.ResponseWriter, req *http.Request) {
 		"hasDashboardContext", assistantReq.Context.Dashboard != nil,
 		"messageLength", len(assistantReq.Message),
 		"historyLength", len(assistantReq.History),
+		"correlationId", correlationID,
 	)
 
-	a.streamSSEResponseWithValidation(ctx, rw, chunkChan, skill, user)
+	a.streamSSEResponseWithValidation(ctx, rw, chunkChan, skill, user, compressedHistory)
 }
 
 func streamSSEResponse(ctx context.Context, rw http.ResponseWriter, chunkChan <-chan LLMStreamChunk, skill string) {
@@ -374,7 +487,36 @@ func streamSSEResponse(ctx context.Context, rw http.ResponseWriter, chunkChan <-
 	}
 }
 
-func (a *App) streamSSEResponseWithValidation(ctx context.Context, rw http.ResponseWriter, chunkChan <-chan LLMStreamChunk, skill string, user *UserIdentity) {
+// streamMaxStepsReached sends a single SSE message telling the user the tool step limit was hit.
+func (a *App) streamMaxStepsReached(rw http.ResponseWriter, maxSteps int) {
+	rw.Header().Set("Content-Type", "text/event-stream")
+	rw.Header().Set("Cache-Control", "no-cache")
+	rw.Header().Set("Connection", "keep-alive")
+	rw.WriteHeader(http.StatusOK)
+
+	flusher, ok := rw.(http.Flusher)
+	if !ok {
+		return
+	}
+
+	msg := fmt.Sprintf(
+		"I've reached the maximum number of tool-call steps (%d) for this request. "+
+			"This limit prevents infinite loops. Please rephrase your question or break it into smaller steps.",
+		maxSteps,
+	)
+
+	chunk := LLMStreamChunk{Chunk: msg}
+	if chunkJSON, err := json.Marshal(chunk); err == nil {
+		fmt.Fprintf(rw, "data: %s\n\n", string(chunkJSON))
+		flusher.Flush()
+	}
+
+	doneJSON, _ := json.Marshal(LLMStreamChunk{Done: true})
+	fmt.Fprintf(rw, "data: %s\n\n", string(doneJSON))
+	flusher.Flush()
+}
+
+func (a *App) streamSSEResponseWithValidation(ctx context.Context, rw http.ResponseWriter, chunkChan <-chan LLMStreamChunk, skill string, user *UserIdentity, historyUpdate []AssistantMessage) {
 	rw.Header().Set("Content-Type", "text/event-stream")
 	rw.Header().Set("Cache-Control", "no-cache")
 	rw.Header().Set("Connection", "keep-alive")
@@ -392,12 +534,27 @@ func (a *App) streamSSEResponseWithValidation(ctx context.Context, rw http.Respo
 		flusher.Flush()
 	}
 
+	// Emit compressed history before any text so the frontend can sync storage.
+	if len(historyUpdate) > 0 {
+		updateChunk := LLMStreamChunk{HistoryUpdate: historyUpdate}
+		if chunkJSON, err := json.Marshal(updateChunk); err == nil {
+			fmt.Fprintf(rw, "data: %s\n\n", string(chunkJSON))
+			flusher.Flush()
+		}
+	}
+
+	correlationID := CorrelationIDFromContext(ctx)
 	toolCallAccumulator := make(map[string]*ToolCallChunk)
 
-	backend.Logger.Debug("Starting SSE stream with validation")
+	backend.Logger.Debug("Starting SSE stream with validation", "correlationId", correlationID)
 
 	startTime := time.Now()
 	chunkCount := 0
+
+	// Keepalive: send a heartbeat every 15s to prevent proxy idle-timeout
+	// disconnects while the LLM is thinking between chunks.
+	keepaliveTicker := time.NewTicker(15 * time.Second)
+	defer keepaliveTicker.Stop()
 
 	for {
 		select {
@@ -409,8 +566,13 @@ func (a *App) streamSSEResponseWithValidation(ctx context.Context, rw http.Respo
 				"duration", time.Since(startTime),
 				"chunksDelivered", chunkCount,
 				"reason", ctx.Err(),
+				"correlationId", correlationID,
 			)
 			return
+
+		case <-keepaliveTicker.C:
+			fmt.Fprintf(rw, "data: {\"keepalive\":true}\n\n")
+			flusher.Flush()
 
 		case chunk, ok := <-chunkChan:
 			if !ok {
@@ -468,6 +630,7 @@ func (a *App) streamSSEResponseWithValidation(ctx context.Context, rw http.Respo
 					"chunksDelivered", chunkCount,
 					"completedSuccessfully", chunk.Done && chunk.Error == "",
 					"error", chunk.Error,
+					"correlationId", correlationID,
 				)
 				return
 			}
@@ -495,7 +658,9 @@ func (a *App) validateToolCall(ctx context.Context, toolCall *ToolCallChunk, use
 	var args map[string]interface{}
 	if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
 		return LLMStreamChunk{
-			Error: "Invalid tool arguments: " + err.Error(),
+			Error:     "Invalid tool arguments: " + err.Error(),
+			ErrorType: string(ErrTypeQueryInvalid),
+			Retryable: false,
 		}
 	}
 
@@ -1012,7 +1177,7 @@ Please execute this step and provide concrete findings. Generate specific querie
 		Temperature:         0.7,
 		MaxTokens:           getMaxTokensForModel("gpt-4o-mini", 2000),
 		MaxCompletionTokens: getMaxCompletionTokensForModel("gpt-4o-mini", 2000),
-		Tools:               GetTools(true, a.settings), 
+		Tools:               GetTools(true, a.settings, a.getCachedDatasources()), 
 		ToolChoice:          "auto",
 	}
 
@@ -1194,6 +1359,258 @@ func (a *App) buildFinalMessage(plan *ExecutionPlan, artifacts []Artifact) strin
 	message.WriteString("- Ask follow-up questions if needed\n")
 
 	return message.String()
+}
+
+// estimateTokens approximates the total token count for a message list using the 4-chars-per-token heuristic.
+func estimateTokens(messages []AssistantMessage) int {
+	total := 0
+	for _, m := range messages {
+		total += len(m.Content)/4 + 4
+	}
+	return total
+}
+
+func getContextWindowForModel(model string) int {
+	model = strings.ToLower(model)
+	if strings.HasPrefix(model, "claude-") ||
+		strings.Contains(model, "gpt-4o") ||
+		strings.Contains(model, "gpt-4-turbo") {
+		return 128_000
+	}
+	if strings.Contains(model, "gpt-3.5-turbo-16k") {
+		return 32_000
+	}
+	return 8_192
+}
+
+func shouldSummarize(messages []AssistantMessage, model string) bool {
+	return estimateTokens(messages) > int(float64(getContextWindowForModel(model))*0.80)
+}
+
+// repairOrphanedToolUseBlocks scans the message list and injects a placeholder
+// tool_result for any tool_use block that has no matching tool_result in the
+// immediately following user message. This prevents hard API errors from LLM
+// providers that require every tool_use to be paired with a tool_result.
+func repairOrphanedToolUseBlocks(messages []AssistantMessage) []AssistantMessage {
+	// Local types for JSON parsing — only used inside this function.
+	type toolUseBlock struct {
+		Type  string                 `json:"type"`
+		ID    string                 `json:"id"`
+		Name  string                 `json:"name"`
+		Input map[string]interface{} `json:"input"`
+	}
+	type toolResultBlock struct {
+		Type      string `json:"type"`
+		ToolUseID string `json:"tool_use_id"`
+		Content   string `json:"content"`
+	}
+
+	// extractToolUseIDs returns the IDs of all tool_use entries found in a
+	// JSON-array content string. Returns nil if the content is not a tool array.
+	extractToolUseIDs := func(content string) []string {
+		content = strings.TrimSpace(content)
+		if len(content) == 0 || content[0] != '[' {
+			return nil
+		}
+		var blocks []toolUseBlock
+		if err := json.Unmarshal([]byte(content), &blocks); err != nil {
+			return nil
+		}
+		var ids []string
+		for _, b := range blocks {
+			if b.Type == "tool_use" && b.ID != "" {
+				ids = append(ids, b.ID)
+			}
+		}
+		return ids
+	}
+
+	// extractToolResultIDs returns the set of tool_use_ids found in a user
+	// message whose content is a JSON array of tool_result entries.
+	extractToolResultIDs := func(content string) map[string]bool {
+		content = strings.TrimSpace(content)
+		if len(content) == 0 || content[0] != '[' {
+			return nil
+		}
+		var blocks []toolResultBlock
+		if err := json.Unmarshal([]byte(content), &blocks); err != nil {
+			return nil
+		}
+		ids := make(map[string]bool)
+		for _, b := range blocks {
+			if b.Type == "tool_result" && b.ToolUseID != "" {
+				ids[b.ToolUseID] = true
+			}
+		}
+		return ids
+	}
+
+	// buildPlaceholders creates synthetic tool_result JSON for a list of IDs.
+	buildPlaceholders := func(ids []string) string {
+		type placeholder struct {
+			Type      string `json:"type"`
+			ToolUseID string `json:"tool_use_id"`
+			Content   string `json:"content"`
+		}
+		results := make([]placeholder, 0, len(ids))
+		for _, id := range ids {
+			results = append(results, placeholder{
+				Type:      "tool_result",
+				ToolUseID: id,
+				Content:   "Tool execution was interrupted before a result was returned.",
+			})
+		}
+		b, _ := json.Marshal(results)
+		return string(b)
+	}
+
+	out := make([]AssistantMessage, 0, len(messages))
+	i := 0
+	for i < len(messages) {
+		msg := messages[i]
+		out = append(out, msg)
+
+		if msg.Role != "assistant" {
+			i++
+			continue
+		}
+
+		toolUseIDs := extractToolUseIDs(msg.Content)
+		if len(toolUseIDs) == 0 {
+			i++
+			continue
+		}
+
+		// Check the next message for matching tool_result entries.
+		if i+1 < len(messages) && messages[i+1].Role == "user" {
+			nextMsg := messages[i+1]
+			resultIDs := extractToolResultIDs(nextMsg.Content)
+
+			var orphans []string
+			for _, id := range toolUseIDs {
+				if !resultIDs[id] {
+					orphans = append(orphans, id)
+				}
+			}
+
+			if len(orphans) > 0 {
+				backend.Logger.Warn("Injecting placeholder tool_results for orphaned tool_use blocks",
+					"orphanCount", len(orphans),
+					"orphanIDs", orphans,
+				)
+				// Merge placeholder results into the existing user message.
+				// If it already has tool_result content, append; otherwise replace.
+				var merged []toolResultBlock
+				if resultIDs != nil {
+					_ = json.Unmarshal([]byte(nextMsg.Content), &merged)
+				}
+				for _, id := range orphans {
+					merged = append(merged, toolResultBlock{
+						Type:      "tool_result",
+						ToolUseID: id,
+						Content:   "Tool execution was interrupted before a result was returned.",
+					})
+				}
+				mergedJSON, _ := json.Marshal(merged)
+				// Emit the patched user message instead of the original.
+				out = append(out, AssistantMessage{Role: "user", Content: string(mergedJSON)})
+				i += 2 // consume both the assistant msg (already appended) and the next user msg
+				continue
+			}
+		} else {
+			// No following user message — insert one with placeholder results.
+			backend.Logger.Warn("Inserting missing user message with placeholder tool_results",
+				"orphanCount", len(toolUseIDs),
+				"orphanIDs", toolUseIDs,
+			)
+			out = append(out, AssistantMessage{
+				Role:    "user",
+				Content: buildPlaceholders(toolUseIDs),
+			})
+		}
+
+		i++
+	}
+	return out
+}
+
+func isContextWindowError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "context_length_exceeded") ||
+		strings.Contains(msg, "maximum context length") ||
+		strings.Contains(msg, "too many tokens") ||
+		strings.Contains(msg, "context window")
+}
+
+const maxUserMessageLength = 10_000
+
+// injectionDelimiters are structural tokens used by LLM providers to separate
+// conversation roles. Stripping them prevents prompt injection via delimiter
+// smuggling. English phrases are intentionally NOT stripped to avoid false
+// positives on legitimate SRE queries.
+var injectionDelimiters = []string{
+	"<|im_start|>", "<|im_end|>",
+	"<|system|>", "<|user|>", "<|assistant|>",
+	"[INST]", "[/INST]",
+	"<<SYS>>", "<</SYS>>",
+	"<system>", "</system>",
+}
+
+func sanitizeUserMessage(msg string) string {
+	// 1. Strip null bytes and non-printable control characters (keep \t \n \r).
+	var b strings.Builder
+	for _, r := range msg {
+		if r == '\t' || r == '\n' || r == '\r' || r >= 0x20 {
+			b.WriteRune(r)
+		}
+	}
+	msg = b.String()
+
+	// 2. Strip known prompt-injection delimiters (case-insensitive).
+	msgLower := strings.ToLower(msg)
+	for _, delim := range injectionDelimiters {
+		delimLower := strings.ToLower(delim)
+		for {
+			idx := strings.Index(msgLower, delimLower)
+			if idx == -1 {
+				break
+			}
+			msg = msg[:idx] + msg[idx+len(delim):]
+			msgLower = strings.ToLower(msg)
+		}
+	}
+
+	// 3. Trim whitespace.
+	msg = strings.TrimSpace(msg)
+
+	// 4. Truncate.
+	if len(msg) > maxUserMessageLength {
+		msg = msg[:maxUserMessageLength]
+	}
+
+	return msg
+}
+
+func (a *App) summarizeConversation(ctx context.Context, history []AssistantMessage) (string, error) {
+	llmClient := a.createLLMClient()
+	model := ""
+	if a.settings != nil {
+		model = a.settings.LLMModel
+	}
+	req := LLMStreamRequest{
+		Model: model,
+		Messages: []AssistantMessage{
+			{Role: "user", Content: BuildSummarizationPrompt(history)},
+		},
+		Temperature:         0.3,
+		MaxTokens:           getMaxTokensForModel(model, 600),
+		MaxCompletionTokens: getMaxCompletionTokensForModel(model, 600),
+		Stream:              false,
+	}
+	return llmClient.SimpleChat(ctx, req)
 }
 
 func getMaxTokensForModel(model string, tokenLimit int) int {

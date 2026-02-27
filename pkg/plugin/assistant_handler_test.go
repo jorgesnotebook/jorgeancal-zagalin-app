@@ -224,7 +224,7 @@ func TestStreamSSEResponseWithValidation(t *testing.T) {
 			}
 
 			// Execute
-			app.streamSSEResponseWithValidation(ctx, rw, chunkChan, tt.skill, tt.user)
+			app.streamSSEResponseWithValidation(ctx, rw, chunkChan, tt.skill, tt.user, nil)
 
 			// Verify headers
 			if rw.Header().Get("Content-Type") != "text/event-stream" {

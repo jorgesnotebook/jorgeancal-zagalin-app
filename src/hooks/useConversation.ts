@@ -23,10 +23,12 @@ export interface UseConversationReturn {
   createNew: (context?: GrafanaContext) => void;
   loadConversation: (id: string) => void;
   addMessage: (message: ConversationMessage, context?: GrafanaContext) => void;
+  replaceMessages: (messages: ConversationMessage[]) => Promise<void>;
   addContext: (context: GrafanaContext) => Promise<void>;
   removeContext: (dashboardUid: string) => Promise<void>;
   deleteConversation: (id: string) => void;
   deleteAll: () => void;
+  pruneByAge: (retentionDays: number) => Promise<number>;
   updateTitle: (id: string, title: string) => void;
   togglePin: (id: string) => void;
   clearCurrent: () => void;
@@ -183,6 +185,31 @@ export function useConversation(): UseConversationReturn {
   );
 
   /**
+   * Replace all messages in the current conversation (used after context-window summarization).
+   * Does not refresh the conversation list since no new conversation is created.
+   */
+  const replaceMessages = useCallback(
+    async (newMessages: ConversationMessage[]) => {
+      const currentConv = conversationRef.current;
+      if (!currentConv) {
+        console.warn('[useConversation] replaceMessages: no active conversation');
+        return;
+      }
+
+      const updated = {
+        ...currentConv,
+        messages: newMessages,
+        updatedAt: new Date(),
+      };
+
+      setConversation(updated);
+      conversationRef.current = updated;
+      await ConversationStorage.saveConversation(storage, updated);
+    },
+    [storage]
+  );
+
+  /**
    * Delete a conversation
    */
   const deleteConversation = useCallback(
@@ -274,6 +301,20 @@ export function useConversation(): UseConversationReturn {
   );
 
   /**
+   * Delete conversations older than retentionDays, skipping pinned ones.
+   */
+  const pruneByAge = useCallback(
+    async (retentionDays: number): Promise<number> => {
+      const removed = await ConversationStorage.pruneByAge(storage, retentionDays);
+      if (removed > 0) {
+        await refreshConversationList();
+      }
+      return removed;
+    },
+    [refreshConversationList, storage]
+  );
+
+  /**
    * Clear the current conversation (start fresh)
    */
   const clearCurrent = useCallback(() => {
@@ -357,10 +398,12 @@ export function useConversation(): UseConversationReturn {
     createNew,
     loadConversation,
     addMessage,
+    replaceMessages,
     addContext,
     removeContext,
     deleteConversation,
     deleteAll,
+    pruneByAge,
     updateTitle,
     togglePin,
     clearCurrent,

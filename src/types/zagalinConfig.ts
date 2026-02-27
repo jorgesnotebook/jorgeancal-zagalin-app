@@ -77,6 +77,15 @@ export interface ZagalinConfig {
   autoOpenOnDashboard: boolean;
 
   llmBackend?: 'backend-proxy' | 'grafana-llm' | 'direct';
+
+  toolPermission?: {
+    enabled: boolean;
+    permissionMessage: string;
+  };
+
+  // How many days to keep conversations in localStorage before automatic cleanup.
+  // 0 means unlimited. Default: 90.
+  conversationRetentionDays?: number;
 }
 
 /**
@@ -114,6 +123,8 @@ export const DEFAULT_CONFIG: ZagalinConfig = {
   autoOpenOnDashboard: false,
 
   llmBackend: 'grafana-llm',
+
+  conversationRetentionDays: 90,
 };
 
 export const PERSONALITY_PRESETS: Record<string, string> = {

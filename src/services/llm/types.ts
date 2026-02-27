@@ -69,6 +69,8 @@ export interface AssistantRequest {
   skillHint?: string;
   enrichedMessage?: string;
   mode?: 'standard' | 'design';
+  step?: number; // Current tool-call turn (0 = user-initiated, incremented per tool loop iteration)
+  correlationId?: string;
   attachedContexts?: Array<{
     dashboardUid: string;
     dashboardTitle: string;
@@ -85,7 +87,11 @@ export interface StreamChunk {
   chunk?: string;
   done?: boolean;
   error?: string;
+  error_type?: string;
+  retryable?: boolean;
   tool_call?: ToolCallChunk;
+  history_update?: Message[];
+  keepalive?: boolean;
 }
 
 export interface ToolCallChunk {
