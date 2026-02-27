@@ -130,10 +130,11 @@ describe('LLMClient', () => {
         '/api/plugins/test/resources/llm/chat',
         expect.objectContaining({
           method: 'POST',
-          headers: {
+          headers: expect.objectContaining({
             'Content-Type': 'application/json',
             Accept: 'text/event-stream',
-          },
+            'X-Correlation-ID': expect.stringMatching(/^[0-9a-f-]{36}$/),
+          }),
           credentials: 'same-origin',
         })
       );
@@ -144,6 +145,7 @@ describe('LLMClient', () => {
         history: [],
         context: {},
         mode: 'standard',
+        correlationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
       });
     });
 
