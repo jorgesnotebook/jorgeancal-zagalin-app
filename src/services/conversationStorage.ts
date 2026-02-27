@@ -306,6 +306,30 @@ export class ConversationStorage {
     }
   }
 
+  /**
+   * Remove unpinned conversations whose updatedAt is older than retentionDays.
+   * Pinned conversations are never deleted. retentionDays <= 0 means unlimited.
+   */
+  static async pruneByAge(storage: StorageBackend, retentionDays: number): Promise<number> {
+    if (retentionDays <= 0) {
+      return 0;
+    }
+    try {
+      const conversations = await loadAllConversations(storage);
+      const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+      const kept = conversations.filter((c) => c.isPinned || c.updatedAt >= cutoff);
+      const removed = conversations.length - kept.length;
+      if (removed > 0) {
+        await saveAllConversations(storage, kept);
+        console.log(`[ConversationStorage] Pruned ${removed} conversation(s) older than ${retentionDays} days`);
+      }
+      return removed;
+    } catch (error) {
+      console.error('Failed to prune conversations by age:', error);
+      return 0;
+    }
+  }
+
   static async exportConversations(storage: StorageBackend): Promise<string> {
     const conversations = await loadAllConversations(storage);
     return JSON.stringify(conversations, null, 2);

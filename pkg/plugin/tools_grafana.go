@@ -216,6 +216,366 @@ func formatAlertTime(startsAt string) string {
 	}
 }
 
+// DashboardSearchItem represents a single dashboard in search results
+type DashboardSearchItem struct {
+	UID         string   `json:"uid"`
+	Title       string   `json:"title"`
+	FolderTitle string   `json:"folderTitle,omitempty"`
+	Tags        []string `json:"tags"`
+	URL         string   `json:"url"`
+}
+
+// SearchDashboardsResult is the structured output for search_dashboards
+type SearchDashboardsResult struct {
+	Count      int                   `json:"count"`
+	Dashboards []DashboardSearchItem `json:"dashboards"`
+}
+
+// DashboardPanelSummary is a simplified panel for LLM consumption
+type DashboardPanelSummary struct {
+	ID    int    `json:"id"`
+	Title string `json:"title"`
+	Type  string `json:"type"`
+}
+
+// DashboardResult is the structured output for get_dashboard
+type DashboardResult struct {
+	UID         string                  `json:"uid"`
+	Title       string                  `json:"title"`
+	Tags        []string                `json:"tags"`
+	FolderTitle string                  `json:"folderTitle,omitempty"`
+	Panels      []DashboardPanelSummary `json:"panels"`
+}
+
+// AnnotationItem represents a single annotation
+type AnnotationItem struct {
+	Time int64    `json:"time"`
+	Text string   `json:"text"`
+	Tags []string `json:"tags"`
+}
+
+// AnnotationsResult is the structured output for get_annotations
+type AnnotationsResult struct {
+	Count       int              `json:"count"`
+	Annotations []AnnotationItem `json:"annotations"`
+}
+
+// FolderItem represents a single Grafana folder
+type FolderItem struct {
+	UID   string `json:"uid"`
+	Title string `json:"title"`
+}
+
+// FoldersResult is the structured output for list_folders
+type FoldersResult struct {
+	Count   int          `json:"count"`
+	Folders []FolderItem `json:"folders"`
+}
+
+// searchDashboards searches Grafana dashboards by query/tag
+func (a *App) searchDashboards(ctx context.Context, args map[string]interface{}, user *UserIdentity) (string, error) {
+	grafanaURL := getGrafanaURL()
+
+	query := ""
+	if q, ok := args["query"].(string); ok {
+		query = q
+	}
+	tag := ""
+	if t, ok := args["tag"].(string); ok {
+		tag = t
+	}
+	limit := 50
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+
+	url := fmt.Sprintf("%s/api/search?type=dash-db&limit=%d", grafanaURL, limit)
+	if query != "" {
+		url += "&query=" + query
+	}
+	if tag != "" {
+		url += "&tag=" + tag
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if a.settings != nil && a.settings.ServiceAccountToken != "" {
+		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", a.settings.ServiceAccountToken))
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Grafana-User", user.UserLogin)
+	httpReq.Header.Set("X-Zagalin-User", user.UserLogin)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("search API failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var raw []struct {
+		UID         string   `json:"uid"`
+		Title       string   `json:"title"`
+		FolderTitle string   `json:"folderTitle"`
+		Tags        []string `json:"tags"`
+		URL         string   `json:"url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	result := &SearchDashboardsResult{
+		Count:      len(raw),
+		Dashboards: make([]DashboardSearchItem, 0, len(raw)),
+	}
+	for _, d := range raw {
+		tags := d.Tags
+		if tags == nil {
+			tags = []string{}
+		}
+		result.Dashboards = append(result.Dashboards, DashboardSearchItem{
+			UID:         d.UID,
+			Title:       d.Title,
+			FolderTitle: d.FolderTitle,
+			Tags:        tags,
+			URL:         d.URL,
+		})
+	}
+
+	backend.Logger.Info("Searched dashboards", "count", result.Count, "user", user.UserLogin)
+
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal result: %w", err)
+	}
+	return string(resultJSON), nil
+}
+
+// getDashboard fetches a specific dashboard by UID and returns a simplified summary
+func (a *App) getDashboard(ctx context.Context, args map[string]interface{}, user *UserIdentity) (string, error) {
+	uid, ok := args["uid"].(string)
+	if !ok || uid == "" {
+		return "", fmt.Errorf("missing required parameter: uid")
+	}
+
+	grafanaURL := getGrafanaURL()
+	url := fmt.Sprintf("%s/api/dashboards/uid/%s", grafanaURL, uid)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if a.settings != nil && a.settings.ServiceAccountToken != "" {
+		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", a.settings.ServiceAccountToken))
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Grafana-User", user.UserLogin)
+	httpReq.Header.Set("X-Zagalin-User", user.UserLogin)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("dashboard API failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var raw struct {
+		Dashboard struct {
+			UID    string   `json:"uid"`
+			Title  string   `json:"title"`
+			Tags   []string `json:"tags"`
+			Panels []struct {
+				ID    int    `json:"id"`
+				Title string `json:"title"`
+				Type  string `json:"type"`
+			} `json:"panels"`
+		} `json:"dashboard"`
+		Meta struct {
+			FolderTitle string `json:"folderTitle"`
+		} `json:"meta"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	tags := raw.Dashboard.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+
+	panels := make([]DashboardPanelSummary, 0, len(raw.Dashboard.Panels))
+	for _, p := range raw.Dashboard.Panels {
+		panels = append(panels, DashboardPanelSummary{
+			ID:    p.ID,
+			Title: p.Title,
+			Type:  p.Type,
+		})
+	}
+
+	result := &DashboardResult{
+		UID:         raw.Dashboard.UID,
+		Title:       raw.Dashboard.Title,
+		Tags:        tags,
+		FolderTitle: raw.Meta.FolderTitle,
+		Panels:      panels,
+	}
+
+	backend.Logger.Info("Fetched dashboard", "uid", uid, "user", user.UserLogin)
+
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal result: %w", err)
+	}
+	return string(resultJSON), nil
+}
+
+// getAnnotations fetches annotations from Grafana
+func (a *App) getAnnotations(ctx context.Context, args map[string]interface{}, user *UserIdentity) (string, error) {
+	grafanaURL := getGrafanaURL()
+
+	from := "now-1h"
+	if f, ok := args["from"].(string); ok && f != "" {
+		from = f
+	}
+	to := "now"
+	if t, ok := args["to"].(string); ok && t != "" {
+		to = t
+	}
+
+	url := fmt.Sprintf("%s/api/annotations?from=%s&to=%s&limit=500", grafanaURL, from, to)
+	if dashUID, ok := args["dashboardUID"].(string); ok && dashUID != "" {
+		url += "&dashboardUID=" + dashUID
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if a.settings != nil && a.settings.ServiceAccountToken != "" {
+		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", a.settings.ServiceAccountToken))
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Grafana-User", user.UserLogin)
+	httpReq.Header.Set("X-Zagalin-User", user.UserLogin)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("annotations API failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var raw []struct {
+		Time int64    `json:"time"`
+		Text string   `json:"text"`
+		Tags []string `json:"tags"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	result := &AnnotationsResult{
+		Count:       len(raw),
+		Annotations: make([]AnnotationItem, 0, len(raw)),
+	}
+	for _, a := range raw {
+		tags := a.Tags
+		if tags == nil {
+			tags = []string{}
+		}
+		result.Annotations = append(result.Annotations, AnnotationItem{
+			Time: a.Time,
+			Text: a.Text,
+			Tags: tags,
+		})
+	}
+
+	backend.Logger.Info("Fetched annotations", "count", result.Count, "user", user.UserLogin)
+
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal result: %w", err)
+	}
+	return string(resultJSON), nil
+}
+
+// listFolders lists all Grafana folders
+func (a *App) listFolders(ctx context.Context, args map[string]interface{}, user *UserIdentity) (string, error) {
+	grafanaURL := getGrafanaURL()
+	url := fmt.Sprintf("%s/api/folders", grafanaURL)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if a.settings != nil && a.settings.ServiceAccountToken != "" {
+		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", a.settings.ServiceAccountToken))
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Grafana-User", user.UserLogin)
+	httpReq.Header.Set("X-Zagalin-User", user.UserLogin)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("folders API failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var raw []struct {
+		UID   string `json:"uid"`
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	result := &FoldersResult{
+		Count:   len(raw),
+		Folders: make([]FolderItem, 0, len(raw)),
+	}
+	for _, f := range raw {
+		result.Folders = append(result.Folders, FolderItem{
+			UID:   f.UID,
+			Title: f.Title,
+		})
+	}
+
+	backend.Logger.Info("Listed folders", "count", result.Count, "user", user.UserLogin)
+
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal result: %w", err)
+	}
+	return string(resultJSON), nil
+}
+
 // detectAlertPatterns identifies services with multiple alerts
 func detectAlertPatterns(serviceAlertCounts map[string]int) []AlertPattern {
 	var patterns []AlertPattern

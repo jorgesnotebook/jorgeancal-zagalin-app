@@ -1,8 +1,45 @@
 package plugin
 
+import (
+	"fmt"
+	"strings"
+)
+
+// hasDatasourceType returns true if any cached datasource has a type that
+// contains typeKeyword. Returns true when the cache is empty so tools are not
+// hidden before the cache has been populated for the first time.
+func hasDatasourceType(datasources []DatasourceInfo, typeKeyword string) bool {
+	if len(datasources) == 0 {
+		return true // cache not yet warm — don't gate
+	}
+	for _, ds := range datasources {
+		if strings.Contains(strings.ToLower(ds.Type), typeKeyword) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildDatasourceHint returns " — available: name (uid: uid), ..." for datasources
+// whose type contains the given type keyword (e.g. "prometheus", "loki", "tempo").
+// Returns empty string when the cache is empty or no matching datasource exists.
+func buildDatasourceHint(datasources []DatasourceInfo, typeKeyword string) string {
+	var parts []string
+	for _, ds := range datasources {
+		if strings.Contains(strings.ToLower(ds.Type), typeKeyword) {
+			parts = append(parts, fmt.Sprintf("%s (uid: %s)", ds.Name, ds.UID))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " — available: " + strings.Join(parts, ", ")
+}
+
 type Tool struct {
-	Type     string   `json:"type"`
-	Function Function `json:"function"`
+	Type         string        `json:"type"`
+	Function     Function      `json:"function"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 type Function struct {
@@ -150,27 +187,6 @@ var ZAGALIN_TOOLS = []Tool{
 	{
 		Type: "function",
 		Function: Function{
-			Name:        "get_panel_data",
-			Description: "Retrieve current data from a dashboard panel",
-			Parameters: ToolParameters{
-				Type: "object",
-				Properties: map[string]PropertyDefinition{
-					"dashboardUid": {
-						Type:        "string",
-						Description: "Dashboard UID",
-					},
-					"panelId": {
-						Type:        "number",
-						Description: "Panel ID",
-					},
-				},
-				Required: []string{"dashboardUid", "panelId"},
-			},
-		},
-	},
-	{
-		Type: "function",
-		Function: Function{
 			Name:        "get_logs",
 			Description: "Fetch and analyze logs from a Loki datasource. Use this when the user asks about logs they are viewing or when you need to investigate log patterns, errors, or volume. Returns log analysis with trends, error rates, and notable messages.",
 			Parameters: ToolParameters{
@@ -220,27 +236,6 @@ var ZAGALIN_TOOLS = []Tool{
 					},
 				},
 				Required: []string{"datasource", "query"},
-			},
-		},
-	},
-	{
-		Type: "function",
-		Function: Function{
-			Name:        "explain_error",
-			Description: "Provide a detailed explanation of an error message or status code",
-			Parameters: ToolParameters{
-				Type: "object",
-				Properties: map[string]PropertyDefinition{
-					"errorMessage": {
-						Type:        "string",
-						Description: "The error message or status code to explain",
-					},
-					"context": {
-						Type:        "string",
-						Description: "Additional context (e.g., which service, what operation)",
-					},
-				},
-				Required: []string{"errorMessage"},
 			},
 		},
 	},
@@ -355,29 +350,126 @@ var ZAGALIN_TOOLS = []Tool{
 			},
 		},
 	},
+	{
+		Type: "function",
+		Function: Function{
+			Name:        "search_dashboards",
+			Description: "Search for Grafana dashboards by title or tag. Use this to discover what dashboards exist before navigating to one or recommending a dashboard to the user.",
+			Parameters: ToolParameters{
+				Type: "object",
+				Properties: map[string]PropertyDefinition{
+					"query": {
+						Type:        "string",
+						Description: "Search query to filter dashboards by title (e.g., \"kubernetes\", \"latency\")",
+					},
+					"tag": {
+						Type:        "string",
+						Description: "Filter dashboards by tag (e.g., \"production\", \"team-platform\")",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return (default: 50)",
+					},
+				},
+				Required: []string{},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: Function{
+			Name:        "get_dashboard",
+			Description: "Fetch details of a specific Grafana dashboard by UID. Returns the dashboard title, tags, folder, and a list of panels (id, title, type). Use this to understand what panels a dashboard has before fetching panel data or guiding the user.",
+			Parameters: ToolParameters{
+				Type: "object",
+				Properties: map[string]PropertyDefinition{
+					"uid": {
+						Type:        "string",
+						Description: "The unique identifier (UID) of the dashboard to fetch",
+					},
+				},
+				Required: []string{"uid"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: Function{
+			Name:        "get_annotations",
+			Description: "Fetch Grafana annotations for a given time range and optionally for a specific dashboard. Useful for understanding deployment or incident timelines — annotations often mark deployments, incidents, or other events.",
+			Parameters: ToolParameters{
+				Type: "object",
+				Properties: map[string]PropertyDefinition{
+					"dashboardUID": {
+						Type:        "string",
+						Description: "Filter annotations to a specific dashboard UID (optional)",
+					},
+					"from": {
+						Type:        "string",
+						Description: "Start time for annotations (e.g., \"now-7d\", \"now-1h\"). Default: \"now-1h\"",
+					},
+					"to": {
+						Type:        "string",
+						Description: "End time for annotations (e.g., \"now\"). Default: \"now\"",
+					},
+				},
+				Required: []string{},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: Function{
+			Name:        "list_folders",
+			Description: "List all Grafana folders. Use this to discover how dashboards are organized and to identify which folders exist before searching for dashboards within a specific area.",
+			Parameters: ToolParameters{
+				Type:       "object",
+				Properties: map[string]PropertyDefinition{},
+				Required:   []string{},
+			},
+		},
+	},
 }
 
-func GetTools(functionCallingEnabled bool, settings *Settings) []Tool {
+func GetTools(functionCallingEnabled bool, settings *Settings, datasources []DatasourceInfo) []Tool {
 	if !functionCallingEnabled {
 		return nil
 	}
 
+	hasPrometheus := hasDatasourceType(datasources, "prometheus")
+	hasLoki := hasDatasourceType(datasources, "loki")
+	hasTempo := hasDatasourceType(datasources, "tempo")
+
 	tools := make([]Tool, 0, len(ZAGALIN_TOOLS))
 
 	for _, tool := range ZAGALIN_TOOLS {
-		if tool.Function.Name == "create_promql_query" {
-			tools = append(tools, buildPromQLTool(settings))
-		} else if tool.Function.Name == "create_logql_query" {
-			tools = append(tools, buildLogQLTool(settings))
-		} else if tool.Function.Name == "create_traceql_query" {
-			tools = append(tools, buildTraceQLTool(settings))
-		} else if tool.Function.Name == "execute_promql" {
-			tools = append(tools, buildExecutePromQLTool(settings))
-		} else if tool.Function.Name == "execute_logql" {
-			tools = append(tools, buildExecuteLogQLTool(settings))
-		} else if tool.Function.Name == "execute_traceql" {
-			tools = append(tools, buildExecuteTraceQLTool(settings))
-		} else {
+		name := tool.Function.Name
+
+		// Gate datasource-specific tools based on what is actually configured.
+		if (name == "create_promql_query" || name == "execute_promql") && !hasPrometheus {
+			continue
+		}
+		if (name == "create_logql_query" || name == "execute_logql" || name == "get_logs") && !hasLoki {
+			continue
+		}
+		if (name == "create_traceql_query" || name == "execute_traceql" || name == "get_trace_by_id") && !hasTempo {
+			continue
+		}
+
+		switch name {
+		case "create_promql_query":
+			tools = append(tools, buildPromQLTool(settings, datasources))
+		case "create_logql_query":
+			tools = append(tools, buildLogQLTool(settings, datasources))
+		case "create_traceql_query":
+			tools = append(tools, buildTraceQLTool(settings, datasources))
+		case "execute_promql":
+			tools = append(tools, buildExecutePromQLTool(settings, datasources))
+		case "execute_logql":
+			tools = append(tools, buildExecuteLogQLTool(settings, datasources))
+		case "execute_traceql":
+			tools = append(tools, buildExecuteTraceQLTool(settings, datasources))
+		default:
 			tools = append(tools, tool)
 		}
 	}
@@ -385,7 +477,7 @@ func GetTools(functionCallingEnabled bool, settings *Settings) []Tool {
 	return tools
 }
 
-func buildPromQLTool(settings *Settings) Tool {
+func buildPromQLTool(settings *Settings, datasources []DatasourceInfo) Tool {
 	props := map[string]PropertyDefinition{
 		"metric": {
 			Type:        "string",
@@ -406,7 +498,7 @@ func buildPromQLTool(settings *Settings) Tool {
 		},
 	}
 
-	description := "Generate a PromQL query for Prometheus metrics"
+	description := "Generate a PromQL query for Prometheus metrics" + buildDatasourceHint(datasources, "prometheus")
 
 	if settings != nil && settings.OtelEnforcement.Enabled {
 		props["serviceName"] = PropertyDefinition{
@@ -434,7 +526,7 @@ func buildPromQLTool(settings *Settings) Tool {
 	}
 }
 
-func buildLogQLTool(settings *Settings) Tool {
+func buildLogQLTool(settings *Settings, datasources []DatasourceInfo) Tool {
 	props := map[string]PropertyDefinition{
 		"logStream": {
 			Type:        "string",
@@ -451,7 +543,7 @@ func buildLogQLTool(settings *Settings) Tool {
 		},
 	}
 
-	description := "Generate a LogQL query for Loki logs"
+	description := "Generate a LogQL query for Loki logs" + buildDatasourceHint(datasources, "loki")
 
 	if settings != nil && settings.OtelEnforcement.Enabled {
 		props["serviceName"] = PropertyDefinition{
@@ -479,7 +571,7 @@ func buildLogQLTool(settings *Settings) Tool {
 	}
 }
 
-func buildTraceQLTool(settings *Settings) Tool {
+func buildTraceQLTool(settings *Settings, datasources []DatasourceInfo) Tool {
 	props := map[string]PropertyDefinition{
 		"traceSelector": {
 			Type:        "string",
@@ -495,7 +587,7 @@ func buildTraceQLTool(settings *Settings) Tool {
 		},
 	}
 
-	description := "Generate a TraceQL query for Tempo traces"
+	description := "Generate a TraceQL query for Tempo traces" + buildDatasourceHint(datasources, "tempo")
 
 	if settings != nil && settings.OtelEnforcement.Enabled {
 		props["serviceName"] = PropertyDefinition{
@@ -523,11 +615,11 @@ func buildTraceQLTool(settings *Settings) Tool {
 	}
 }
 
-func buildExecutePromQLTool(settings *Settings) Tool {
+func buildExecutePromQLTool(settings *Settings, datasources []DatasourceInfo) Tool {
 	props := map[string]PropertyDefinition{
 		"datasourceUid": {
 			Type:        "string",
-			Description: "The Prometheus datasource UID",
+			Description: "The Prometheus datasource UID" + buildDatasourceHint(datasources, "prometheus"),
 		},
 		"query": {
 			Type:        "string",
@@ -575,11 +667,11 @@ func buildExecutePromQLTool(settings *Settings) Tool {
 	}
 }
 
-func buildExecuteLogQLTool(settings *Settings) Tool {
+func buildExecuteLogQLTool(settings *Settings, datasources []DatasourceInfo) Tool {
 	props := map[string]PropertyDefinition{
 		"datasourceUid": {
 			Type:        "string",
-			Description: "The Loki datasource UID",
+			Description: "The Loki datasource UID" + buildDatasourceHint(datasources, "loki"),
 		},
 		"query": {
 			Type:        "string",
@@ -627,11 +719,11 @@ func buildExecuteLogQLTool(settings *Settings) Tool {
 	}
 }
 
-func buildExecuteTraceQLTool(settings *Settings) Tool {
+func buildExecuteTraceQLTool(settings *Settings, datasources []DatasourceInfo) Tool {
 	props := map[string]PropertyDefinition{
 		"datasourceUid": {
 			Type:        "string",
-			Description: "The Tempo datasource UID",
+			Description: "The Tempo datasource UID" + buildDatasourceHint(datasources, "tempo"),
 		},
 		"query": {
 			Type:        "string",

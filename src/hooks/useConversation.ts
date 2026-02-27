@@ -28,6 +28,7 @@ export interface UseConversationReturn {
   removeContext: (dashboardUid: string) => Promise<void>;
   deleteConversation: (id: string) => void;
   deleteAll: () => void;
+  pruneByAge: (retentionDays: number) => Promise<number>;
   updateTitle: (id: string, title: string) => void;
   togglePin: (id: string) => void;
   clearCurrent: () => void;
@@ -300,6 +301,20 @@ export function useConversation(): UseConversationReturn {
   );
 
   /**
+   * Delete conversations older than retentionDays, skipping pinned ones.
+   */
+  const pruneByAge = useCallback(
+    async (retentionDays: number): Promise<number> => {
+      const removed = await ConversationStorage.pruneByAge(storage, retentionDays);
+      if (removed > 0) {
+        await refreshConversationList();
+      }
+      return removed;
+    },
+    [refreshConversationList, storage]
+  );
+
+  /**
    * Clear the current conversation (start fresh)
    */
   const clearCurrent = useCallback(() => {
@@ -388,6 +403,7 @@ export function useConversation(): UseConversationReturn {
     removeContext,
     deleteConversation,
     deleteAll,
+    pruneByAge,
     updateTitle,
     togglePin,
     clearCurrent,

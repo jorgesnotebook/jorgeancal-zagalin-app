@@ -192,3 +192,18 @@ func (a *App) getDatasourceType(ctx context.Context, req *http.Request, uid stri
 
 	return "", fmt.Errorf("datasource not found: %s", uid)
 }
+
+// getCachedDatasources returns the current in-memory datasource snapshot without
+// making any network calls. Returns nil if the cache has never been populated.
+func (a *App) getCachedDatasources() []DatasourceInfo {
+	if a.datasourceCache == nil {
+		return nil
+	}
+	a.datasourceCache.mu.RLock()
+	defer a.datasourceCache.mu.RUnlock()
+	result := make([]DatasourceInfo, 0, len(a.datasourceCache.datasources))
+	for _, ds := range a.datasourceCache.datasources {
+		result = append(result, ds)
+	}
+	return result
+}

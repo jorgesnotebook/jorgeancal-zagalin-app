@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo, KeyboardEvent } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback, KeyboardEvent } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import {
@@ -22,6 +22,7 @@ import { ZagalinColors } from '../../theme/colors';
 import { isLLMReady } from '../../services/llmHealthService';
 import { VectorSearchService } from '../../services/vectorSearchService';
 import { type ToolCall } from '../../services/zagalinTools';
+import { isZagalinError, type ZagalinError } from '../../services/errors';
 import { useConversation } from '../../hooks/useConversation';
 import type { ConversationMessage } from '../../services/conversationStorage';
 import { ConversationListSidebar } from './ConversationListSidebar';
@@ -40,6 +41,7 @@ import type { ExecutionPlan } from '../../services/frontendPrompts';
 import { needsOrchestration } from '../../services/orchestrationDetector';
 import { isDashboardQuestion, readDashboardPanels, buildDashboardSummaryPrompt } from '../../services/dashboardReader';
 import { ContextService } from '../../services/contextService';
+import { getPluginApiUrl } from '../../services/pluginUrl';
 import { generateMessageId } from '../../utils/idGenerator';
 import { STREAMING_ANIMATION } from '../../utils/constants';
 
@@ -98,10 +100,46 @@ function sanitizeMarkdown(content: string): string {
 
 export type ChatMode = 'standard' | 'design';
 
+const FOLLOW_UPS_RE = /<follow-ups>([\s\S]*?)<\/follow-ups>/;
+
+function extractFollowUps(text: string): { content: string; suggestions: string[] } {
+  const match = text.match(FOLLOW_UPS_RE);
+  if (!match) {
+    return { content: text, suggestions: [] };
+  }
+  let suggestions: string[] = [];
+  try {
+    const parsed = JSON.parse(match[1].trim());
+    if (Array.isArray(parsed)) {
+      suggestions = parsed.filter((item): item is string => typeof item === 'string').slice(0, 3);
+    }
+  } catch {
+    // ignore parse errors — suggestions are best-effort
+  }
+  return { content: text.replace(FOLLOW_UPS_RE, '').trimEnd(), suggestions };
+}
+
+function formatAge(date: Date): string {
+  const diffMs = Date.now() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 1) {
+    return 'just now';
+  }
+  if (diffMin < 60) {
+    return `${diffMin}m ago`;
+  }
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) {
+    return `${diffH}h ago`;
+  }
+  return `${Math.floor(diffH / 24)}d ago`;
+}
+
 export function ChatPanel() {
   const s = useStyles2(getStyles);
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [zagalinError, setZagalinError] = useState<ZagalinError | null>(null);
   const [displayedContent, setDisplayedContent] = useState('');
   const [llmReady, setLlmReady] = useState<boolean | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -124,6 +162,14 @@ export function ChatPanel() {
 
   const [isSimpleStreaming, setIsSimpleStreaming] = useState(false);
   const [simpleStreamingContent, setSimpleStreamingContent] = useState('');
+  const [toolStatusContent, setToolStatusContent] = useState('');
+
+  // Permission gating state — set when a sensitive tool awaits user approval
+  const [pendingPermission, setPendingPermission] = useState<{
+    toolName: string;
+    message: string;
+    resolve: (allowed: boolean) => void;
+  } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const vectorSearchRef = useRef(new VectorSearchService());
@@ -131,10 +177,17 @@ export function ChatPanel() {
   const simpleStreamingContentRef = useRef<string>('');
   const animationFrameRef = useRef<number | null>(null);
   const displayedLengthRef = useRef<number>(0);
+  const activeSubscriptionRef = useRef<{ unsubscribe: () => void } | null>(null);
+  const retryFnRef = useRef<(() => void) | null>(null);
+
+  const [contextLastUpdated, setContextLastUpdated] = useState<Date | null>(null);
+  const [isRefreshingContext, setIsRefreshingContext] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [feedbackRatings, setFeedbackRatings] = useState<Record<string, 'up' | 'down'>>({});
 
   const { context, hasContext, loading: contextLoading } = useGrafanaContext();
 
-  const { config: zagalinConfig } = useZagalinConfig();
+  const { config: zagalinConfig, loading: configLoading } = useZagalinConfig();
 
   const {
     messages: conversationMessages,
@@ -148,6 +201,7 @@ export function ChatPanel() {
     loadConversation,
     deleteConversation,
     deleteAll,
+    pruneByAge,
     updateTitle,
     togglePin,
     clearCurrent,
@@ -160,10 +214,139 @@ export function ChatPanel() {
     createNew(context);
   };
 
+  // Async permission checker passed to executeToolCall when permission gating is on.
+  const requestPermission = React.useCallback(
+    (toolName: string, message: string): Promise<boolean> =>
+      new Promise<boolean>((resolve) => {
+        setPendingPermission({ toolName, message, resolve });
+      }),
+    []
+  );
+
+  const fetchContextStatus = useCallback(async () => {
+    try {
+      const res = await fetch(getPluginApiUrl('/context/status'), { credentials: 'same-origin' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.lastUpdated) {
+          setContextLastUpdated(new Date(data.lastUpdated));
+        }
+      }
+    } catch {
+      // silently ignore — context status is best-effort
+    }
+  }, []);
+
+  const handleRefreshContext = useCallback(async () => {
+    setIsRefreshingContext(true);
+    try {
+      const res = await fetch(getPluginApiUrl('/context/refresh'), {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        console.warn('[Zagalin] Context refresh failed:', text);
+      }
+      await fetchContextStatus();
+    } catch (err) {
+      console.warn('[Zagalin] Context refresh error:', err);
+    } finally {
+      setIsRefreshingContext(false);
+    }
+  }, [fetchContextStatus]);
+
+  const handleFeedback = useCallback(
+    async (messageId: string, rating: 'up' | 'down') => {
+      setFeedbackRatings((prev) => ({ ...prev, [messageId]: rating }));
+      try {
+        await fetch(getPluginApiUrl('/feedback'), {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId, rating }),
+        });
+      } catch {
+        // silently ignore — feedback submission is best-effort
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    fetchContextStatus();
+  }, [fetchContextStatus]);
+
+  // Abort active stream on component unmount or page unload.
+  useEffect(() => {
+    const abort = () => {
+      activeSubscriptionRef.current?.unsubscribe();
+      activeSubscriptionRef.current = null;
+    };
+    window.addEventListener('beforeunload', abort);
+    return () => {
+      window.removeEventListener('beforeunload', abort);
+      abort();
+    };
+  }, []);
+
+  // Prune stale conversations once per session after config has loaded.
+  const retentionPrunedRef = useRef(false);
+  useEffect(() => {
+    if (!configLoading && !retentionPrunedRef.current) {
+      retentionPrunedRef.current = true;
+      const days = zagalinConfig.conversationRetentionDays ?? 90;
+      if (days > 0) {
+        pruneByAge(days);
+      }
+    }
+  }, [configLoading, zagalinConfig.conversationRetentionDays, pruneByAge]);
+
+  const handlePermissionApprove = () => {
+    if (pendingPermission) {
+      pendingPermission.resolve(true);
+      setPendingPermission(null);
+    }
+  };
+
+  const handlePermissionDeny = () => {
+    if (pendingPermission) {
+      pendingPermission.resolve(false);
+      setPendingPermission(null);
+    }
+  };
+
   const messages: Message[] = useMemo(
     () => [...conversationMessages, ...optimisticMessages],
     [conversationMessages, optimisticMessages]
   );
+
+  const handleExportMarkdown = useCallback(() => {
+    if (messages.length === 0) {
+      return;
+    }
+    const lines: string[] = [
+      '# Conversation Export',
+      '',
+      `*Exported: ${new Date().toLocaleString()}*`,
+      '',
+    ];
+    for (const msg of messages) {
+      if (msg.role === 'system') {
+        continue;
+      }
+      const roleLabel = msg.role === 'user' ? '**You:**' : '**Zagalin:**';
+      lines.push('---', '', roleLabel, '', msg.content, '');
+    }
+    const markdown = lines.join('\n');
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `zagalin-chat-${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [messages]);
 
   useEffect(() => {
     const checkHealth = async () => {
@@ -273,6 +456,7 @@ export function ChatPanel() {
     setOptimisticMessages([userMessage]);
     setInput('');
     setError(null);
+    setZagalinError(null);
     setDisplayedContent('');
 
     await addMessage(userMessage, context);
@@ -317,7 +501,19 @@ export function ChatPanel() {
   const cleanupStreamingState = () => {
     setIsSimpleStreaming(false);
     setSimpleStreamingContent('');
+    setToolStatusContent('');
+    setZagalinError(null);
+    setSuggestions([]);
     simpleStreamingContentRef.current = '';
+    activeSubscriptionRef.current = null;
+  };
+
+  const handleStop = () => {
+    activeSubscriptionRef.current?.unsubscribe();
+    activeSubscriptionRef.current = null;
+    cleanupStreamingState();
+    setIsFrontendOrchestrating(false);
+    setOptimisticMessages([]);
   };
 
   const handleDashboardQuestionFlow = async (userMessage: ConversationMessage, enrichedPrompt: string) => {
@@ -327,7 +523,7 @@ export function ChatPanel() {
     // Extract fresh context at the moment of asking (includes current URL, template vars, time range)
     const currentContext = await ContextService.getContext();
 
-    llmClient.chat({
+    activeSubscriptionRef.current = llmClient.chat({
       message: userMessage.content,
       enrichedMessage: enrichedPrompt,
       history: messages.map((m) => ({ role: m.role, content: m.content })),
@@ -357,9 +553,16 @@ export function ChatPanel() {
         }
       },
       complete: async () => {
-        const assistantMessage = createAssistantMessage(simpleStreamingContentRef.current);
+        const { content, suggestions: newSuggestions } = extractFollowUps(simpleStreamingContentRef.current);
+        simpleStreamingContentRef.current = content;
+        const assistantMessage = createAssistantMessage(content);
         await addMessage(assistantMessage);
-        cleanupStreamingState();
+        setSuggestions(newSuggestions);
+        setIsSimpleStreaming(false);
+        setSimpleStreamingContent('');
+        setToolStatusContent('');
+        simpleStreamingContentRef.current = '';
+        activeSubscriptionRef.current = null;
       },
       error: (err) => {
         setError(err instanceof Error ? err.message : 'Streaming failed');
@@ -378,7 +581,7 @@ export function ChatPanel() {
     const orchestrator = new FrontendOrchestrator();
     frontendOrchestratorRef.current = orchestrator;
 
-    orchestrator
+    activeSubscriptionRef.current = orchestrator
       .start(
         enhancedQuery,
         messages.map((m) => ({ role: m.role, content: m.content })),
@@ -436,16 +639,29 @@ export function ChatPanel() {
       });
   };
 
-  const handleSimpleStreamingFlow = async (enhancedQuery: string) => {
+  const handleSimpleStreamingFlow = async (enhancedQuery: string, step = 0, priorHistory?: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>) => {
     setIsSimpleStreaming(true);
+    setToolStatusContent('');
     simpleStreamingContentRef.current = '';
+
+    // Capture a retry closure at the root step so retryable errors can replay.
+    if (step === 0) {
+      retryFnRef.current = () => {
+        cleanupStreamingState();
+        handleSimpleStreamingFlow(enhancedQuery, 0, priorHistory);
+      };
+    }
 
     // Extract fresh context at the moment of asking (includes current URL, template vars, time range)
     const currentContext = await ContextService.getContext();
 
-    llmClient.chat({
+    const history = priorHistory ?? messages.map((m) => ({ role: m.role, content: m.content }));
+
+    const pendingToolCalls: Array<{ id: string; name: string; arguments: string }> = [];
+
+    activeSubscriptionRef.current = llmClient.chat({
       message: enhancedQuery,
-      history: messages.map((m) => ({ role: m.role, content: m.content })),
+      history,
       context: {
         dashboard: currentContext.dashboard,
         panel: currentContext.panel,
@@ -454,6 +670,7 @@ export function ChatPanel() {
       },
       attachedContexts: conversation?.contexts,
       mode,
+      step,
     }).subscribe({
       next: (chunk) => {
         if (chunk.history_update && chunk.history_update.length > 0) {
@@ -467,18 +684,91 @@ export function ChatPanel() {
           );
           return;
         }
+        if (chunk.tool_call) {
+          // Accumulate tool calls — backend sends them once complete
+          pendingToolCalls.push({
+            id: chunk.tool_call.id,
+            name: chunk.tool_call.function.name,
+            arguments: chunk.tool_call.function.arguments,
+          });
+          return;
+        }
         if (chunk.chunk) {
           simpleStreamingContentRef.current += chunk.chunk;
           setSimpleStreamingContent(simpleStreamingContentRef.current);
         }
       },
       complete: async () => {
-        const assistantMessage = createAssistantMessage(simpleStreamingContentRef.current);
+        // If the LLM called tools, execute them and continue the loop
+        if (pendingToolCalls.length > 0) {
+          const { executeToolCall, TOOL_STATUS_MESSAGES } = await import('../../services/zagalinTools');
+
+          // Build assistant message with the tool_use blocks
+          const assistantToolUseContent = JSON.stringify(
+            pendingToolCalls.map((tc) => ({
+              type: 'tool_use',
+              id: tc.id,
+              name: tc.name,
+              input: JSON.parse(tc.arguments || '{}'),
+            }))
+          );
+
+          const toolPermission = zagalinConfig.toolPermission;
+          const checker = toolPermission?.enabled ? requestPermission : undefined;
+          const permMsg = toolPermission?.permissionMessage;
+
+          const toolResults: string[] = [];
+          for (const tc of pendingToolCalls) {
+            // Show an in-progress status before the tool executes.
+            const statusMsg = TOOL_STATUS_MESSAGES[tc.name] ?? `Running ${tc.name}…`;
+            setToolStatusContent(statusMsg);
+
+            try {
+              const result = await executeToolCall(
+                { id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.arguments } },
+                checker,
+                permMsg
+              );
+              toolResults.push(
+                JSON.stringify({ type: 'tool_result', tool_use_id: tc.id, content: JSON.stringify(result) })
+              );
+            } catch (err: any) {
+              toolResults.push(
+                JSON.stringify({ type: 'tool_result', tool_use_id: tc.id, content: `Error: ${err.message}` })
+              );
+            }
+          }
+
+          // Append tool_use + tool_result to history and recurse
+          const updatedHistory = [
+            ...history,
+            { role: 'user' as const, content: enhancedQuery },
+            { role: 'assistant' as const, content: assistantToolUseContent },
+            { role: 'user' as const, content: `[${toolResults.join(',')}]` },
+          ];
+
+          await handleSimpleStreamingFlow(enhancedQuery, step + 1, updatedHistory);
+          return;
+        }
+
+        const { content, suggestions: newSuggestions } = extractFollowUps(simpleStreamingContentRef.current);
+        simpleStreamingContentRef.current = content;
+        const assistantMessage = createAssistantMessage(content);
         await addMessage(assistantMessage);
-        cleanupStreamingState();
+        setSuggestions(newSuggestions);
+        setIsSimpleStreaming(false);
+        setSimpleStreamingContent('');
+        setToolStatusContent('');
+        simpleStreamingContentRef.current = '';
+        activeSubscriptionRef.current = null;
       },
       error: (err) => {
-        setError(err instanceof Error ? err.message : 'Streaming failed');
+        if (isZagalinError(err)) {
+          setZagalinError(err);
+          setError(err.userMessage);
+        } else {
+          setError(err instanceof Error ? err.message : 'Streaming failed');
+        }
         cleanupStreamingState();
       },
     });
@@ -658,11 +948,70 @@ export function ChatPanel() {
               <Badge color="red" text="LLM Unavailable" icon="exclamation-triangle" />
             )}
           </div>
+          {llmReady && (
+            <div className={s.contextActions}>
+              {contextLastUpdated && (
+                <Tooltip
+                  content={`Backend context last refreshed: ${contextLastUpdated.toLocaleString()}`}
+                >
+                  <span className={s.contextStatusAge}>{formatAge(contextLastUpdated)}</span>
+                </Tooltip>
+              )}
+              <Tooltip content="Refresh backend context (metrics, logs, traces)">
+                <IconButton
+                  name="sync"
+                  size="sm"
+                  variant="secondary"
+                  aria-label="Refresh context"
+                  disabled={isRefreshingContext}
+                  onClick={handleRefreshContext}
+                />
+              </Tooltip>
+              {messages.length > 0 && (
+                <Tooltip content="Export conversation as Markdown">
+                  <IconButton
+                    name="download-alt"
+                    size="sm"
+                    variant="secondary"
+                    aria-label="Export conversation"
+                    onClick={handleExportMarkdown}
+                  />
+                </Tooltip>
+              )}
+            </div>
+          )}
         </div>
 
         {error && (
-          <Alert title="Error" severity="error" onRemove={() => setError(null)}>
-            {error}
+          <Alert
+            title="Error"
+            severity="error"
+            onRemove={() => {
+              setError(null);
+              setZagalinError(null);
+            }}
+          >
+            <div className={s.errorBody}>
+              <span>{error}</span>
+              {zagalinError?.hint && (
+                <span className={s.errorHint}>{zagalinError.hint}</span>
+              )}
+              {zagalinError?.retryable && retryFnRef.current && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon="sync"
+                  className={s.retryButton}
+                  onClick={() => {
+                    setError(null);
+                    setZagalinError(null);
+                    retryFnRef.current?.();
+                  }}
+                >
+                  Try again
+                </Button>
+              )}
+            </div>
           </Alert>
         )}
 
@@ -724,6 +1073,20 @@ export function ChatPanel() {
                     tooltip="Copy to clipboard"
                     onClick={() => copyToClipboard(message.content)}
                   />
+                  <IconButton
+                    name="thumbs-up"
+                    size="sm"
+                    tooltip="Good response"
+                    className={feedbackRatings[message.id] === 'up' ? s.feedbackSelected : undefined}
+                    onClick={() => handleFeedback(message.id, 'up')}
+                  />
+                  <IconButton
+                    name="thumbs-down"
+                    size="sm"
+                    tooltip="Poor response"
+                    className={feedbackRatings[message.id] === 'down' ? s.feedbackSelected : undefined}
+                    onClick={() => handleFeedback(message.id, 'down')}
+                  />
                 </div>
               )}
             </div>
@@ -744,14 +1107,21 @@ export function ChatPanel() {
             </div>
           )} */}
 
-          {/* Thinking indicator */}
+          {/* Thinking indicator / tool status */}
           {(isFrontendOrchestrating || isSimpleStreaming) && !displayedContent && (
             <div className={`${s.message} ${s.assistantMessage}`}>
-              <div className={s.thinkingIndicator}>
-                <span className={s.thinkingDot}></span>
-                <span className={s.thinkingDot}></span>
-                <span className={s.thinkingDot}></span>
-              </div>
+              {toolStatusContent ? (
+                <div className={s.toolStatusIndicator}>
+                  <span className={s.thinkingDot}></span>
+                  <span className={s.toolStatusText}>{toolStatusContent}</span>
+                </div>
+              ) : (
+                <div className={s.thinkingIndicator}>
+                  <span className={s.thinkingDot}></span>
+                  <span className={s.thinkingDot}></span>
+                  <span className={s.thinkingDot}></span>
+                </div>
+              )}
             </div>
           )}
 
@@ -771,6 +1141,42 @@ export function ChatPanel() {
 
           <div ref={messagesEndRef} />
         </div>
+
+        {/* Tool permission approval prompt */}
+        {pendingPermission && (
+          <div className={s.permissionPrompt}>
+            <div className={s.permissionMessage}>
+              <strong>Tool approval required</strong>
+              <span>{pendingPermission.message}</span>
+            </div>
+            <div className={s.permissionActions}>
+              <Button size="sm" variant="destructive" onClick={handlePermissionDeny}>
+                Deny
+              </Button>
+              <Button size="sm" variant="primary" onClick={handlePermissionApprove}>
+                Allow
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Follow-up suggestion chips */}
+        {suggestions.length > 0 && !isSimpleStreaming && !isFrontendOrchestrating && (
+          <div className={s.suggestionChips}>
+            {suggestions.map((suggestion, i) => (
+              <button
+                key={i}
+                className={s.suggestionChip}
+                onClick={() => {
+                  setInput(suggestion);
+                  setSuggestions([]);
+                }}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className={s.inputContainer}>
           <div className={s.modeSelector}>
@@ -804,15 +1210,26 @@ export function ChatPanel() {
               }}
             />
             <div className={s.inputActions}>
-              <Button
-                icon="comment-alt"
-                onClick={handleSend}
-                disabled={!input.trim() || isFrontendOrchestrating || isSimpleStreaming}
-                size="sm"
-                className={s.sendButton}
-              >
-                {isFrontendOrchestrating || isSimpleStreaming ? 'Running...' : 'Send'}
-              </Button>
+              {isFrontendOrchestrating || isSimpleStreaming ? (
+                <Button
+                  icon="square-shape"
+                  onClick={handleStop}
+                  size="sm"
+                  variant="destructive"
+                >
+                  Stop
+                </Button>
+              ) : (
+                <Button
+                  icon="comment-alt"
+                  onClick={handleSend}
+                  disabled={!input.trim()}
+                  size="sm"
+                  className={s.sendButton}
+                >
+                  Send
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -854,6 +1271,34 @@ const getStyles = (theme: GrafanaTheme2) => ({
     display: flex;
     align-items: center;
     gap: ${theme.spacing(1)};
+  `,
+  contextStatusAge: css`
+    font-size: ${theme.typography.bodySmall.fontSize};
+    color: ${theme.colors.text.secondary};
+    white-space: nowrap;
+    cursor: default;
+  `,
+  suggestionChips: css`
+    display: flex;
+    flex-wrap: wrap;
+    gap: ${theme.spacing(1)};
+    padding: ${theme.spacing(1)} ${theme.spacing(2)};
+  `,
+  suggestionChip: css`
+    background: ${theme.colors.background.secondary};
+    border: 1px solid ${theme.colors.border.weak};
+    border-radius: 16px;
+    padding: ${theme.spacing(0.5)} ${theme.spacing(1.5)};
+    font-size: ${theme.typography.bodySmall.fontSize};
+    color: ${theme.colors.text.secondary};
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    white-space: nowrap;
+    &:hover {
+      background: ${theme.colors.background.primary};
+      border-color: ${theme.colors.border.strong};
+      color: ${theme.colors.text.primary};
+    }
   `,
   contextSection: css`
     padding: ${theme.spacing(2)};
@@ -907,6 +1352,17 @@ const getStyles = (theme: GrafanaTheme2) => ({
     gap: ${theme.spacing(0.75)};
     align-items: center;
     padding: ${theme.spacing(1.5, 2)};
+  `,
+  toolStatusIndicator: css`
+    display: flex;
+    gap: ${theme.spacing(1)};
+    align-items: center;
+    padding: ${theme.spacing(1.5, 2)};
+  `,
+  toolStatusText: css`
+    font-size: ${theme.typography.bodySmall.fontSize};
+    color: ${theme.colors.text.secondary};
+    font-style: italic;
   `,
   thinkingDot: css`
     width: 8px;
@@ -1144,6 +1600,10 @@ const getStyles = (theme: GrafanaTheme2) => ({
     margin-top: ${theme.spacing(0.5)};
     opacity: 0.7;
   `,
+  feedbackSelected: css`
+    color: ${theme.colors.primary.text};
+    opacity: 1;
+  `,
   actionButtons: css`
     display: flex;
     gap: ${theme.spacing(1)};
@@ -1161,6 +1621,40 @@ const getStyles = (theme: GrafanaTheme2) => ({
     font-weight: ${theme.typography.fontWeightMedium};
     color: ${theme.colors.text.primary};
     margin-bottom: ${theme.spacing(0.5)};
+  `,
+  errorBody: css`
+    display: flex;
+    flex-direction: column;
+    gap: ${theme.spacing(0.75)};
+  `,
+  errorHint: css`
+    font-size: ${theme.typography.bodySmall.fontSize};
+    color: ${theme.colors.text.secondary};
+  `,
+  retryButton: css`
+    align-self: flex-start;
+    margin-top: ${theme.spacing(0.5)};
+  `,
+  permissionPrompt: css`
+    display: flex;
+    align-items: flex-start;
+    gap: ${theme.spacing(2)};
+    padding: ${theme.spacing(1.5)} ${theme.spacing(2)};
+    background: ${theme.colors.warning.transparent};
+    border-top: 1px solid ${theme.colors.warning.border};
+    border-bottom: 1px solid ${theme.colors.warning.border};
+  `,
+  permissionMessage: css`
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: ${theme.spacing(0.5)};
+    font-size: ${theme.typography.bodySmall.fontSize};
+  `,
+  permissionActions: css`
+    display: flex;
+    gap: ${theme.spacing(1)};
+    flex-shrink: 0;
   `,
   inputContainer: css`
     border-top: 1px solid ${theme.colors.border.weak};

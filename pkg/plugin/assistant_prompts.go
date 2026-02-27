@@ -59,7 +59,13 @@ Tool execution rules:
 - When investigating, call MULTIPLE tools in the same response when inputs are independent.
 - Do NOT wait for metrics before starting log queries — call both at once.
 - Always state the actual time range used in evidence. Default to last 1 hour for investigations.
-- If a tool call fails, note the failure and continue with other signals.
+
+Tool failure — three-strike rule (MANDATORY):
+- **Strike 1**: A tool returns an error or empty result → try a meaningfully different approach (different query, different datasource, different time range, different tool).
+- **Strike 2**: Second failure → try one more distinct approach.
+- **Strike 3**: Third failure → STOP. Do NOT retry again. Tell the user exactly what you tried, what failed, and ask ONE targeted question to unblock the investigation.
+- Never silently retry the same query or tool call after a failure. Each attempt must be genuinely different.
+- Never loop more than 3 tool attempts for the same investigative question.
 
 Evidence-first rules:
 - Do NOT invent: metric names, label names, panel indices, thresholds, calculations, or relationships
@@ -254,7 +260,12 @@ Response format requirements:
      * Dashboard context with queries
      * Panel queries
      * Metric/log query results
-     * Explicit statement of signal absence (e.g. "no errors observed")`
+     * Explicit statement of signal absence (e.g. "no errors observed")
+
+Follow-up suggestions (REQUIRED):
+As the absolute last line of your response, after all other content, append:
+<follow-ups>["Suggestion one", "Suggestion two", "Suggestion three"]</follow-ups>
+Rules: 2–3 items · each ≤8 words · actionable · specific to this conversation · valid JSON string array · no text after the closing tag`
 
 const DESIGN_MODE_PROMPT = `## Design Mode
 

@@ -164,6 +164,14 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/tools/execute_promql", a.versionDetectionMiddleware(a.handleExecutePromQL))
 	mux.HandleFunc("/tools/execute_logql", a.versionDetectionMiddleware(a.handleExecuteLogQL))
 	mux.HandleFunc("/tools/execute_traceql", a.versionDetectionMiddleware(a.handleExecuteTraceQL))
+
+	mux.HandleFunc("/tools/get_firing_alerts", a.versionDetectionMiddleware(a.handleGetFiringAlerts))
+	mux.HandleFunc("/tools/search_dashboards", a.versionDetectionMiddleware(a.handleSearchDashboards))
+	mux.HandleFunc("/tools/get_dashboard", a.versionDetectionMiddleware(a.handleGetDashboard))
+	mux.HandleFunc("/tools/get_annotations", a.versionDetectionMiddleware(a.handleGetAnnotations))
+	mux.HandleFunc("/tools/list_folders", a.versionDetectionMiddleware(a.handleListFolders))
+
+	mux.HandleFunc("/feedback", a.versionDetectionMiddleware(a.handleSubmitFeedback))
 }
 
 func (a *App) handleContextStatus(w http.ResponseWriter, req *http.Request) {
@@ -420,4 +428,227 @@ func (a *App) handleExecuteTraceQL(w http.ResponseWriter, req *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(result))
+}
+
+func (a *App) handleGetFiringAlerts(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	user, err := extractUserIdentity(req)
+	if err != nil {
+		sendErrorResponse(w, "Authentication required", err, http.StatusUnauthorized)
+		return
+	}
+
+	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
+		if !a.guardrails.rateLimiter.Allow(user.UserLogin) {
+			backend.Logger.Warn("Rate limit exceeded for get_firing_alerts", "user", user.UserLogin)
+			sendErrorResponse(w, "Rate limit exceeded", fmt.Errorf("too many requests"), http.StatusTooManyRequests)
+			return
+		}
+	}
+
+	var args map[string]interface{}
+	if err := json.NewDecoder(req.Body).Decode(&args); err != nil {
+		args = map[string]interface{}{}
+	}
+
+	result, err := a.getFiringAlerts(req.Context(), args, user)
+	if err != nil {
+		backend.Logger.Error("get_firing_alerts failed", "error", err, "user", user.UserLogin)
+		sendErrorResponse(w, "Failed to get firing alerts", err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(result))
+}
+
+func (a *App) handleSearchDashboards(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	user, err := extractUserIdentity(req)
+	if err != nil {
+		sendErrorResponse(w, "Authentication required", err, http.StatusUnauthorized)
+		return
+	}
+
+	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
+		if !a.guardrails.rateLimiter.Allow(user.UserLogin) {
+			backend.Logger.Warn("Rate limit exceeded for search_dashboards", "user", user.UserLogin)
+			sendErrorResponse(w, "Rate limit exceeded", fmt.Errorf("too many requests"), http.StatusTooManyRequests)
+			return
+		}
+	}
+
+	var args map[string]interface{}
+	if err := json.NewDecoder(req.Body).Decode(&args); err != nil {
+		args = map[string]interface{}{}
+	}
+
+	result, err := a.searchDashboards(req.Context(), args, user)
+	if err != nil {
+		backend.Logger.Error("search_dashboards failed", "error", err, "user", user.UserLogin)
+		sendErrorResponse(w, "Failed to search dashboards", err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(result))
+}
+
+func (a *App) handleGetDashboard(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	user, err := extractUserIdentity(req)
+	if err != nil {
+		sendErrorResponse(w, "Authentication required", err, http.StatusUnauthorized)
+		return
+	}
+
+	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
+		if !a.guardrails.rateLimiter.Allow(user.UserLogin) {
+			backend.Logger.Warn("Rate limit exceeded for get_dashboard", "user", user.UserLogin)
+			sendErrorResponse(w, "Rate limit exceeded", fmt.Errorf("too many requests"), http.StatusTooManyRequests)
+			return
+		}
+	}
+
+	var args map[string]interface{}
+	if err := json.NewDecoder(req.Body).Decode(&args); err != nil {
+		sendErrorResponse(w, "Invalid request body", err, http.StatusBadRequest)
+		return
+	}
+
+	result, err := a.getDashboard(req.Context(), args, user)
+	if err != nil {
+		backend.Logger.Error("get_dashboard failed", "error", err, "user", user.UserLogin)
+		sendErrorResponse(w, "Failed to get dashboard", err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(result))
+}
+
+func (a *App) handleGetAnnotations(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	user, err := extractUserIdentity(req)
+	if err != nil {
+		sendErrorResponse(w, "Authentication required", err, http.StatusUnauthorized)
+		return
+	}
+
+	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
+		if !a.guardrails.rateLimiter.Allow(user.UserLogin) {
+			backend.Logger.Warn("Rate limit exceeded for get_annotations", "user", user.UserLogin)
+			sendErrorResponse(w, "Rate limit exceeded", fmt.Errorf("too many requests"), http.StatusTooManyRequests)
+			return
+		}
+	}
+
+	var args map[string]interface{}
+	if err := json.NewDecoder(req.Body).Decode(&args); err != nil {
+		args = map[string]interface{}{}
+	}
+
+	result, err := a.getAnnotations(req.Context(), args, user)
+	if err != nil {
+		backend.Logger.Error("get_annotations failed", "error", err, "user", user.UserLogin)
+		sendErrorResponse(w, "Failed to get annotations", err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(result))
+}
+
+func (a *App) handleListFolders(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	user, err := extractUserIdentity(req)
+	if err != nil {
+		sendErrorResponse(w, "Authentication required", err, http.StatusUnauthorized)
+		return
+	}
+
+	if a.guardrails != nil && a.guardrails.rateLimiter != nil {
+		if !a.guardrails.rateLimiter.Allow(user.UserLogin) {
+			backend.Logger.Warn("Rate limit exceeded for list_folders", "user", user.UserLogin)
+			sendErrorResponse(w, "Rate limit exceeded", fmt.Errorf("too many requests"), http.StatusTooManyRequests)
+			return
+		}
+	}
+
+	var args map[string]interface{}
+	if err := json.NewDecoder(req.Body).Decode(&args); err != nil {
+		args = map[string]interface{}{}
+	}
+
+	result, err := a.listFolders(req.Context(), args, user)
+	if err != nil {
+		backend.Logger.Error("list_folders failed", "error", err, "user", user.UserLogin)
+		sendErrorResponse(w, "Failed to list folders", err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(result))
+}
+
+// feedbackRequest holds a user's rating for a single assistant message.
+type feedbackRequest struct {
+	MessageID string `json:"messageId"`
+	Rating    string `json:"rating"` // "up" or "down"
+}
+
+// handleSubmitFeedback receives thumbs-up/down ratings for assistant messages
+// and logs them so operators can analyse prompt quality offline.
+func (a *App) handleSubmitFeedback(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	user, err := extractUserIdentity(req)
+	if err != nil {
+		sendErrorResponse(w, "Authentication required", err, http.StatusUnauthorized)
+		return
+	}
+
+	var fb feedbackRequest
+	if err := json.NewDecoder(req.Body).Decode(&fb); err != nil {
+		sendErrorResponse(w, "Invalid request body", err, http.StatusBadRequest)
+		return
+	}
+
+	if fb.Rating != "up" && fb.Rating != "down" {
+		sendErrorResponse(w, "Invalid rating: must be 'up' or 'down'",
+			fmt.Errorf("unexpected rating value: %q", fb.Rating), http.StatusBadRequest)
+		return
+	}
+
+	backend.Logger.Info("Message feedback received",
+		"messageId", fb.MessageID,
+		"rating", fb.Rating,
+		"user", user.UserLogin,
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }

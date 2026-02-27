@@ -92,12 +92,16 @@ function AssistantChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
 
-  // Cleanup subscription on unmount
+  // Abort active stream on component unmount or page unload.
   useEffect(() => {
+    const abort = () => {
+      streamSubscriptionRef.current?.unsubscribe();
+      streamSubscriptionRef.current = null;
+    };
+    window.addEventListener('beforeunload', abort);
     return () => {
-      if (streamSubscriptionRef.current) {
-        streamSubscriptionRef.current.unsubscribe();
-      }
+      window.removeEventListener('beforeunload', abort);
+      abort();
     };
   }, []);
 

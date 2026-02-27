@@ -8,14 +8,16 @@ import (
 type PluginSettings struct {
 	LLMBackend string `json:"llmBackend"`
 
-	LLMProvider      string `json:"llmProvider"`
-	LLMModel         string `json:"llmModel"`
-	LLMEndpoint      string `json:"llmEndpoint"`
-	LLMOrganization  string `json:"llmOrganization"`
+	LLMProvider      string   `json:"llmProvider"`
+	LLMModel         string   `json:"llmModel"`
+	LLMFallbackModels []string `json:"llmFallbackModels,omitempty"` // Ordered fallback chain if primary model is unavailable
+	LLMEndpoint      string   `json:"llmEndpoint"`
+	LLMOrganization  string   `json:"llmOrganization"`
 
 	MaxRequestsPerMinute int     `json:"maxRequestsPerMinute"`
 	MaxQueriesPerRequest int     `json:"maxQueriesPerRequest"` // Maximum number of queries allowed per request
 	MaxQueryTimeRangeHours int   `json:"maxQueryTimeRangeHours"` // Maximum time range in hours (0 = unlimited)
+	MaxSteps             int     `json:"maxSteps"`             // Maximum tool-call turns per user message before stopping
 	MonthlyBudgetUSD     float64 `json:"monthlyBudgetUSD"`
 
 	ContextRefreshMinutes int `json:"contextRefreshMinutes"`
@@ -34,6 +36,27 @@ type PluginSettings struct {
 
 	QueryValidation    QueryValidationSettings `json:"queryValidation"`
 	ToolCallValidation bool                    `json:"toolCallValidation"`
+
+	ToolPermission ToolPermissionSettings `json:"toolPermission"`
+
+	// EnablePromptCaching adds cache_control to the system message so Anthropic
+	// Claude (via grafana-llm-app) can cache it between turns. Requires
+	// grafana-llm-app to pass cache_control fields through to the provider.
+	// Has no effect when using OpenAI models.
+	EnablePromptCaching bool `json:"enablePromptCaching"`
+
+	// ConversationRetentionDays is how long conversations are kept in browser
+	// localStorage before automatic cleanup. 0 means unlimited. Default: 90.
+	ConversationRetentionDays int `json:"conversationRetentionDays"`
+}
+
+// ToolPermissionSettings gates execution of side-effect tools behind a user
+// approval prompt. When Enabled is true, the frontend will pause before
+// running any tool in the TOOLS_REQUIRING_PERMISSION set and display
+// PermissionMessage to the user. The tool is only executed after approval.
+type ToolPermissionSettings struct {
+	Enabled           bool   `json:"enabled"`
+	PermissionMessage string `json:"permissionMessage"`
 }
 
 type OtelEnforcementSettings struct {
@@ -99,7 +122,10 @@ func applyDefaults(s *PluginSettings) {
 		s.LLMProvider = "openai" 
 	}
 	if s.LLMModel == "" {
-		s.LLMModel = "gpt-4o-mini" 
+		s.LLMModel = "gpt-4o-mini"
+	}
+	if len(s.LLMFallbackModels) == 0 {
+		s.LLMFallbackModels = []string{"gpt-4o-mini", "gpt-3.5-turbo"}
 	}
 
 	if s.MaxRequestsPerMinute == 0 {
@@ -107,6 +133,9 @@ func applyDefaults(s *PluginSettings) {
 	}
 	if s.MaxQueriesPerRequest == 0 {
 		s.MaxQueriesPerRequest = 10 // Default: 10 queries per request
+	}
+	if s.MaxSteps == 0 {
+		s.MaxSteps = 10 // Default: 10 tool-call turns per user message
 	}
 	if s.MaxQueryTimeRangeHours == 0 {
 		s.MaxQueryTimeRangeHours = 24 // Default: 24 hours
@@ -129,6 +158,10 @@ func applyDefaults(s *PluginSettings) {
 	}
 	if s.DesignModeTemperature == 0 {
 		s.DesignModeTemperature = 0.8
+	}
+
+	if s.ConversationRetentionDays == 0 {
+		s.ConversationRetentionDays = 90
 	}
 
 	// OTel defaults: only set numeric/string defaults, respect boolean values from UI

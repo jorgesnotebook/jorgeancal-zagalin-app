@@ -105,6 +105,10 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     plugin.meta.jsonData?.maxQueryTimeRangeHours ?? 24
   );
 
+  const [conversationRetentionDays, setConversationRetentionDays] = useState<number>(
+    plugin.meta.jsonData?.conversationRetentionDays ?? 90
+  );
+
   const [referenceDashboards, setReferenceDashboards] = useState<string[]>(
     plugin.meta.jsonData?.referenceDashboards || []
   );
@@ -224,6 +228,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
           allowedDatasources,
           defaultDatasource,
           maxQueryTimeRangeHours,
+          conversationRetentionDays,
           llmBackend: llmBackend === 'disabled' ? '' : llmBackend,
           llmProvider,
           llmModel,
@@ -299,6 +304,7 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     setQueryValidationEnableLLM(false);
     setQueryValidationLLMMode('advisory');
     setMaxQueryTimeRangeHours(24);
+    setConversationRetentionDays(90);
     setIsDirty(true);
   };
 
@@ -1606,6 +1612,39 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             </InlineField>
             <span className={s.skillDescription}>Automatically open chat when viewing dashboards</span>
           </InlineFieldRow>
+        </div>
+      </div>
+
+      <div className={s.section}>
+        <h3 className={s.sectionTitle}>Data Retention</h3>
+        <div className={s.sectionContent}>
+          <Field
+            label="Conversation Retention Period"
+            description={
+              conversationRetentionDays === 0
+                ? 'Conversations are kept indefinitely (unlimited).'
+                : `Conversations inactive for more than ${conversationRetentionDays} days are automatically removed on next session start. Pinned conversations are never deleted.`
+            }
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ flex: 1 }}>
+                <Slider
+                  inputId="conversation-retention-days"
+                  min={0}
+                  max={365}
+                  step={1}
+                  value={conversationRetentionDays}
+                  onChange={(v) => {
+                    setConversationRetentionDays(v);
+                    setIsDirty(true);
+                  }}
+                />
+              </div>
+              <span style={{ minWidth: 80, textAlign: 'right' }}>
+                {conversationRetentionDays === 0 ? 'Unlimited' : `${conversationRetentionDays} days`}
+              </span>
+            </div>
+          </Field>
         </div>
       </div>
 

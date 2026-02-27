@@ -15,6 +15,7 @@ import { getPluginApiUrl } from '../pluginUrl';
 import { getZagalinConfig } from '../configHelper';
 import { SSEParser } from '../../utils/sseParser';
 import { addVersionHeader } from '../versionReporter';
+import { toZagalinError } from '../errors';
 
 export class LLMClient {
   private backendType: BackendType;
@@ -64,6 +65,33 @@ export class LLMClient {
       const url = getPluginApiUrl('/llm/chat');
       const abortController = new AbortController();
 
+      // Client-side idle timeout: surface a friendly error if no real data
+      // arrives within 60s (keepalive pings do not reset this timer).
+      const IDLE_TIMEOUT_MS = 60_000;
+      let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const clearIdleTimer = () => {
+        if (idleTimer !== null) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+      };
+
+      const resetIdleTimer = () => {
+        clearIdleTimer();
+        idleTimer = setTimeout(() => {
+          abortController.abort();
+          subscriber.error(
+            new Error(
+              'No response received in 60 seconds. The assistant may be overloaded — please try again or rephrase your question.'
+            )
+          );
+        }, IDLE_TIMEOUT_MS);
+      };
+
+      resetIdleTimer();
+
+      const correlationId = crypto.randomUUID();
       const backendRequest = {
         message: request.message,
         history: request.history,
@@ -71,6 +99,8 @@ export class LLMClient {
         skillHint: request.skillHint,
         enrichedMessage: request.enrichedMessage,
         mode: request.mode || 'standard',
+        step: request.step ?? 0,
+        correlationId,
       };
 
       fetch(url, {
@@ -78,6 +108,7 @@ export class LLMClient {
         headers: addVersionHeader({
           'Content-Type': 'application/json',
           Accept: 'text/event-stream',
+          'X-Correlation-ID': correlationId,
         }),
         body: JSON.stringify(backendRequest),
         credentials: 'same-origin',
@@ -85,25 +116,44 @@ export class LLMClient {
       })
         .then(async (response) => {
           if (!response.ok) {
-            const error = await response.text();
-            throw new Error(`Error: ${response.status} - ${error}`);
+            const errorText = await response.text();
+            const rawMsg = `Error: ${response.status} - ${errorText}`;
+            throw toZagalinError(new Error(rawMsg));
           }
 
           SSEParser.parseStream<StreamChunk>(response, {
             onChunk: (chunk, observer) => {
+              if (chunk.keepalive) {
+                // Keepalive heartbeat from backend — suppress from stream.
+                return;
+              }
+              resetIdleTimer();
+              // If the backend signals an error in the stream, convert to a
+              // ZagalinError so the subscriber can display structured feedback.
+              if (chunk.error) {
+                observer.error(toZagalinError(new Error(chunk.error), chunk.error_type));
+                return;
+              }
               observer.next(chunk);
             },
             shouldComplete: (chunk) => Boolean(chunk.done || chunk.error),
           }).subscribe({
             next: (chunk) => subscriber.next(chunk),
-            error: (err) => subscriber.error(err),
-            complete: () => subscriber.complete(),
+            error: (err) => {
+              clearIdleTimer();
+              subscriber.error(toZagalinError(err));
+            },
+            complete: () => {
+              clearIdleTimer();
+              subscriber.complete();
+            },
           });
         })
         .catch((fetchError) => {
+          clearIdleTimer();
           // Only propagate error if it's not an abort
           if (fetchError.name !== 'AbortError') {
-            subscriber.error(fetchError);
+            subscriber.error(toZagalinError(fetchError));
           } else {
             subscriber.complete();
           }
@@ -111,6 +161,7 @@ export class LLMClient {
 
       // Return cleanup function that aborts the fetch
       return () => {
+        clearIdleTimer();
         abortController.abort();
       };
     });
