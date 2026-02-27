@@ -86,6 +86,7 @@ export interface StreamChunk {
   done?: boolean;
   error?: string;
   tool_call?: ToolCallChunk;
+  history_update?: Message[];
 }
 
 export interface ToolCallChunk {

@@ -1489,6 +1489,36 @@ func BuildPlanningPrompt(userMessage string, context AssistantContext) string {
 	return prompt.String()
 }
 
+// BuildSummarizationPrompt builds a prompt asking the LLM to compress conversation history.
+// The ≤400-word summary preserves critical debugging state without inflating the context window.
+func BuildSummarizationPrompt(history []AssistantMessage) string {
+	var sb strings.Builder
+	for _, msg := range history {
+		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, msg.Content))
+	}
+	return fmt.Sprintf(`Summarize the following conversation in ≤400 words. Preserve:
+- The original problem or question
+- Exact query strings or commands used
+- Key findings and conclusions
+- What was ruled out and why
+- The immediate next step or open question
+
+Conversation:
+%s`, sb.String())
+}
+
+// BuildCheckpointMessage wraps a summary in a synthetic user message the LLM treats as prior context.
+// The instruction prevents the LLM from acknowledging the summary instead of continuing work.
+func BuildCheckpointMessage(summary string) AssistantMessage {
+	return AssistantMessage{
+		Role: "user",
+		Content: fmt.Sprintf(`[CONVERSATION SUMMARY]
+%s
+[END SUMMARY]
+Do not acknowledge this summary or ask the user to confirm — proceed directly with the next action.`, summary),
+	}
+}
+
 func parsePlanFromJSON(text string) (*ExecutionPlan, error) {
 	var plan ExecutionPlan
 	err := json.Unmarshal([]byte(text), &plan)

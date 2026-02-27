@@ -50,10 +50,11 @@ type LLMStreamRequest struct {
 }
 
 type LLMStreamChunk struct {
-	Chunk   string `json:"chunk,omitempty"`
-	Done    bool   `json:"done,omitempty"`
-	Error   string `json:"error,omitempty"`
-	ToolCall *ToolCallChunk `json:"tool_call,omitempty"`
+	Chunk         string             `json:"chunk,omitempty"`
+	Done          bool               `json:"done,omitempty"`
+	Error         string             `json:"error,omitempty"`
+	ToolCall      *ToolCallChunk     `json:"tool_call,omitempty"`
+	HistoryUpdate []AssistantMessage `json:"history_update,omitempty"`
 }
 
 type ToolCallChunk struct {

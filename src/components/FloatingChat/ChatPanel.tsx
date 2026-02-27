@@ -139,6 +139,7 @@ export function ChatPanel() {
   const {
     messages: conversationMessages,
     addMessage,
+    replaceMessages,
     addContext,
     removeContext,
     conversation,
@@ -339,6 +340,17 @@ export function ChatPanel() {
       attachedContexts: conversation?.contexts,
     }).subscribe({
       next: (chunk) => {
+        if (chunk.history_update && chunk.history_update.length > 0) {
+          replaceMessages(
+            chunk.history_update.map((m) => ({
+              id: generateMessageId(),
+              role: m.role as 'user' | 'assistant',
+              content: m.content,
+              timestamp: new Date(),
+            }))
+          );
+          return;
+        }
         if (chunk.chunk) {
           simpleStreamingContentRef.current += chunk.chunk;
           setSimpleStreamingContent(simpleStreamingContentRef.current);
@@ -444,6 +456,17 @@ export function ChatPanel() {
       mode,
     }).subscribe({
       next: (chunk) => {
+        if (chunk.history_update && chunk.history_update.length > 0) {
+          replaceMessages(
+            chunk.history_update.map((m) => ({
+              id: generateMessageId(),
+              role: m.role as 'user' | 'assistant',
+              content: m.content,
+              timestamp: new Date(),
+            }))
+          );
+          return;
+        }
         if (chunk.chunk) {
           simpleStreamingContentRef.current += chunk.chunk;
           setSimpleStreamingContent(simpleStreamingContentRef.current);
