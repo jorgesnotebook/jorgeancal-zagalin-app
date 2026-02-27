@@ -48,6 +48,11 @@ type PluginSettings struct {
 	// ConversationRetentionDays is how long conversations are kept in browser
 	// localStorage before automatic cleanup. 0 means unlimited. Default: 90.
 	ConversationRetentionDays int `json:"conversationRetentionDays"`
+
+	// Slack Socket Mode integration. Disabled by default.
+	// Tokens (App-Level + Bot) are stored in secureJsonData, not here.
+	SlackEnabled bool   `json:"slackEnabled"`
+	SlackBotName string `json:"slackBotName"` // display name used in help messages
 }
 
 // ToolPermissionSettings gates execution of side-effect tools behind a user
@@ -84,9 +89,16 @@ type QueryValidationSettings struct {
 
 type Settings struct {
 	PluginSettings
-	LLMAPIKey              string
-	ServiceAccountToken    string
-	GrafanaURL             string
+	LLMAPIKey           string
+	ServiceAccountToken string
+	GrafanaURL          string
+
+	// Slack secure credentials — never stored in jsonData.
+	// SlackAppToken is the App-Level Token (xapp-...) used to open the
+	// Socket Mode WebSocket connection. SlackBotToken is the Bot User OAuth
+	// Token (xoxb-...) used to post messages back to channels.
+	SlackAppToken string
+	SlackBotToken string
 }
 
 func LoadSettings(jsonData json.RawMessage, decryptedSecureJSONData map[string]string) (*Settings, error) {
@@ -103,6 +115,12 @@ func LoadSettings(jsonData json.RawMessage, decryptedSecureJSONData map[string]s
 	}
 	if serviceAccountToken, ok := decryptedSecureJSONData["serviceAccountToken"]; ok {
 		settings.ServiceAccountToken = serviceAccountToken
+	}
+	if slackAppToken, ok := decryptedSecureJSONData["slackAppToken"]; ok {
+		settings.SlackAppToken = slackAppToken
+	}
+	if slackBotToken, ok := decryptedSecureJSONData["slackBotToken"]; ok {
+		settings.SlackBotToken = slackBotToken
 	}
 
 	applyDefaults(&settings.PluginSettings)
@@ -162,6 +180,9 @@ func applyDefaults(s *PluginSettings) {
 
 	if s.ConversationRetentionDays == 0 {
 		s.ConversationRetentionDays = 90
+	}
+	if s.SlackBotName == "" {
+		s.SlackBotName = "Zagalin"
 	}
 
 	// OTel defaults: only set numeric/string defaults, respect boolean values from UI

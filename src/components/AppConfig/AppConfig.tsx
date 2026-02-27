@@ -113,6 +113,22 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     plugin.meta.jsonData?.referenceDashboards || []
   );
 
+  // Slack Socket Mode integration (disabled by default)
+  const [slackEnabled, setSlackEnabled] = useState<boolean>(
+    plugin.meta.jsonData?.slackEnabled || false
+  );
+  const [slackBotName, setSlackBotName] = useState<string>(
+    plugin.meta.jsonData?.slackBotName || 'Zagalin'
+  );
+  const [slackAppToken, setSlackAppToken] = useState<string>('');
+  const [slackBotToken, setSlackBotToken] = useState<string>('');
+  const [hasSlackAppToken, setHasSlackAppToken] = useState<boolean>(
+    plugin.meta.secureJsonFields?.slackAppToken || false
+  );
+  const [hasSlackBotToken, setHasSlackBotToken] = useState<boolean>(
+    plugin.meta.secureJsonFields?.slackBotToken || false
+  );
+
   useEffect(() => {
     if (plugin.meta.jsonData) {
       let migratedConfig = { ...DEFAULT_CONFIG, ...plugin.meta.jsonData };
@@ -163,10 +179,14 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
       setQueryValidationLLMMode(plugin.meta.jsonData.queryValidation?.llmValidationMode || 'advisory');
 
       setReferenceDashboards(plugin.meta.jsonData.referenceDashboards || []);
+      setSlackEnabled(plugin.meta.jsonData.slackEnabled || false);
+      setSlackBotName(plugin.meta.jsonData.slackBotName || 'Zagalin');
     }
 
     if (plugin.meta.secureJsonFields) {
       setHasServiceAccountToken(plugin.meta.secureJsonFields.serviceAccountToken || false);
+      setHasSlackAppToken(plugin.meta.secureJsonFields.slackAppToken || false);
+      setHasSlackBotToken(plugin.meta.secureJsonFields.slackBotToken || false);
     }
   }, [plugin.meta.jsonData, plugin.meta.secureJsonFields]);
 
@@ -254,6 +274,8 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
             llmValidationMode: queryValidationLLMMode,
           },
           referenceDashboards,
+          slackEnabled,
+          slackBotName,
         },
       };
 
@@ -263,6 +285,12 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
       }
       if (serviceAccountToken) {
         settings.secureJsonData.serviceAccountToken = serviceAccountToken;
+      }
+      if (slackAppToken) {
+        settings.secureJsonData.slackAppToken = slackAppToken;
+      }
+      if (slackBotToken) {
+        settings.secureJsonData.slackBotToken = slackBotToken;
       }
 
       await getBackendSrv().post(`/api/plugins/${plugin.meta.id}/settings`, settings);
@@ -305,6 +333,10 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
     setQueryValidationLLMMode('advisory');
     setMaxQueryTimeRangeHours(24);
     setConversationRetentionDays(90);
+    setSlackEnabled(false);
+    setSlackBotName('Zagalin');
+    setSlackAppToken('');
+    setSlackBotToken('');
     setIsDirty(true);
   };
 
@@ -1645,6 +1677,105 @@ export function AppConfig({ plugin }: PluginConfigPageProps<any>) {
               </span>
             </div>
           </Field>
+        </div>
+      </div>
+
+      {/* ── Slack Integration ─────────────────────────────────────────── */}
+      <div className={s.section}>
+        <h3 className={s.sectionTitle}>Slack Integration</h3>
+        <div className={s.sectionContent}>
+          <Alert title="Outbound connection — no public URL required" severity="info">
+            This uses Slack&apos;s <strong>Socket Mode</strong>: Grafana opens an outbound WebSocket to Slack.
+            Your Grafana instance does not need to be publicly accessible.
+          </Alert>
+
+          <Field
+            label="Enable Slack bot"
+            description="When enabled and tokens are configured, Zagalin connects to Slack and responds to slash commands and @mentions."
+          >
+            <Switch
+              id="slack-enabled"
+              value={slackEnabled}
+              onChange={(e) => {
+                setSlackEnabled(e.currentTarget.checked);
+                setIsDirty(true);
+              }}
+            />
+          </Field>
+
+          {slackEnabled && (
+            <>
+              <Field
+                label="Bot display name"
+                description="Name shown in help messages when Slack users interact with the bot."
+              >
+                <Input
+                  id="slack-bot-name"
+                  value={slackBotName}
+                  placeholder="Zagalin"
+                  onChange={(e) => {
+                    setSlackBotName(e.currentTarget.value);
+                    setIsDirty(true);
+                  }}
+                />
+              </Field>
+
+              <Field
+                label="App-Level Token (xapp-…)"
+                description={
+                  hasSlackAppToken
+                    ? 'Token configured. Enter a new value to replace it.'
+                    : 'Required to open the Socket Mode WebSocket connection. Create this in your Slack app under Settings → Basic Information → App-Level Tokens with the connections:write scope.'
+                }
+              >
+                <Input
+                  id="slack-app-token"
+                  type="password"
+                  placeholder={hasSlackAppToken ? 'Configured' : 'xapp-1-…'}
+                  value={slackAppToken}
+                  prefix={hasSlackAppToken && !slackAppToken ? <Icon name="check" /> : undefined}
+                  onChange={(e) => {
+                    setSlackAppToken(e.currentTarget.value);
+                    setIsDirty(true);
+                  }}
+                />
+              </Field>
+
+              <Field
+                label="Bot User OAuth Token (xoxb-…)"
+                description={
+                  hasSlackBotToken
+                    ? 'Token configured. Enter a new value to replace it.'
+                    : 'Required to post messages back to Slack channels. Found in your Slack app under OAuth & Permissions. Required scopes: app_mentions:read, commands, chat:write.'
+                }
+              >
+                <Input
+                  id="slack-bot-token"
+                  type="password"
+                  placeholder={hasSlackBotToken ? 'Configured' : 'xoxb-…'}
+                  value={slackBotToken}
+                  prefix={hasSlackBotToken && !slackBotToken ? <Icon name="check" /> : undefined}
+                  onChange={(e) => {
+                    setSlackBotToken(e.currentTarget.value);
+                    setIsDirty(true);
+                  }}
+                />
+              </Field>
+
+              {(!hasSlackAppToken || !hasSlackBotToken) && (
+                <Alert title="Setup checklist" severity="warning">
+                  <ol style={{ margin: 0, paddingLeft: '1.2em' }}>
+                    <li>Create a Slack app at <strong>api.slack.com/apps</strong></li>
+                    <li>Enable <strong>Socket Mode</strong> (Settings → Socket Mode)</li>
+                    <li>Generate an <strong>App-Level Token</strong> with <code>connections:write</code></li>
+                    <li>Add bot scopes: <code>app_mentions:read</code>, <code>commands</code>, <code>chat:write</code></li>
+                    <li>Install the app to your workspace and copy the <strong>Bot User OAuth Token</strong></li>
+                    <li>Optionally add a <strong>Slash Command</strong> (e.g. <code>/zagalin</code>) pointing to any URL — Socket Mode does not use it</li>
+                  </ol>
+                </Alert>
+              )}
+            </>
+          )}
         </div>
       </div>
 

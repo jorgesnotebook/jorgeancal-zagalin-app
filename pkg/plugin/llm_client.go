@@ -55,19 +55,49 @@ type ContentBlock struct {
 // AssistantMessage is a single chat message. Content holds the plain text for
 // all internal operations. When ContentBlocks is non-empty it is marshaled as
 // an array (required for Anthropic cache_control); otherwise Content is used.
+//
+// For the backend-only tool-calling loop (e.g. Slack bot):
+//   - Set ToolCalls when role=="assistant" and the LLM wants to call tools.
+//   - Set ToolCallID when role=="tool" to carry the tool result back.
 type AssistantMessage struct {
 	Role          string
 	Content       string         // always the plain-text content
 	ContentBlocks []ContentBlock // set only when cache_control is needed
+
+	// Tool-calling loop (OpenAI format). Only used in backend-only agentic paths.
+	ToolCalls  []openAIToolCall // non-nil → assistant wants to call tools
+	ToolCallID string           // non-empty → this is a tool-result message
 }
 
 func (m AssistantMessage) MarshalJSON() ([]byte, error) {
+	// Tool result: {"role":"tool","tool_call_id":"...","content":"..."}
+	if m.ToolCallID != "" {
+		return json.Marshal(struct {
+			Role       string `json:"role"`
+			ToolCallID string `json:"tool_call_id"`
+			Content    string `json:"content"`
+		}{Role: "tool", ToolCallID: m.ToolCallID, Content: m.Content})
+	}
+
+	// Assistant with tool_calls: {"role":"assistant","content":null,"tool_calls":[...]}
+	if len(m.ToolCalls) > 0 {
+		type assistantWithTools struct {
+			Role      string          `json:"role"`
+			Content   *string         `json:"content"`
+			ToolCalls []openAIToolCall `json:"tool_calls"`
+		}
+		return json.Marshal(assistantWithTools{Role: m.Role, Content: nil, ToolCalls: m.ToolCalls})
+	}
+
+	// ContentBlocks (Anthropic cache_control)
 	if len(m.ContentBlocks) > 0 {
 		return json.Marshal(struct {
 			Role    string         `json:"role"`
 			Content []ContentBlock `json:"content"`
 		}{Role: m.Role, Content: m.ContentBlocks})
 	}
+
+	// Default: plain text
 	return json.Marshal(struct {
 		Role    string `json:"role"`
 		Content string `json:"content"`
@@ -658,4 +688,129 @@ func (c *LLMClient) SimpleChat(ctx context.Context, req LLMStreamRequest) (strin
 	c.logger.Debug("Received LLM validation response", "length", len(content))
 
 	return content, nil
+}
+
+// SimpleChatResult is the result of a non-streaming LLM call that may include
+// tool-use requests alongside (or instead of) a text response.
+type SimpleChatResult struct {
+	Content   string
+	ToolCalls []openAIToolCall // non-empty when the model wants to call tools
+}
+
+// SimpleChatFull is like SimpleChat but also returns any tool calls the model
+// requested. It is used by backend-only agentic loops (e.g. the Slack bot)
+// that need to drive the full tool-calling cycle without SSE.
+func (c *LLMClient) SimpleChatFull(ctx context.Context, req LLMStreamRequest) (*SimpleChatResult, error) {
+	req.Stream = false
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	llmURL := fmt.Sprintf("%s/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions", c.grafanaURL)
+	corrID := CorrelationIDFromContext(ctx)
+
+	// Build a template request for header copying; the body is re-created per
+	// retry attempt because the reader is consumed after the first Do().
+	templateReq, err := http.NewRequestWithContext(ctx, "POST", llmURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	templateReq.Header.Set("Content-Type", "application/json")
+	templateReq.Header.Set("Accept", "application/json")
+	templateReq.Header.Set("X-Zagalin-Service", "slack-bot")
+	if corrID != "" {
+		templateReq.Header.Set("X-Correlation-ID", corrID)
+	}
+	if c.serviceAccountToken != "" && c.serviceAccountToken != "existing-token-via-plugin-context" {
+		templateReq.Header.Set("Authorization", "Bearer "+c.serviceAccountToken)
+	} else {
+		grafanaConfig := backend.GrafanaConfigFromContext(ctx)
+		if token, err := grafanaConfig.PluginAppClientSecret(); err == nil && token != "" {
+			templateReq.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
+
+	maxAttempts := 3
+	var resp *http.Response
+	var lastErr error
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			delay := c.retryDelays[attempt-1]
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		attemptReq, err := http.NewRequestWithContext(ctx, "POST", llmURL, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		for k, vs := range templateReq.Header {
+			for _, v := range vs {
+				attemptReq.Header.Add(k, v)
+			}
+		}
+
+		resp, err = c.httpClient.Do(attemptReq)
+		if err != nil {
+			lastErr = fmt.Errorf("attempt %d: %w", attempt+1, err)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			respBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if !isRetryableLLMStatus(resp.StatusCode) {
+				return nil, fmt.Errorf("LLM API returned status %d: %s", resp.StatusCode, string(respBody))
+			}
+			lastErr = fmt.Errorf("attempt %d: status %d: %s", attempt+1, resp.StatusCode, string(respBody))
+			resp = nil
+			continue
+		}
+		break
+	}
+
+	if resp == nil {
+		return nil, fmt.Errorf("LLM request failed after %d attempts: %w", maxAttempts, lastErr)
+	}
+	defer resp.Body.Close()
+
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content   *string          `json:"content"`
+				ToolCalls []openAIToolCall `json:"tool_calls"`
+			} `json:"message"`
+		} `json:"choices"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(responseBody, &parsed); err != nil {
+		return nil, fmt.Errorf("failed to parse LLM response: %w", err)
+	}
+	if parsed.Error != nil {
+		return nil, fmt.Errorf("LLM API error: %s", parsed.Error.Message)
+	}
+	if len(parsed.Choices) == 0 {
+		return nil, fmt.Errorf("no response from LLM")
+	}
+
+	result := &SimpleChatResult{
+		ToolCalls: parsed.Choices[0].Message.ToolCalls,
+	}
+	if parsed.Choices[0].Message.Content != nil {
+		result.Content = *parsed.Choices[0].Message.Content
+	}
+	return result, nil
 }

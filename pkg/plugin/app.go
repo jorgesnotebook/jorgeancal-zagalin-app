@@ -34,6 +34,7 @@ type App struct {
 	llmClient          *LLMClient
 	versionDetector    *VersionDetector
 	skillRegistry      *skills.SkillRegistry
+	slackBot           *SlackBot
 	dashboardFetchStatus struct {
 		sync.RWMutex
 		LastAttempt  time.Time
@@ -159,6 +160,14 @@ func NewApp(ctx context.Context, appSettings backend.AppInstanceSettings) (insta
 			"strictMode", settings.QueryValidation.StrictMode,
 			"llmValidation", settings.QueryValidation.EnableLLMValidation,
 		)
+
+		if settings.SlackEnabled && settings.SlackAppToken != "" && settings.SlackBotToken != "" {
+			app.slackBot = newSlackBot(settings, &app)
+			app.slackBot.Start(ctx)
+			backend.Logger.Info("Slack Socket Mode bot started", "botName", settings.SlackBotName)
+		} else if settings.SlackEnabled {
+			backend.Logger.Warn("Slack integration enabled but tokens not configured — bot not started")
+		}
 	}
 
 	mux := http.NewServeMux()
@@ -182,6 +191,11 @@ func (a *App) Dispose() {
 	if a.runManager != nil {
 		a.runManager.Stop()
 		backend.Logger.Info("Run manager stopped")
+	}
+
+	if a.slackBot != nil {
+		a.slackBot.Stop()
+		backend.Logger.Info("Slack bot stopped")
 	}
 }
 
